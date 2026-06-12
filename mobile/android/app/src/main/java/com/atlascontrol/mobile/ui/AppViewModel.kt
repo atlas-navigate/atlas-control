@@ -950,28 +950,40 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         notificationPollJob?.cancel()
         notificationPollJob = viewModelScope.launch {
             val repo = AtlasRepository(ApiClient.create(baseUrl))
+            // A single failed poll must NOT tear the connection down: a
+            // momentary stall (or an nginx 429/503 while the WebView is
+            // hammering tiles) used to cascade into networkChangeRetry and a
+            // spurious "can't connect" seconds after a successful connect.
+            // Only consecutive *transport* failures mean Atlas is gone — an
+            // HTTP error status is still a response FROM Atlas.
+            var consecutiveFailures = 0
             while (_state.value == ConnectionState.CONNECTED) {
                 try {
-                    pollNotifications(repo)
+                    consecutiveFailures = if (pollNotifications(repo)) 0 else consecutiveFailures + 1
                 } catch (e: CancellationException) {
                     throw e
                 } catch (_: Throwable) {}
+                if (consecutiveFailures >= 3) {
+                    if (_state.value == ConnectionState.CONNECTED) {
+                        MdnsDns.clearCache()
+                        networkChangeRetry()
+                    }
+                    return@launch
+                }
                 delay(10_000L)
             }
         }
     }
 
-    private suspend fun pollNotifications(repo: AtlasRepository) {
-        val device = repo.getDevice().getOrNull() ?: run {
-            if (_state.value == ConnectionState.CONNECTED) {
-                MdnsDns.clearCache()
-                networkChangeRetry()
-            }
-            return
-        }
+    /** Returns true if Atlas answered (any HTTP response counts as alive). */
+    private suspend fun pollNotifications(repo: AtlasRepository): Boolean {
+        val result = repo.getDevice()
+        val device = result.getOrNull()
+            ?: return result.exceptionOrNull() is retrofit2.HttpException
         val messages = repo.getMessages().getOrNull().orEmpty()
         maybeNotifyForNewMessage(messages, device)
         maybeNotifyForBattery(device)
+        return true
     }
 
     private fun maybeNotifyForNewMessage(messages: List<AtlasMessage>, device: DeviceInfo) {

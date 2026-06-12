@@ -665,23 +665,47 @@ final class AppViewModel: ObservableObject {
         notificationPollTask?.cancel()
         notificationPollTask = Task { @MainActor [weak self] in
             guard let self else { return }
+            // A single failed poll must NOT tear the connection down: a
+            // momentary stall (or an nginx 429/503 while the WebView is
+            // hammering tiles) used to cascade into networkChangeRetry and
+            // a spurious "can't connect" seconds after a successful connect.
+            // Only consecutive *transport* failures mean Atlas is gone.
+            var consecutiveFailures = 0
             while self.state == .connected {
                 if Task.isCancelled { return }
-                await self.pollNotifications(base: baseUrl)
+                switch await self.pollNotifications(base: baseUrl) {
+                case .ok, .serverAlive:
+                    consecutiveFailures = 0
+                case .unreachable:
+                    consecutiveFailures += 1
+                    if consecutiveFailures >= 3 {
+                        MdnsResolver.clearCache()
+                        self.networkChangeRetry()
+                        return
+                    }
+                }
                 try? await Task.sleep(nanoseconds: 10_000_000_000)
             }
         }
     }
 
-    private func pollNotifications(base: String) async {
+    private enum PollOutcome { case ok, serverAlive, unreachable }
+
+    private func pollNotifications(base: String) async -> PollOutcome {
         do {
             let device   = try await AtlasApi.getDevice(base: base)
             let messages = (try? await AtlasApi.getMessages(base: base)) ?? []
             maybeNotifyForNewMessage(messages: messages, device: device)
             maybeNotifyForBattery(device)
+            return .ok
+        } catch let err as AtlasApiError {
+            // An HTTP status (rate limit, transient 5xx) is still a response
+            // FROM Atlas — the box is reachable, just busy. Never count it
+            // toward teardown.
+            if case .http = err { return .serverAlive }
+            return .unreachable
         } catch {
-            MdnsResolver.clearCache()
-            networkChangeRetry()
+            return .unreachable
         }
     }
 

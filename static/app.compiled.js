@@ -7497,7 +7497,7 @@ function SettingsPage({
     onClick: onResetSidebarOrder
   }, "Reset Order")))), /*#__PURE__*/React.createElement(DeviceConfigSection, null), /*#__PURE__*/React.createElement(GpsShareSection, {
     nodes: nodes || []
-  }), /*#__PURE__*/React.createElement(FactoryResetSection, null), /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement(SoftwareUpdateSection, null), /*#__PURE__*/React.createElement(FactoryResetSection, null), /*#__PURE__*/React.createElement("div", {
     className: "settings-actions",
     style: {
       marginTop: 4
@@ -7523,6 +7523,272 @@ function SettingsPage({
       marginLeft: 'auto'
     }
   }, "Connection settings require an app restart to take effect.")));
+}
+
+// ═══════════════════════════════════════════════
+// Software Update Section
+// ═══════════════════════════════════════════════
+function SoftwareUpdateSection() {
+  const [info, setInfo] = useState(null); // light local info from GET
+  const [check, setCheck] = useState(null); // remote check result from POST
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState('');
+  const [confirming, setConfirming] = useState(false);
+  const [install, setInstall] = useState(null); // {startVersion} while updating
+  const [status, setStatus] = useState(null); // /api/update/status payload
+  const [unreachable, setUnreachable] = useState(0);
+  const pollRef = useRef(null);
+  const logRef = useRef(null);
+  useEffect(() => {
+    api.get('/api/update/check').then(i => {
+      setInfo(i);
+      // Resume the progress view if an update is already running (e.g. the
+      // page reloaded mid-update, or another client started one).
+      if (i && i.update_running) setInstall({
+        startVersion: i.version
+      });
+    }).catch(() => {});
+    return () => clearInterval(pollRef.current);
+  }, []);
+
+  // Poll status while an update runs. The service restarts itself partway
+  // through, so fetch failures are expected — keep polling through them.
+  useEffect(() => {
+    if (!install) return;
+    pollRef.current = setInterval(async () => {
+      try {
+        const s = await api.get('/api/update/status', {
+          timeoutMs: 8000
+        });
+        setUnreachable(0);
+        setStatus(s);
+        if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+        const finished = s.state === 'success' || !s.running && install.startVersion && s.version && s.version !== install.startVersion;
+        if (finished) {
+          clearInterval(pollRef.current);
+          setStatus(p => ({
+            ...p,
+            state: 'success'
+          }));
+          setTimeout(() => window.location.reload(), 3000);
+        } else if (s.state === 'failed') {
+          clearInterval(pollRef.current);
+        }
+      } catch {
+        setUnreachable(n => n + 1);
+      }
+    }, 2500);
+    return () => clearInterval(pollRef.current);
+  }, [install]);
+  async function runCheck() {
+    setChecking(true);
+    setError('');
+    setCheck(null);
+    try {
+      const r = await api.post('/api/update/check', undefined, {
+        timeoutMs: 45000
+      });
+      setCheck(r);
+      if (r.version) setInfo(p => ({
+        ...(p || {}),
+        ...r
+      }));
+    } catch (e) {
+      setError(e.message || 'Update check failed');
+    } finally {
+      setChecking(false);
+    }
+  }
+  async function startInstall() {
+    setConfirming(false);
+    setError('');
+    setStatus(null);
+    setUnreachable(0);
+    try {
+      await api.post('/api/update/apply');
+      setInstall({
+        startVersion: info === null || info === void 0 ? void 0 : info.version
+      });
+    } catch (e) {
+      setError(e.message || 'Could not start the update');
+    }
+  }
+  const SL = {
+    fontSize: 11,
+    fontWeight: 700,
+    color: 'var(--text-muted)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    marginBottom: 12
+  };
+  const muted = {
+    fontSize: 12,
+    color: 'var(--text-muted)'
+  };
+  const state = status === null || status === void 0 ? void 0 : status.state;
+  return /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      marginBottom: 16
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: SL
+  }, "Software Update"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 14,
+      flexWrap: 'wrap',
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: 'var(--text-primary)',
+      fontWeight: 600
+    }
+  }, "Atlas Control ", info !== null && info !== void 0 && info.version ? `· ${info.version}` : ''), /*#__PURE__*/React.createElement("div", {
+    style: muted
+  }, info !== null && info !== void 0 && info.installed_at ? `Installed ${info.installed_at.slice(0, 10)} · ` : '', "Updates download from GitHub and preserve all data, maps and settings.")), !install && /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-sm",
+    style: {
+      marginLeft: 'auto'
+    },
+    onClick: runCheck,
+    disabled: checking
+  }, checking ? 'Checking…' : 'Check for Updates')), error && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: 'var(--accent-red)',
+      fontSize: 12,
+      marginBottom: 8
+    }
+  }, error), check && !install && (check.update_available ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      border: '1px solid var(--border-bright)',
+      borderRadius: 'var(--radius)',
+      padding: '10px 12px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: 'var(--accent-green)',
+      fontWeight: 600,
+      marginBottom: 6
+    }
+  }, "Update available: ", check.latest, " (", check.behind, " new ", check.behind === 1 ? 'commit' : 'commits', ")"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxHeight: 120,
+      overflowY: 'auto',
+      marginBottom: 10
+    }
+  }, (check.commits || []).map(c => /*#__PURE__*/React.createElement("div", {
+    key: c.rev,
+    style: {
+      fontSize: 12,
+      color: 'var(--text-secondary)',
+      padding: '2px 0'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: 'var(--text-muted)',
+      fontFamily: 'monospace'
+    }
+  }, c.rev), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: 'var(--text-muted)'
+    }
+  }, " ", c.date, " "), c.subject))), check.local_changes && /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...muted,
+      color: 'var(--accent-yellow, #d8b54a)',
+      marginBottom: 8
+    }
+  }, "This box has local code changes \u2014 the update keeps them and installs what it can."), !confirming ? /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary btn-sm",
+    onClick: () => setConfirming(true)
+  }, "Install Update") : /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12,
+      color: 'var(--text-secondary)'
+    }
+  }, "Atlas restarts when done (~1\u20133 min). Install now?"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary btn-sm",
+    onClick: startInstall
+  }, "Yes, install"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-sm",
+    onClick: () => setConfirming(false)
+  }, "Cancel"))) : /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: 'var(--accent-green)'
+    }
+  }, "\u2713 Up to date", check.ahead > 0 ? ` (${check.ahead} local commits ahead of the release)` : '')), install && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10,
+      marginBottom: 8
+    }
+  }, state === 'success' ? /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: 'var(--accent-green)',
+      fontSize: 13,
+      fontWeight: 600
+    }
+  }, "\u2713 Updated", status !== null && status !== void 0 && status.version ? ` to ${status.version}` : '', " \u2014 reloading\u2026") : state === 'failed' ? /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: 'var(--accent-red)',
+      fontSize: 13,
+      fontWeight: 600
+    }
+  }, "Update failed \u2014 see log below") : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", {
+    className: "spinner",
+    style: {
+      width: 14,
+      height: 14,
+      border: '2px solid var(--border)',
+      borderTopColor: 'var(--accent-green)',
+      borderRadius: '50%',
+      display: 'inline-block',
+      animation: 'spin 1s linear infinite'
+    }
+  }), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 13,
+      color: 'var(--text-secondary)'
+    }
+  }, unreachable >= 2 ? 'Atlas is restarting — reconnecting…' : 'Installing update…'))), (status === null || status === void 0 ? void 0 : status.log) && /*#__PURE__*/React.createElement("pre", {
+    ref: logRef,
+    style: {
+      background: 'var(--bg-input)',
+      border: '1px solid var(--border)',
+      borderRadius: 'var(--radius)',
+      padding: 10,
+      fontSize: 11,
+      lineHeight: 1.5,
+      maxHeight: 200,
+      overflowY: 'auto',
+      whiteSpace: 'pre-wrap',
+      color: 'var(--text-secondary)',
+      margin: 0
+    }
+  }, status.log), state === 'failed' && /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-sm",
+    style: {
+      marginTop: 8
+    },
+    onClick: () => {
+      setInstall(null);
+      setStatus(null);
+      setCheck(null);
+    }
+  }, "Dismiss")));
 }
 
 // ═══════════════════════════════════════════════

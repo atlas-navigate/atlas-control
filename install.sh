@@ -1094,6 +1094,9 @@ sed -i "s|/atlas_data/atlas-control/static|$APP_DIR/static|g" "$NGINX_SITE"
 ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/atlas
 rm -f /etc/nginx/sites-enabled/default
 nginx -t && systemctl enable --now nginx
+# enable --now is a no-op when nginx is already running — reload so config
+# changes shipped by an update actually take effect.
+systemctl reload-or-restart nginx
 log "Nginx configured (HTTPS :443 → Flask :5000)"
 
 # ════════════════════════════════════════════════════════════════════════════
