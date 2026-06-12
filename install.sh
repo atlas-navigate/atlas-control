@@ -25,6 +25,12 @@
 # ║   12.  Install systemd services + udev hardware rules                     ║
 # ╚══════════════════════════════════════════════════════════════════════════╝
 set -euo pipefail
+# A bare `set -e` death is invisible in logs/update.log; report it.  The [✗]
+# marker is what /api/update/status keys on to surface a failed update.
+set -E
+# Subshell filter: $(...) substitution failures fire ERR too but don't kill
+# the script — only report the top-level failure that actually aborts.
+trap '(( BASH_SUBSHELL == 0 )) && echo -e "\033[0;31m[✗]\033[0m install.sh aborted (line $LINENO: $BASH_COMMAND)" >&2 || true' ERR
 
 # ── Self-update safety ──────────────────────────────────────────────────────
 # Section 2 may `git pull` the directory this script lives in, rewriting
@@ -149,8 +155,18 @@ done
 
 # ── Must run as root ────────────────────────────────────────────────────────
 [[ $EUID -eq 0 ]] || die "Run with sudo:  sudo ./install.sh"
-ATLAS_USER="${SUDO_USER:-$(logname 2>/dev/null || echo ubuntu)}"
-ATLAS_HOME=$(getent passwd "$ATLAS_USER" | cut -d: -f6)
+# In-app updates arrive via systemd-run: no SUDO_USER and no login session
+# (logname fails), so fall back to the owner of the existing install rather
+# than a hardcoded guess — getent on a nonexistent user exits 2, which under
+# `set -eo pipefail` killed the updater before its first line of output.
+ATLAS_USER="${SUDO_USER:-$(logname 2>/dev/null || true)}"
+if [[ -z "$ATLAS_USER" ]] || ! getent passwd "$ATLAS_USER" > /dev/null; then
+    ATLAS_USER="$(stat -c %U /atlas_data/atlas-control 2>/dev/null || echo ubuntu)"
+fi
+ATLAS_HOME="$(getent passwd "$ATLAS_USER" | cut -d: -f6)" \
+    || die "Cannot resolve home directory for user '$ATLAS_USER'"
+# systemd-run units have no $HOME; tools like the ollama CLI panic without it.
+export HOME="${HOME:-/root}"
 SCRIPT_DIR="$ATLAS_INSTALL_SELF"
 
 # Auto-detect an existing installation and offer the quick-update path.
@@ -338,7 +354,7 @@ elif [[ -d "$SCRIPT_DIR/.git" ]] && command_exists git; then
     REPO_OWNER="$(stat -c %U "$SCRIPT_DIR" 2>/dev/null || echo "$ATLAS_USER")"
     if sudo -u "$REPO_OWNER" GIT_TERMINAL_PROMPT=0 \
         git -C "$SCRIPT_DIR" pull --ff-only "$GIT_FETCH_URL" "$ATLAS_REPO_BRANCH" 2>/dev/null; then
-        log "Source at $(git -C "$SCRIPT_DIR" rev-parse --short HEAD) ($ATLAS_REPO_BRANCH)"
+        log "Source at $(sudo -u "$REPO_OWNER" git -C "$SCRIPT_DIR" rev-parse --short HEAD) ($ATLAS_REPO_BRANCH)"
         # If the pull brought a newer install.sh, hand off to it so the update
         # runs with the latest install logic (we're executing a pre-pull temp
         # copy).  The relaunched script pulls again, finds itself current, and
@@ -1229,8 +1245,13 @@ if systemctl is-active --quiet ollama; then
                 log "Ollama model present: $model"
             else
                 info "Pulling Ollama model: $model"
-                ollama pull "$model"
-                log "Ollama model ready: $model"
+                # Never fatal: an off-grid box can't pull, and a failed pull
+                # must not abort the update before services restart.
+                if ollama pull "$model"; then
+                    log "Ollama model ready: $model"
+                else
+                    warn "Could not pull $model (offline?) — Ray needs it; pull manually when online"
+                fi
             fi
         done
     else
@@ -1245,7 +1266,7 @@ log "Services started"
 
 # Record the installed version — re-runs of install.sh use this marker to
 # offer the quick-update path, and the app can surface it as a version string.
-ATLAS_REV="$(git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+ATLAS_REV="$(sudo -u "$ATLAS_USER" git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 echo "${ATLAS_REV} $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$APP_DIR/.atlas_installed"
 chown "$ATLAS_USER:$ATLAS_USER" "$APP_DIR/.atlas_installed"
 

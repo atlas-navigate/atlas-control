@@ -2359,7 +2359,9 @@ def api_update_check():
     _, remote = _update_git("rev-parse", "--short", "FETCH_HEAD")
     _, behind = _update_git("rev-list", "--count", "HEAD..FETCH_HEAD")
     _, ahead = _update_git("rev-list", "--count", "FETCH_HEAD..HEAD")
-    _, dirty = _update_git("status", "--porcelain")
+    # Untracked files (e.g. the .atlas_installed marker) never block a
+    # fast-forward pull — only modified tracked files count as "dirty".
+    _, dirty = _update_git("status", "--porcelain", "--untracked-files=no")
     _, log = _update_git(
         "log", "--format=%h%x09%cs%x09%s", "--max-count=20", "HEAD..FETCH_HEAD"
     )

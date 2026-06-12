@@ -56,3 +56,4 @@ hotspot_config.json
 
 # ── OSRM lib symlink (points to system path, not portable) ───────────────────
 lib
+.atlas_installed
