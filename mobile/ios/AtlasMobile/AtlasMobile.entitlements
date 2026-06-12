@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+        Both entitlements below require Apple-issued capabilities on your
+        developer account.  They work in TestFlight / paid-team builds.
+
+        For free Apple-ID development (Simulator or sideload), you can
+        comment them out — the app will still build; the only loss is
+        Wi-Fi SSID inspection (NEHotspotNetwork.fetchCurrent) and the
+        in-app "Join Atlas Hotspot" button (NEHotspotConfigurationManager).
+        Both are optional UX shortcuts; the app falls back to instructing
+        the user to switch Wi-Fi via Settings.
+    -->
+    <key>com.apple.developer.networking.wifi-info</key>
+    <true/>
+    <key>com.apple.developer.networking.HotspotConfiguration</key>
+    <true/>
+
+    <!--
+        Multicast / broadcast networking.  Required on a real iPhone (iOS 14+)
+        for the UDP discovery beacon to send to 255.255.255.255 (AtlasBeacon)
+        and for the direct mDNS query to 224.0.0.251 (MdnsResolver) — without
+        it both sends fail with EHOSTUNREACH on device.  This is the iOS
+        counterpart of Android's CHANGE_WIFI_MULTICAST_STATE + MulticastLock.
+
+        Apple gates this capability: it must be enabled for the App ID in the
+        developer portal and present on the provisioning profile, otherwise the
+        signed build is rejected on device.  The iOS Simulator does not enforce
+        it, and the beacon's unicast fan-out covers most LANs even without it.
+    -->
+    <key>com.apple.developer.networking.multicast</key>
+    <true/>
+</dict>
+</plist>

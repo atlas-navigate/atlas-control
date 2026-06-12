@@ -1,0 +1,18 @@
+# Xcode-generated artifacts (xcodegen rebuilds these from project.yml)
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+build/
+
+# Swift Package Manager
+.swiftpm/
+.build/
+Packages/
+Package.resolved
+
+# CocoaPods (unused, but listed defensively)
+Pods/
+
+# macOS junk
+.DS_Store

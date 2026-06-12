@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>$(DEVELOPMENT_LANGUAGE)</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>Atlas Control</string>
+    <key>CFBundleDisplayName</key>
+    <string>Atlas Control</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>UILaunchScreen</key>
+    <dict>
+        <key>UIColorName</key>
+        <string>AtlasBackground</string>
+    </dict>
+    <key>UIUserInterfaceStyle</key>
+    <string>Dark</string>
+    <key>UIApplicationSceneManifest</key>
+    <dict>
+        <key>UIApplicationSupportsMultipleScenes</key>
+        <false/>
+    </dict>
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <key>UISupportedInterfaceOrientations~ipad</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationPortraitUpsideDown</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <key>UIRequiresFullScreen</key>
+    <false/>
+    <key>UIViewControllerBasedStatusBarAppearance</key>
+    <true/>
+    <key>UIStatusBarStyle</key>
+    <string>UIStatusBarStyleLightContent</string>
+
+    <!-- ── Bluetooth (BLE pairing with Atlas Jetson) ──────────────────── -->
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>Atlas Control uses Bluetooth to pair with your Atlas Jetson and read its initial connection manifest.</string>
+    <key>NSBluetoothPeripheralUsageDescription</key>
+    <string>Atlas Control uses Bluetooth to pair with your Atlas Jetson and read its initial connection manifest.</string>
+
+    <!-- ── Local network (HTTP/HTTPS to Atlas + mDNS browsing) ───────── -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Atlas Control connects to your Atlas Jetson over the local network — both the on-device hotspot and any LAN that Atlas joins.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_https._tcp</string>
+        <string>_http._tcp</string>
+    </array>
+
+    <!-- ── Location (NEHotspotNetwork SSID + optional phone-tracker) ── -->
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>Atlas Control needs your location to detect which Wi-Fi network you're on (so the app can switch between the Atlas hotspot and your home/office LAN) and to plot your phone on the Atlas map while connected.</string>
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+    <string>Atlas Control sends your location to the Atlas tracker only while you are actively using the app and connected to your Atlas Jetson.</string>
+
+    <!-- ── Microphone / camera disabled ──────────────────────────────── -->
+
+    <!-- ── Allow cleartext HTTP to Atlas (self-signed cert / port 5000) ── -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+        <key>NSAllowsArbitraryLoadsInWebContent</key>
+        <true/>
+    </dict>
+
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>bluetooth-central</string>
+        <string>fetch</string>
+    </array>
+
+    <!-- iOS shows our user-facing app name on the lock screen / banner -->
+    <key>CFBundleLocalizations</key>
+    <array>
+        <string>en</string>
+    </array>
+</dict>
+</plist>

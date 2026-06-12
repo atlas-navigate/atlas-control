@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">Atlas Mobile</string>
+    <string name="notification_channel_messages">Atlas messages</string>
+    <string name="notification_channel_messages_desc">Incoming message notifications from Atlas</string>
+    <string name="notification_channel_battery">Atlas battery</string>
+    <string name="notification_channel_battery_desc">Battery threshold notifications from Atlas</string>
+    <string name="notification_battery_low_title">Atlas battery low</string>
+    <string name="notification_battery_low_body">Atlas battery dropped to %1$d%%.</string>
+    <string name="notification_battery_charged_title">Atlas battery charging nearly complete</string>
+    <string name="notification_battery_charged_body">Atlas is charging and has reached %1$d%%.</string>
+</resources>

@@ -1,0 +1,12 @@
+<resources>
+    <color name="atlas_background">#09111C</color>
+    <color name="atlas_surface">#111B2B</color>
+    <color name="atlas_surface_elevated">#162235</color>
+    <color name="atlas_accent">#5AA7FF</color>
+    <color name="atlas_accent_alt">#5EF2C2</color>
+    <color name="atlas_text">#F3F7FB</color>
+    <color name="atlas_text_secondary">#9AAFC4</color>
+    <color name="atlas_icon_bg">#0E1727</color>
+    <color name="atlas_icon_fg">#5EF2C2</color>
+</resources>
+
