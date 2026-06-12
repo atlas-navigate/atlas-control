@@ -2290,6 +2290,10 @@ import re as _update_re
 _UPDATE_LOG_PATH = os.path.join(_BASE_DIR, "logs", "update.log")
 _UPDATE_LAUNCHER = "/usr/local/sbin/atlas-update"
 _UPDATE_UNIT = "atlas-update.service"
+# Wall-clock of the last in-app launch; lets /api/update/status distinguish
+# "never ran" from "launched and died silently". Survives the failure case
+# (the app only restarts when an update actually progresses).
+_UPDATE_LAUNCHED_AT = [0.0]
 _ANSI_RE = _update_re.compile(r"\x1b\[[0-9;]*m")
 
 
@@ -2402,6 +2406,7 @@ def api_update_apply():
         detail = (r.stderr or r.stdout).strip()[:300]
         return jsonify({"error": f"Update launcher failed: {detail}"}), 500
     logging.info("Software update launched via web UI")
+    _UPDATE_LAUNCHED_AT[0] = time.time()
     return jsonify({"started": True})
 
 
@@ -2421,6 +2426,14 @@ def api_update_status():
             state = "success"
         elif "[✗]" in tail:
             state = "failed"
+    elif not running and not tail.strip():
+        # The unit died before writing a single byte (it runs with --collect,
+        # so systemd forgets its exit status). Without this the UI polls an
+        # ever-"idle" state and looks hung.
+        if _UPDATE_LAUNCHED_AT[0] and time.time() - _UPDATE_LAUNCHED_AT[0] < 600:
+            state = "failed"
+            tail = ("[✗] The update process exited before producing any output.\n"
+                    "Run `sudo bash install.sh --update` in a terminal to see the error.")
     return jsonify({
         "state": state,
         "running": running,
