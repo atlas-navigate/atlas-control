@@ -2284,6 +2284,149 @@ def api_device_owner_put():
         return jsonify({"ok": False, "error": "failed to update node identity on device"}), 502
     return jsonify({"ok": True})
 
+# ------------------------------------------------------------------ API: Software update
+import re as _update_re
+
+_UPDATE_LOG_PATH = os.path.join(_BASE_DIR, "logs", "update.log")
+_UPDATE_LAUNCHER = "/usr/local/sbin/atlas-update"
+_UPDATE_UNIT = "atlas-update.service"
+_ANSI_RE = _update_re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _update_git(*args, timeout=10):
+    """Run a git command in the app checkout; returns (rc, stdout)."""
+    try:
+        r = subprocess.run(
+            ["git", "-C", _BASE_DIR, *args],
+            capture_output=True, text=True, timeout=timeout,
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        )
+        return r.returncode, r.stdout.strip()
+    except Exception as exc:
+        logging.warning("update git %s failed: %s", args[:2], exc)
+        return -1, ""
+
+
+def _update_local_info():
+    rc, head = _update_git("rev-parse", "--short", "HEAD")
+    info = {
+        "version": head if rc == 0 else None,
+        "is_git_checkout": rc == 0,
+        "installed_at": None,
+    }
+    try:
+        with open(os.path.join(_BASE_DIR, ".atlas_installed"), encoding="utf-8") as f:
+            parts = f.read().split()
+            if len(parts) >= 2:
+                info["installed_at"] = parts[1]
+    except OSError:
+        pass
+    return info
+
+
+def _update_unit_active():
+    try:
+        r = subprocess.run(
+            ["systemctl", "is-active", _UPDATE_UNIT],
+            capture_output=True, text=True, timeout=5,
+        )
+        return r.stdout.strip() in ("active", "activating")
+    except Exception:
+        return False
+
+
+@app.route("/api/update/check", methods=["GET", "POST"])
+def api_update_check():
+    """Local version info; POST also contacts GitHub for the latest release."""
+    info = _update_local_info()
+    info["launcher_installed"] = os.path.exists(_UPDATE_LAUNCHER)
+    info["update_running"] = _update_unit_active()
+    if request.method == "GET":
+        return jsonify(info)
+
+    if not info["is_git_checkout"]:
+        info["error"] = "Not a git checkout — re-run install.sh to enable updates."
+        return jsonify(info), 400
+
+    # Fetch the published branch, then compare locally. Works anonymously
+    # (the repo is public) and gives us an exact changelog without the
+    # GitHub API. The remote was set by install.sh.
+    rc, _ = _update_git("fetch", "origin", "main", timeout=30)
+    if rc != 0:
+        info["error"] = "Could not reach GitHub — check the internet connection."
+        return jsonify(info), 502
+
+    _, remote = _update_git("rev-parse", "--short", "FETCH_HEAD")
+    _, behind = _update_git("rev-list", "--count", "HEAD..FETCH_HEAD")
+    _, ahead = _update_git("rev-list", "--count", "FETCH_HEAD..HEAD")
+    _, dirty = _update_git("status", "--porcelain")
+    _, log = _update_git(
+        "log", "--format=%h%x09%cs%x09%s", "--max-count=20", "HEAD..FETCH_HEAD"
+    )
+    commits = [
+        dict(zip(("rev", "date", "subject"), line.split("\t", 2)))
+        for line in log.splitlines() if line.strip()
+    ]
+    info.update({
+        "latest": remote or None,
+        "behind": int(behind or 0),
+        "ahead": int(ahead or 0),
+        "update_available": int(behind or 0) > 0,
+        "local_changes": bool(dirty.strip()),
+        "commits": commits,
+        "checked_at": int(time.time()),
+    })
+    return jsonify(info)
+
+
+@app.route("/api/update/apply", methods=["POST"])
+def api_update_apply():
+    """Launch install.sh --update via the root launcher (detached unit)."""
+    if _update_unit_active():
+        return jsonify({"started": True, "already_running": True})
+    if not os.path.exists(_UPDATE_LAUNCHER):
+        return jsonify({
+            "error": "Update launcher not installed — run `sudo ./install.sh --update` "
+                     "once from a terminal to enable in-app updates.",
+        }), 409
+    try:
+        r = subprocess.run(
+            ["sudo", "-n", _UPDATE_LAUNCHER],
+            capture_output=True, text=True, timeout=30,
+        )
+    except Exception as exc:
+        return jsonify({"error": f"Failed to launch update: {exc}"}), 500
+    if r.returncode != 0:
+        detail = (r.stderr or r.stdout).strip()[:300]
+        return jsonify({"error": f"Update launcher failed: {detail}"}), 500
+    logging.info("Software update launched via web UI")
+    return jsonify({"started": True})
+
+
+@app.route("/api/update/status")
+def api_update_status():
+    """Poll while an update runs; the UI tails the log and watches the rev."""
+    running = _update_unit_active()
+    tail = ""
+    try:
+        with open(_UPDATE_LOG_PATH, encoding="utf-8", errors="replace") as f:
+            tail = _ANSI_RE.sub("", "".join(f.readlines()[-60:]))
+    except OSError:
+        pass
+    state = "running" if running else "idle"
+    if not running and tail:
+        if "Atlas Control updated to" in tail or "installation complete" in tail:
+            state = "success"
+        elif "[✗]" in tail:
+            state = "failed"
+    return jsonify({
+        "state": state,
+        "running": running,
+        "log": tail,
+        "version": _update_local_info().get("version"),
+    })
+
+
 # ------------------------------------------------------------------ API: Factory reset
 def _device_link_state():
     """Probe the live device link more accurately than mesh.connected alone.

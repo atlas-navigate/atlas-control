@@ -1111,6 +1111,18 @@ sed "s|OLLAMA_USER|$OLLAMA_SERVICE_USER|g; s|OLLAMA_GROUP|$OLLAMA_SERVICE_GROUP|
 systemctl daemon-reload
 systemctl enable atlas-control ollama
 log "Services enabled: atlas-control, ollama"
+
+# Web-app-triggered updates: install the root-owned launcher the Flask app
+# invokes via sudo.  It starts install.sh --update as a transient systemd
+# unit so the update survives atlas-control restarting itself mid-update.
+sed "s|__APP_DIR__|$APP_DIR|g" "$APP_DIR/atlas_update_launcher.sh" > /usr/local/sbin/atlas-update
+chown root:root /usr/local/sbin/atlas-update
+chmod 755 /usr/local/sbin/atlas-update
+SUDOERS_UPDATE="/etc/sudoers.d/atlas-update"
+echo "$ATLAS_USER ALL=(ALL) NOPASSWD: /usr/local/sbin/atlas-update" > "$SUDOERS_UPDATE"
+chmod 440 "$SUDOERS_UPDATE"
+visudo -c -f "$SUDOERS_UPDATE" > /dev/null
+log "Update launcher installed (/usr/local/sbin/atlas-update — used by the web UI)"
 log "Atlas UPS defaults: I2C bus 7, address 0x41 (Waveshare UPS Power Module C)"
 
 # ════════════════════════════════════════════════════════════════════════════

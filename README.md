@@ -60,6 +60,8 @@ sudo /atlas_data/atlas-control/install.sh --update
 
 This pulls the latest release, refreshes Python dependencies, configs, and services, then restarts Atlas — your database, settings, maps, and routing data are preserved. It runs without prompts, so it's safe to automate. Re-running `install.sh` with no flags on an installed system offers the same quick update; use `--full` to force the complete install flow (e.g. to add more state routing data).
 
+You can also update from the web app: **Settings → Software Update → Check for Updates** scans GitHub for new releases, shows the changelog, and installs with one click while streaming progress.
+
 ## Access
 
 | Network | URL |
