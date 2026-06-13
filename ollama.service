@@ -14,7 +14,16 @@ User=OLLAMA_USER
 Group=OLLAMA_GROUP
 Environment="OLLAMA_KEEP_ALIVE=10h"
 Environment="OLLAMA_NUM_PARALLEL=1"
+# 2 loaded models: chat model (GPU) + embedder (pinned to CPU by the app).
+# With a cap of 1, every RAG message evicts the chat model and reloads it
+# (~10 s) — the single biggest source of Ray latency.
+Environment="OLLAMA_MAX_LOADED_MODELS=2"
 Environment="OLLAMA_GPU_OVERHEAD=0"
+# Flash attention + q8_0 KV cache: halves KV-cache memory on the 8 GB
+# shared-RAM Orin Nano with negligible quality loss (KV quant requires FA;
+# ignored by new-engine models like qwen3.5, harmless there).
+Environment="OLLAMA_FLASH_ATTENTION=1"
+Environment="OLLAMA_KV_CACHE_TYPE=q8_0"
 Environment="OLLAMA_MODELS=OLLAMA_DATA_DIR/models"
 ExecStart=/usr/local/bin/ollama serve
 Restart=always

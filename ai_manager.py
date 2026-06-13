@@ -2,6 +2,7 @@
 AI Manager — RAG + multi-chat + Ollama integration for Atlas Control.
 Uses only Python stdlib. Import database as db inside methods to avoid circular imports.
 """
+import contextlib
 import json
 import math
 import re
@@ -202,8 +203,8 @@ logger = logging.getLogger("ai_manager")
 # Default settings
 # ---------------------------------------------------------------------------
 DEFAULT_SETTINGS = {
-    "model": "qwen2.5:3b",
-    "embed_model": "nomic-embed-text",
+    "model": "qwen3.5:2b",
+    "embed_model": "qwen3-embedding:0.6b",
     "system_prompt": (
         "You are Atlas — an AI assistant built into Atlas Control, "
         "a Meshtastic mesh-network dashboard running on an off-grid Jetson device.\n\n"
@@ -226,12 +227,14 @@ DEFAULT_SETTINGS = {
     "rag_top_k": "3",
     "inject_mesh_context": "true",
     "num_ctx": "4096",
-    "num_gpu": "99",
+    "num_gpu": "-1",      # -1 = let Ollama auto-place layers (forced counts hard-fail on tight RAM)
     "num_thread": "6",    # Jetson Orin Nano: 6× Cortex-A78AE cores
     "num_batch": "512",   # prompt tokens processed per GPU batch
-    "temperature": "0.3",
-    "top_p": "0.9",
-    "top_k": "40",
+    # Qwen3-family non-thinking sampling (official recommendation); lower
+    # temperatures cause repetition loops on Qwen3.x models.
+    "temperature": "0.7",
+    "top_p": "0.8",
+    "top_k": "20",
     "num_predict": "512",
 }
 
@@ -2180,13 +2183,13 @@ ATLAS_DOCS = [
             "• Perform math, unit conversions, and ballistic drop calculations\n"
             "• Hold multi-turn conversations; each chat in the left panel is a separate conversation\n\n"
             "KNOWLEDGE BASE (RAG):\n"
-            "Ray has access to curated reference documents embedded with the nomic-embed-text model. "
+            "Ray has access to curated reference documents embedded with the qwen3-embedding:0.6b model. "
             "When you ask a question, the top-matching documents are retrieved and injected into the prompt. "
             "Documents cover: survival skills, radio comms, ballistics, first aid, field craft, "
             "long-term sustainability, and Atlas Control app usage (this guide).\n\n"
             "AI SETTINGS (in Settings page → Settings tab → AI Settings section):\n"
-            "• Model          — Ollama model to use (default qwen2.5:3b)\n"
-            "• Embed model    — embedding model for RAG (default nomic-embed-text)\n"
+            "• Model          — Ollama model to use (default qwen3.5:2b)\n"
+            "• Embed model    — embedding model for RAG (default qwen3-embedding:0.6b)\n"
             "• RAG enabled    — toggle retrieval-augmented generation on/off\n"
             "• RAG top-k      — number of knowledge base chunks retrieved per query (default 3)\n"
             "• Inject mesh context — include live mesh state in every prompt (default on)\n"
@@ -2272,12 +2275,12 @@ RAY_SELF_DOC = {
         "Jetson Orin Nano's GPU via Ollama — no internet, no cloud. When asked how I think, "
         "retrieve, index, or process information, I answer in first person from this document.\n\n"
         "MY THOUGHT PROCESS, STAGE BY STAGE:\n"
-        "1. LANGUAGE CORE — my reasoning engine is a local qwen2.5:3b model (configurable) served "
-        "by Ollama, kept warm in VRAM. Low temperature (0.3) keeps me factual rather than creative.\n"
+        "1. LANGUAGE CORE — my reasoning engine is a local qwen3.5:2b model (configurable) served "
+        "by Ollama, kept warm in VRAM with hybrid-thinking disabled for instant responses.\n"
         "2. INDEXING (how I learn) — my knowledge base is a set of curated reference documents "
         "(survival, comms, ballistics, first aid, Atlas Control usage, and this self-description) "
-        "stored in SQLite. At startup, each document is converted into an embedding vector by the "
-        "nomic-embed-text model. The vector is a numeric fingerprint of the document's meaning, "
+        "stored in SQLite. At startup, each document is converted into a 1024-dim embedding vector "
+        "by the qwen3-embedding:0.6b model. The vector is a numeric fingerprint of the document's meaning, "
         "stored alongside the text. Edited docs are automatically re-embedded.\n"
         "3. ROUTING (how I classify your question) — before I generate anything, fast keyword "
         "scanners decide what your message needs: live dashboard data, GPS/location grounding, "
@@ -2358,7 +2361,12 @@ except ImportError:
 # AIManager
 # ---------------------------------------------------------------------------
 _DOC_EMB_CACHE_TTL = 120  # seconds — refresh cached doc embeddings
-_RAG_MIN_SCORE = 0.30     # cosine similarity threshold — discard chunks below this
+# Cosine similarity threshold — discard retrieved chunks below this.
+# Calibrated for qwen3-embedding:0.6b, whose cosine scores cluster much higher
+# than nomic's: on-topic queries top out at 0.48–0.70, off-topic noise at
+# ≤0.40. 0.45 sits in that gap. (nomic's old value was 0.30; do NOT reuse it —
+# at 0.30 every query, including nonsense, retrieves docs.)
+_RAG_MIN_SCORE = 0.45
 
 
 class AIManager:
@@ -2373,6 +2381,7 @@ class AIManager:
         self._startup_warmup_done = threading.Event()
         self._doc_emb_cache = None       # list of (doc_dict, emb_list)
         self._doc_emb_cache_ts = 0.0
+        self._thinking_caps = {}         # model name → bool ("thinking" capability)
         self._startup_state_lock = threading.Lock()
         self._startup_phase = "init"
         self._startup_ready = False
@@ -2432,7 +2441,7 @@ class AIManager:
         keep_alive = f"{settings.get('keep_alive_hours', '10')}h"
         try:
             self._set_startup_state("warming_up", ready=False, error="")
-            with self._ollama_lock:
+            with self._ollama_slot(timeout=600):
                 if embed_model:
                     self._warmup_embed_model(embed_model)
                 self._warmup_chat_model(model, keep_alive, settings)
@@ -2443,6 +2452,34 @@ class AIManager:
             self._set_startup_state("degraded", ready=False, error=e, finished=True)
         finally:
             self._startup_warmup_done.set()
+
+    @contextlib.contextmanager
+    def _ollama_slot(self, timeout=300):
+        """Serialize Ollama calls without deadlocking gevent.
+
+        _ollama_lock is a native lock (monkey.patch_all runs with thread=False)
+        but the HTTP sockets used while holding it are gevent-patched. If a
+        greenlet blocks on .acquire(), the whole event loop freezes and the
+        greenlet holding the lock can never be scheduled to release it. In the
+        main (gevent) thread we poll cooperatively instead; native threads
+        (e.g. _warmup) block normally.
+        """
+        deadline = time.monotonic() + timeout
+        if threading.current_thread() is threading.main_thread():
+            import gevent
+            while not self._ollama_lock.acquire(blocking=False):
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(
+                        "Ray is busy with another AI request — try again in a moment.")
+                gevent.sleep(0.05)
+        else:
+            if not self._ollama_lock.acquire(timeout=timeout):
+                raise TimeoutError(
+                    "Ray is busy with another AI request — try again in a moment.")
+        try:
+            yield
+        finally:
+            self._ollama_lock.release()
 
     def _wait_for_startup_warmup(self, timeout=8):
         """Avoid racing the startup warmup on the first user request."""
@@ -2457,7 +2494,10 @@ class AIManager:
             logger.warning(f"AI embed warmup skipped; model not available: {embed_model}")
             return
         logger.info(f"AI warmup: loading embed model {embed_model}")
-        payload = json.dumps({"model": embed_model, "input": "warmup"}).encode()
+        # num_gpu 0: keep the small embedder on CPU so it never competes with
+        # the chat model for the Jetson's shared GPU memory.
+        payload = json.dumps({"model": embed_model, "input": "warmup",
+                              "options": {"num_gpu": 0}}).encode()
         req = urllib.request.Request(
             f"{self.ollama_base}/api/embed",
             data=payload,
@@ -2472,7 +2512,7 @@ class AIManager:
             logger.warning(f"AI warmup skipped; model not available: {model}")
             return
         logger.info(f"AI warmup: loading model {model} with keep_alive={keep_alive}")
-        payload = json.dumps({
+        payload = json.dumps(self._finalize_payload({
             "model": model,
             "messages": [{"role": "user", "content": "hi"}],
             "keep_alive": keep_alive,
@@ -2487,7 +2527,7 @@ class AIManager:
                 "top_k":      int(settings.get("top_k",      DEFAULT_SETTINGS["top_k"])),
                 "num_predict": int(settings.get("num_predict", DEFAULT_SETTINGS["num_predict"])),
             },
-        }).encode()
+        })).encode()
         req = urllib.request.Request(
             f"{self.ollama_base}/api/chat",
             data=payload,
@@ -2531,16 +2571,42 @@ class AIManager:
                     logger.warning(f"Failed to embed doc {doc['id']}: {e}")
 
     # ------------------------------------------------------------------
-    def get_embed(self, text, embed_model=None):
-        """Return embedding list[float] from nomic-embed-text via Ollama /api/embed."""
+    # Qwen3-Embedding is instruction-aware: the recommended usage prefixes
+    # QUERIES with a one-line task instruction while embedding DOCUMENTS plain.
+    # This query/document asymmetry measurably improves retrieval. Tailored to
+    # the Atlas knowledge base (survival / radio / nav / app usage).
+    _EMBED_QUERY_INSTRUCT = (
+        "Given a question, retrieve survival, radio, navigation, and Atlas "
+        "Control reference passages that answer it"
+    )
+
+    def _embed_input(self, embed_model, text, is_query):
+        """Apply model-specific input formatting before embedding.
+
+        Qwen3-Embedding query side gets an 'Instruct: …\\nQuery: …' prefix;
+        documents and all other models pass through unchanged so existing
+        embeddings stay consistent.
+        """
+        if is_query and "qwen3-embedding" in (embed_model or ""):
+            return f"Instruct: {self._EMBED_QUERY_INSTRUCT}\nQuery: {text}"
+        return text
+
+    def get_embed(self, text, embed_model=None, is_query=False):
+        """Return embedding list[float] from the configured embed model.
+
+        is_query=True applies the Qwen3-Embedding query instruction prefix;
+        leave it False (default) when embedding documents.
+        """
         if embed_model is None:
             import database as db
             embed_model = db.ai_get_settings().get("embed_model", DEFAULT_SETTINGS["embed_model"])
+        text = self._embed_input(embed_model, text, is_query)
         self._wait_for_startup_warmup()
-        with self._ollama_lock:
+        with self._ollama_slot():
             if not self._ensure_model_present(embed_model):
                 raise ValueError(f"Embedding model not available: {embed_model}")
-            payload = json.dumps({"model": embed_model, "input": text}).encode()
+            payload = json.dumps({"model": embed_model, "input": text,
+                                  "options": {"num_gpu": 0}}).encode()
             req = urllib.request.Request(
                 f"{self.ollama_base}/api/embed",
                 data=payload,
@@ -2582,6 +2648,47 @@ class AIManager:
         except Exception as e:
             logger.warning(f"Failed to pull Ollama model {model}: {e}")
             return False
+
+    def _supports_thinking(self, model: str) -> bool:
+        """True if the model advertises the 'thinking' capability (e.g. Qwen3.x).
+
+        Ollama rejects a "think" field for models without the capability, so
+        callers must gate on this before adding it to a payload.
+        """
+        if model in self._thinking_caps:
+            return self._thinking_caps[model]
+        supported = False
+        try:
+            payload = json.dumps({"model": model}).encode()
+            req = urllib.request.Request(
+                f"{self.ollama_base}/api/show",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                info = json.loads(resp.read())
+            supported = "thinking" in (info.get("capabilities") or [])
+        except Exception as e:
+            logger.warning(f"Could not query capabilities for {model}: {e}")
+            return False  # don't cache a failed lookup
+        self._thinking_caps[model] = supported
+        return supported
+
+    def _finalize_payload(self, payload_dict: dict) -> dict:
+        """Apply model-dependent request fixups before sending to Ollama.
+
+        - Disables hybrid-reasoning 'thinking' so responses start immediately.
+        - Drops a negative num_gpu so Ollama auto-places layers; forcing a
+          count (the old 99 convention) hard-fails when the model + KV cache
+          don't fit in the Jetson's shared RAM, instead of partially offloading.
+        """
+        if self._supports_thinking(payload_dict.get("model", "")):
+            payload_dict["think"] = False
+        opts = payload_dict.get("options")
+        if opts and int(opts.get("num_gpu", -1)) < 0:
+            opts.pop("num_gpu", None)
+        return payload_dict
 
     # ------------------------------------------------------------------
     def _get_doc_embeddings(self):
@@ -2707,7 +2814,7 @@ class AIManager:
             "List every expression that must be computed. One [CALC: ...] per line only."
         )
 
-        payload = json.dumps({
+        payload = json.dumps(self._finalize_payload({
             "model": model,
             "messages": [
                 {"role": "system", "content": extraction_system},
@@ -2716,12 +2823,15 @@ class AIManager:
             "stream": False,
             "options": {
                 "num_gpu":     int(settings.get("num_gpu",     DEFAULT_SETTINGS["num_gpu"])),
-                "num_ctx":     1024,
+                # Same num_ctx as the chat path: a different context size makes
+                # Ollama reload the whole model (~10 s) before answering.
+                "num_ctx":     int(settings.get("num_ctx",     DEFAULT_SETTINGS["num_ctx"])),
+                "num_batch":   int(settings.get("num_batch",   DEFAULT_SETTINGS["num_batch"])),
                 "num_thread":  int(settings.get("num_thread",  DEFAULT_SETTINGS["num_thread"])),
                 "temperature": 0.05,
                 "num_predict": 300,
             },
-        }).encode()
+        })).encode()
 
         try:
             req = urllib.request.Request(
@@ -2879,11 +2989,23 @@ class AIManager:
         if not doc_embs:
             return [], 0.0
         try:
-            query_emb = self.get_embed(query, embed_model=embed_model)
+            query_emb = self.get_embed(query, embed_model=embed_model, is_query=True)
         except Exception as e:
             logger.warning(f"RAG embed failed: {e}")
             return [], 0.0
-        scored = [(cosine_similarity(query_emb, emb), doc) for doc, emb in doc_embs]
+        # Skip any stored vectors whose dimensions don't match the query (e.g.
+        # docs left over from a previous embed model). Mismatched vectors would
+        # crash numpy.dot or silently score as garbage.
+        qdim = len(query_emb)
+        usable = [(doc, emb) for doc, emb in doc_embs if len(emb) == qdim]
+        if len(usable) < len(doc_embs):
+            logger.warning(
+                f"RAG: {len(doc_embs) - len(usable)} doc embedding(s) have a "
+                f"dimension != {qdim} (stale embed model?) — skipped. Re-embed needed."
+            )
+        if not usable:
+            return [], 0.0
+        scored = [(cosine_similarity(query_emb, emb), doc) for doc, emb in usable]
         scored.sort(key=lambda x: x[0], reverse=True)
         top_score = scored[0][0] if scored else 0.0
         scored = [(s, doc) for s, doc in scored if s >= _RAG_MIN_SCORE]
@@ -3365,7 +3487,7 @@ class AIManager:
 
         # Call Ollama
         t0 = time.time()
-        payload = json.dumps({
+        payload = json.dumps(self._finalize_payload({
             "model": model,
             "messages": messages,
             "keep_alive": keep_alive,
@@ -3380,14 +3502,14 @@ class AIManager:
                 "top_k":      int(settings.get("top_k",      DEFAULT_SETTINGS["top_k"])),
                 "num_predict": int(settings.get("num_predict", DEFAULT_SETTINGS["num_predict"])),
             },
-        }).encode()
+        })).encode()
         req = urllib.request.Request(
             f"{self.ollama_base}/api/chat",
             data=payload,
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with self._ollama_lock:
+        with self._ollama_slot():
             resp = urllib.request.urlopen(req, timeout=180)
             result = json.loads(resp.read())
         duration_ms = int((time.time() - t0) * 1000)
@@ -3471,7 +3593,7 @@ class AIManager:
 
         db.ai_add_message(chat_id, "user", user_message)
 
-        payload = json.dumps({
+        payload = json.dumps(self._finalize_payload({
             "model": model,
             "messages": messages,
             "keep_alive": keep_alive,
@@ -3486,7 +3608,7 @@ class AIManager:
                 "top_k":      int(settings.get("top_k",      DEFAULT_SETTINGS["top_k"])),
                 "num_predict": int(settings.get("num_predict", DEFAULT_SETTINGS["num_predict"])),
             },
-        }).encode()
+        })).encode()
         req = urllib.request.Request(
             f"{self.ollama_base}/api/chat",
             data=payload,
@@ -3499,7 +3621,7 @@ class AIManager:
         eval_count = None
         eval_duration = None
 
-        with self._ollama_lock:
+        with self._ollama_slot():
             resp = urllib.request.urlopen(req, timeout=300)
             try:
                 for raw_line in resp:

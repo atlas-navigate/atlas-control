@@ -3816,10 +3816,28 @@ def main():
     settings = db.get_app_settings()
     ai_settings = db.ai_get_settings()
     ai_updates = {}
-    if ai_settings.get("model") in (None, "", "llama3.2:3b", "qwen3:4b"):
-        ai_updates["model"] = "qwen2.5:3b"
-    if ai_settings.get("embed_model") in (None, ""):
-        ai_updates["embed_model"] = "nomic-embed-text"
+    if ai_settings.get("model") in (None, "", "llama3.2:3b", "qwen3:4b", "qwen2.5:3b", "qwen3.5:4b"):
+        ai_updates["model"] = "qwen3.5:2b"
+        # Qwen3-family sampling: stored low-temp values from older models
+        # cause repetition loops on Qwen3.x
+        ai_updates["temperature"] = "0.7"
+        ai_updates["top_p"] = "0.8"
+        ai_updates["top_k"] = "20"
+        # Auto layer placement: forcing 99 layers hard-fails on the 8 GB Jetson
+        ai_updates["num_gpu"] = "-1"
+    # Stale 2048-token context from pre-Qwen3.5 defaults truncates the system
+    # prompt once RAG docs + 8-turn history are injected
+    if ai_settings.get("num_ctx") == "2048":
+        ai_updates["num_ctx"] = "4096"
+    # Migrate the embedder to qwen3-embedding:0.6b. nomic (768-dim) and qwen3
+    # (1024-dim) vectors are incompatible, so switching wipes stored doc
+    # embeddings; the background re-embed thread regenerates them on startup.
+    if ai_settings.get("embed_model") in (None, "", "nomic-embed-text"):
+        if ai_settings.get("embed_model") != "qwen3-embedding:0.6b":
+            ai_updates["embed_model"] = "qwen3-embedding:0.6b"
+            _conn = db.get_db()
+            _conn.execute("UPDATE ai_documents SET embedding=NULL")
+            _conn.commit()
     if ai_updates:
         db.ai_set_settings(ai_updates)
     web_port = args.web_port or int(settings.get("web_port", 5000))

@@ -4902,9 +4902,9 @@ function AIPage() {
             <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--text-primary)' }}>Ray</div>
             <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>
               {warmingUp
-                ? `Loading ${settings.model || 'qwen2.5:3b'}…`
+                ? `Loading ${settings.model || 'qwen3.5:2b'}…`
                 : aiReady
-                  ? `${settings.model || 'qwen2.5:3b'} · RAG ${settings.rag_enabled === 'true' ? 'on' : 'off'} · ${status?.doc_count || 0} docs`
+                  ? `${settings.model || 'qwen3.5:2b'} · RAG ${settings.rag_enabled === 'true' ? 'on' : 'off'} · ${status?.doc_count || 0} docs`
                   : status?.running
                     ? `Starting Ray… ${status?.startup_phase || 'warming_up'}`
                     : 'Ollama not reachable'}
@@ -4947,6 +4947,9 @@ function AIPage() {
                     }
                     const confTier = confLabel ? confLabel.split('|')[0].trim() : null;
                     const confColor = confTier === 'HIGH' ? 'var(--accent-green)' : confTier === 'MEDIUM' ? '#f59e0b' : '#ef4444';
+                    // Markdown-lite: render **bold** as <strong> via React nodes (no raw HTML)
+                    const renderBold = (text) => text.split(/\*\*([^*]+)\*\*/g).map((part, pi) =>
+                      pi % 2 === 1 ? <strong key={pi}>{part}</strong> : part);
                     return (
                     <div key={m.id || i} style={{ display: 'flex', flexDirection: 'column', alignItems: m.role === 'user' ? 'flex-end' : 'flex-start', gap: 3 }}>
                       {m.role === 'assistant' ? (
@@ -4958,7 +4961,7 @@ function AIPage() {
                             fontSize: 14, lineHeight: 1.65, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
                             color: 'var(--text-primary)',
                           }}>
-                            {msgBody}{m.streaming && <span style={{ display: 'inline-block', width: 2, height: '1em', background: 'var(--accent-green)', marginLeft: 2, verticalAlign: 'text-bottom', animation: 'blink 1s step-end infinite' }} />}
+                            {renderBold(msgBody)}{m.streaming && <span style={{ display: 'inline-block', width: 2, height: '1em', background: 'var(--accent-green)', marginLeft: 2, verticalAlign: 'text-bottom', animation: 'blink 1s step-end infinite' }} />}
                           </div>
                           {confLabel && (
                             <div style={{ display: 'flex', alignItems: 'center', gap: 5, paddingLeft: 4 }}>
@@ -5171,12 +5174,12 @@ function AIPage() {
                         {status.models.map(m => <option key={m} value={m}>{m}</option>)}
                       </select>
                     ) : (
-                      <input style={inputStyle} value={settings.model || ''} onChange={e => setSettings(p => ({...p, model: e.target.value}))} placeholder="qwen2.5:3b" />
+                      <input style={inputStyle} value={settings.model || ''} onChange={e => setSettings(p => ({...p, model: e.target.value}))} placeholder="qwen3.5:2b" />
                     )}
                   </div>
                   <div>
                     <label style={labelStyle}>Embed Model</label>
-                    <input style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} value={settings.embed_model || ''} onChange={e => setSettings(p => ({...p, embed_model: e.target.value}))} placeholder="nomic-embed-text" />
+                    <input style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} value={settings.embed_model || ''} onChange={e => setSettings(p => ({...p, embed_model: e.target.value}))} placeholder="qwen3-embedding:0.6b" />
                   </div>
                 </div>
               </div>

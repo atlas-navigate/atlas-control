@@ -951,8 +951,8 @@ def ai_seed_documents(docs):
 # ── AI Settings ───────────────────────────────────────────────────────────────
 
 _AI_DEFAULTS = {
-    "model": "qwen2.5:3b",
-    "embed_model": "nomic-embed-text",
+    "model": "qwen3.5:2b",
+    "embed_model": "qwen3-embedding:0.6b",
     "system_prompt": (
         "You are Ray — an AI assistant built into Atlas Control, "
         "a Meshtastic mesh-network dashboard running on an off-grid Jetson device.\n\n"
@@ -968,12 +968,12 @@ _AI_DEFAULTS = {
     "rag_top_k": "3",
     "inject_mesh_context": "true",
     # Generation parameters — must stay in sync with DEFAULT_SETTINGS in ai_manager.py
-    "temperature": "0.3",
-    "top_p": "0.9",
-    "top_k": "40",
+    "temperature": "0.7",
+    "top_p": "0.8",
+    "top_k": "20",
     "num_predict": "512",
     "num_ctx": "4096",
-    "num_gpu": "99",
+    "num_gpu": "-1",
     "num_thread": "6",
     "num_batch": "512",
 }

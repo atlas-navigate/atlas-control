@@ -62,8 +62,8 @@ PROTOMAPS_FALLBACK_KEY="20260608.pmtiles"
 ROUTING_PROFILES=("car" "hiking")
 
 # Ollama models pulled on first run (also checked after updates)
-OLLAMA_CHAT_MODEL="qwen2.5:3b"
-OLLAMA_EMBED_MODEL="nomic-embed-text"
+OLLAMA_CHAT_MODEL="qwen3.5:2b"
+OLLAMA_EMBED_MODEL="qwen3-embedding:0.6b"
 
 # ── Atlas Control source repository ─────────────────────────────────────────
 # install.sh fetches the current version of Atlas Control from here, so a
@@ -1212,10 +1212,26 @@ import sys; sys.path.insert(0, '$APP_DIR')
 import database
 s = database.ai_get_settings()
 updates = {}
-if s.get('model') in (None, '', 'llama3.2:3b', 'qwen3:4b'):
-    updates['model'] = 'qwen2.5:3b'
-if s.get('embed_model') in (None, ''):
-    updates['embed_model'] = 'nomic-embed-text'
+if s.get('model') in (None, '', 'llama3.2:3b', 'qwen3:4b', 'qwen2.5:3b', 'qwen3.5:4b'):
+    updates['model'] = 'qwen3.5:2b'
+    # Qwen3-family sampling: old low-temp values cause repetition loops
+    updates['temperature'] = '0.7'
+    updates['top_p'] = '0.8'
+    updates['top_k'] = '20'
+    updates['num_gpu'] = '-1'
+# Stale 2048-token context truncates the system prompt once RAG + history land
+if s.get('num_ctx') == '2048':
+    updates['num_ctx'] = '4096'
+# Migrate the embedder to qwen3-embedding:0.6b. nomic (768-dim) and qwen3
+# (1024-dim) vectors are incompatible, so any change wipes stored doc
+# embeddings — the app re-embeds them on next startup.
+if s.get('embed_model') in (None, '', 'nomic-embed-text'):
+    if s.get('embed_model') != 'qwen3-embedding:0.6b':
+        updates['embed_model'] = 'qwen3-embedding:0.6b'
+        conn = database.get_db()
+        n = conn.execute('UPDATE ai_documents SET embedding=NULL').rowcount
+        conn.commit()
+        print(f'Cleared {n} stale doc embedding(s) for re-embed')
 if updates:
     database.ai_set_settings(updates)
     print(f'Updated AI defaults: {updates}')

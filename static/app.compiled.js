@@ -5233,7 +5233,7 @@ function AIPage() {
       color: 'var(--text-muted)',
       marginTop: 1
     }
-  }, warmingUp ? `Loading ${settings.model || 'qwen2.5:3b'}…` : aiReady ? `${settings.model || 'qwen2.5:3b'} · RAG ${settings.rag_enabled === 'true' ? 'on' : 'off'} · ${(status === null || status === void 0 ? void 0 : status.doc_count) || 0} docs` : status !== null && status !== void 0 && status.running ? `Starting Ray… ${(status === null || status === void 0 ? void 0 : status.startup_phase) || 'warming_up'}` : 'Ollama not reachable')), /*#__PURE__*/React.createElement("div", {
+  }, warmingUp ? `Loading ${settings.model || 'qwen3.5:2b'}…` : aiReady ? `${settings.model || 'qwen3.5:2b'} · RAG ${settings.rag_enabled === 'true' ? 'on' : 'off'} · ${(status === null || status === void 0 ? void 0 : status.doc_count) || 0} docs` : status !== null && status !== void 0 && status.running ? `Starting Ray… ${(status === null || status === void 0 ? void 0 : status.startup_phase) || 'warming_up'}` : 'Ollama not reachable')), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       gap: 4
@@ -5288,6 +5288,10 @@ function AIPage() {
     }
     const confTier = confLabel ? confLabel.split('|')[0].trim() : null;
     const confColor = confTier === 'HIGH' ? 'var(--accent-green)' : confTier === 'MEDIUM' ? '#f59e0b' : '#ef4444';
+    // Markdown-lite: render **bold** as <strong> via React nodes (no raw HTML)
+    const renderBold = text => text.split(/\*\*([^*]+)\*\*/g).map((part, pi) => pi % 2 === 1 ? /*#__PURE__*/React.createElement("strong", {
+      key: pi
+    }, part) : part);
     return /*#__PURE__*/React.createElement("div", {
       key: m.id || i,
       style: {
@@ -5310,7 +5314,7 @@ function AIPage() {
         wordBreak: 'break-word',
         color: 'var(--text-primary)'
       }
-    }, msgBody, m.streaming && /*#__PURE__*/React.createElement("span", {
+    }, renderBold(msgBody), m.streaming && /*#__PURE__*/React.createElement("span", {
       style: {
         display: 'inline-block',
         width: 2,
@@ -5708,7 +5712,7 @@ function AIPage() {
       ...p,
       model: e.target.value
     })),
-    placeholder: "qwen2.5:3b"
+    placeholder: "qwen3.5:2b"
   })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     style: labelStyle
   }, "Embed Model"), /*#__PURE__*/React.createElement("input", {
@@ -5721,7 +5725,7 @@ function AIPage() {
       ...p,
       embed_model: e.target.value
     })),
-    placeholder: "nomic-embed-text"
+    placeholder: "qwen3-embedding:0.6b"
   })))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,

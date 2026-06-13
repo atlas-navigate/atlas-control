@@ -57,9 +57,9 @@ Everything below lives in [`ai_manager.py`](ai_manager.py).
               └─────────────────────┬─────────────────────┘
                                     │
               ┌─────────────────────▼─────────────────────┐
-              │   7. LANGUAGE CORE — qwen2.5:3b @ Ollama  │
+              │   7. LANGUAGE CORE — qwen3.5:2b @ Ollama  │
               │   Jetson GPU, 4096-token window,          │
-              │   temp 0.3, streams token by token        │
+              │   temp 0.7, thinking off, streams tokens  │
               └─────────────────────┬─────────────────────┘
                                     │
               ┌─────────────────────▼─────────────────────┐
@@ -76,7 +76,7 @@ Everything below lives in [`ai_manager.py`](ai_manager.py).
    OFFLINE INDEXING (startup, background thread)
    ┌──────────────────────────────────────────────────────────────┐
    │ seed docs (survival, comms, ballistics, first aid, app usage,│
-   │ Ray self-architecture) ──► nomic-embed-text ──► embedding    │
+   │ Ray self-architecture) ──► qwen3-embedding:0.6b ──► embedding│
    │ vector stored next to the text in SQLite (ai_documents).     │
    │ Edited docs get their embedding cleared and re-embedded.     │
    └──────────────────────────────────────────────────────────────┘
@@ -89,7 +89,7 @@ flowchart TD
     U[User message] --> R{1. Routing<br/>keyword scanners}
     R -->|always| S[2. Live senses<br/>system stats + mesh state]
     R -->|always| G[3. GPS + offline<br/>reverse geocode]
-    R -->|knowledge question| RAG[4. RAG recall<br/>embed query, cosine top-3 ≥ 0.30]
+    R -->|knowledge question| RAG[4. RAG recall<br/>embed query, cosine top-3 ≥ 0.45]
     R -->|physics / ballistics| C[5. Calc agent<br/>G1 drag sim / sandboxed eval]
     R -->|asks about Ray itself| SK[Self-knowledge doc<br/>force-injected]
     S --> CTX[6. Context assembly<br/>+ last 8 chat messages]
@@ -97,12 +97,12 @@ flowchart TD
     RAG --> CTX
     C --> CTX
     SK --> CTX
-    CTX --> LLM[7. Language core<br/>qwen2.5:3b via Ollama on GPU]
+    CTX --> LLM[7. Language core<br/>qwen3.5:2b via Ollama on GPU]
     LLM --> P[8. Post-processing<br/>CALC tags + confidence footer]
     P --> A[Answer]
 
     subgraph Indexing at startup
-        D[Seed docs] --> E[nomic-embed-text] --> DB[(SQLite<br/>text + embedding)]
+        D[Seed docs] --> E[qwen3-embedding:0.6b] --> DB[(SQLite<br/>text + embedding)]
     end
     DB -.-> RAG
 ```
@@ -131,12 +131,13 @@ gravity-weighted lookup over 68,000 world cities so a nearby town beats a distan
 metropolis. If you type coordinates or a place name, that overrides the device fix.
 
 ### 4. Indexing & retrieval (RAG) — `_embed_unembedded_docs`, `rag_search`
-**Indexing:** at startup, every seeded knowledge doc is run through `nomic-embed-text`,
-producing a vector "fingerprint of meaning" stored next to the text in SQLite. Changed
-docs are automatically re-embedded.
-**Retrieval:** your question is embedded the same way and compared against every doc by
-cosine similarity. The top 3 docs scoring ≥ 0.30 are pasted into the context. Embeddings
-are cached in RAM for 120 s so repeated queries don't hit the database.
+**Indexing:** at startup, every seeded knowledge doc is run through `qwen3-embedding:0.6b`,
+producing a 1024-dim vector "fingerprint of meaning" stored next to the text in SQLite.
+Changed docs are automatically re-embedded.
+**Retrieval:** your question is embedded the same way — with a Qwen3-Embedding query
+instruction prefix that documents don't get — and compared against every doc by cosine
+similarity. The top 3 docs scoring ≥ 0.45 are pasted into the context. Embeddings are
+cached in RAM for 120 s so repeated queries don't hit the database.
 
 ### 5. The calculator agent — `_calc_agent_pass`, `_ballistic_direct_compute`
 Ray does not trust a 3B-parameter model with arithmetic:
@@ -150,7 +151,8 @@ Ray does not trust a 3B-parameter model with arithmetic:
 
 ### 6–7. Working memory & generation — `chat()` / `chat_stream()`
 The system prompt + all injected sections + the last 8 chat messages go to Ollama
-(default `qwen2.5:3b`, 4096-token window, temperature 0.3, kept warm in VRAM for 10 h).
+(default `qwen3.5:2b`, 4096-token window, temperature 0.7, hybrid-thinking disabled,
+kept warm in VRAM for 10 h).
 The answer streams token by token over the socket.
 
 ### 8. Confidence footer — `_confidence_label`
