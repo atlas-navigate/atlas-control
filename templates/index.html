@@ -1496,6 +1496,228 @@ function resolveTz(tz) {
   return tz;
 }
 
+// ═══════════════════════════════════════════════
+// Markdown rendering for AI (Ray) replies
+// ═══════════════════════════════════════════════
+// Renders a safe subset of Markdown as real React nodes — never raw HTML, so
+// model output can never inject markup (no dangerouslySetInnerHTML). Supports
+// headings, **bold**, *italics*, `inline code`, fenced code blocks, tables,
+// ordered/unordered (nested) lists, blockquotes, horizontal rules and links.
+// Tolerant of partial input so a reply renders cleanly mid-stream (e.g. an
+// unclosed code fence or a half-built table).
+
+// Inline span parser: code / bold / italic / strikethrough / links.
+// Single-pass scanner (no regex) so identifiers like node_id aren't mangled
+// and so it degrades gracefully on unterminated markers.
+function mdInline(text, kp) {
+  const out = [];
+  let buf = '';
+  let i = 0;
+  const flush = () => { if (buf) { out.push(buf); buf = ''; } };
+  while (i < text.length) {
+    const c = text[i];
+    if (c === '`') {                                   // `inline code`
+      const end = text.indexOf('`', i + 1);
+      if (end > i) {
+        flush();
+        out.push(<code key={kp + 'c' + i} style={{ fontFamily: 'var(--font-mono)', fontSize: '0.86em', background: 'var(--accent-green-dim)', color: 'var(--accent-green)', padding: '1px 5px', borderRadius: 4, wordBreak: 'break-word' }}>{text.slice(i + 1, end)}</code>);
+        i = end + 1; continue;
+      }
+    }
+    if (c === '*' && text[i + 1] === '*') {            // **bold**
+      const end = text.indexOf('**', i + 2);
+      if (end > i + 1) {
+        flush();
+        out.push(<strong key={kp + 'b' + i}>{mdInline(text.slice(i + 2, end), kp + 'b' + i)}</strong>);
+        i = end + 2; continue;
+      }
+    }
+    if (c === '*') {                                   // *italic*
+      const end = text.indexOf('*', i + 1);
+      if (end > i + 1) {
+        flush();
+        out.push(<em key={kp + 'i' + i}>{mdInline(text.slice(i + 1, end), kp + 'i' + i)}</em>);
+        i = end + 1; continue;
+      }
+    }
+    if (c === '~' && text[i + 1] === '~') {            // ~~strikethrough~~
+      const end = text.indexOf('~~', i + 2);
+      if (end > i + 1) {
+        flush();
+        out.push(<span key={kp + 's' + i} style={{ textDecoration: 'line-through', opacity: 0.7 }}>{mdInline(text.slice(i + 2, end), kp + 's' + i)}</span>);
+        i = end + 2; continue;
+      }
+    }
+    if (c === '[') {                                   // [label](url)
+      const close = text.indexOf(']', i + 1);
+      if (close > i && text[close + 1] === '(') {
+        const paren = text.indexOf(')', close + 2);
+        if (paren > close) {
+          flush();
+          out.push(<a key={kp + 'l' + i} href={text.slice(close + 2, paren).trim()} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-green)', textDecoration: 'underline' }}>{text.slice(i + 1, close)}</a>);
+          i = paren + 1; continue;
+        }
+      }
+    }
+    buf += c; i++;
+  }
+  flush();
+  return out;
+}
+
+// Split a table row into trimmed cells, tolerating optional leading/trailing pipes.
+function mdSplitRow(line) {
+  let s = line.trim();
+  if (s.startsWith('|')) s = s.slice(1);
+  if (s.endsWith('|'))  s = s.slice(0, -1);
+  return s.split('|').map(c => c.trim());
+}
+
+// True when a line is a GFM table separator row, e.g. `|---|:--:|---:|`.
+function mdIsTableSep(s) {
+  if (!s || s.indexOf('-') === -1 || s.indexOf('|') === -1) return false;
+  return mdSplitRow(s).every(c => /^:?-{1,}:?$/.test(c));
+}
+
+// True when a line begins a non-paragraph block (used to terminate paragraphs).
+function mdIsBlockStart(line) {
+  return /^\s*```/.test(line)
+      || /^\s*#{1,6}\s/.test(line)
+      || /^\s*([-*_])\1{2,}\s*$/.test(line)
+      || /^\s*>\s?/.test(line)
+      || /^\s*([-*+]|\d+[.)])\s+/.test(line);
+}
+
+const MD_HEAD = { 1: 19, 2: 17, 3: 15.5, 4: 14.5, 5: 13.5, 6: 13 };
+
+// Block-level Markdown renderer. Returns a fragment of React block nodes.
+function MarkdownMessage({ text }) {
+  const lines = (text || '').split('\n');
+  const blocks = [];
+  let i = 0;
+  let k = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // ── fenced code block ──
+    const fence = line.match(/^\s*```(.*)$/);
+    if (fence) {
+      i++;
+      const code = [];
+      while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) { code.push(lines[i]); i++; }
+      if (i < lines.length) i++;   // consume closing fence (if present)
+      blocks.push(
+        <pre key={k++} style={{ margin: '8px 0', padding: '10px 12px', background: 'rgba(0,0,0,0.28)', border: '1px solid var(--border)', borderRadius: 8, overflowX: 'auto', fontFamily: 'var(--font-mono)', fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-primary)', whiteSpace: 'pre' }}>
+          <code>{code.join('\n')}</code>
+        </pre>
+      );
+      continue;
+    }
+
+    // ── blank line ──
+    if (/^\s*$/.test(line)) { i++; continue; }
+
+    // ── heading ──
+    const h = line.match(/^\s*(#{1,6})\s+(.*)$/);
+    if (h) {
+      const lvl = h[1].length;
+      blocks.push(
+        <div key={k++} style={{ fontSize: MD_HEAD[lvl], fontWeight: 700, lineHeight: 1.3, margin: (blocks.length ? 12 : 2) + 'px 0 5px', color: 'var(--text-primary)' }}>
+          {mdInline(h[2].trim(), 'h' + k)}
+        </div>
+      );
+      i++; continue;
+    }
+
+    // ── horizontal rule ──
+    if (/^\s*([-*_])\1{2,}\s*$/.test(line)) {
+      blocks.push(<hr key={k++} style={{ border: 0, borderTop: '1px solid var(--border)', margin: '12px 0' }} />);
+      i++; continue;
+    }
+
+    // ── table ──
+    if (line.indexOf('|') !== -1 && i + 1 < lines.length && mdIsTableSep(lines[i + 1])) {
+      const header = mdSplitRow(line);
+      const aligns = mdSplitRow(lines[i + 1]).map(c => {
+        const l = c.startsWith(':'), r = c.endsWith(':');
+        return (l && r) ? 'center' : r ? 'right' : 'left';
+      });
+      i += 2;
+      const rows = [];
+      while (i < lines.length && lines[i].indexOf('|') !== -1 && !/^\s*$/.test(lines[i]) && !/^\s*```/.test(lines[i])) {
+        rows.push(mdSplitRow(lines[i])); i++;
+      }
+      blocks.push(
+        <div key={k++} style={{ overflowX: 'auto', margin: '8px 0' }}>
+          <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
+            <thead>
+              <tr>{header.map((c, ci) => (
+                <th key={ci} style={{ border: '1px solid var(--border)', padding: '6px 10px', textAlign: aligns[ci] || 'left', background: 'var(--accent-green-dim)', fontWeight: 700, whiteSpace: 'nowrap' }}>{mdInline(c, 'th' + k + '_' + ci)}</th>
+              ))}</tr>
+            </thead>
+            <tbody>{rows.map((r, ri) => (
+              <tr key={ri}>{header.map((_, ci) => (
+                <td key={ci} style={{ border: '1px solid var(--border)', padding: '6px 10px', textAlign: aligns[ci] || 'left', verticalAlign: 'top' }}>{mdInline(r[ci] || '', 't' + k + '_' + ri + '_' + ci)}</td>
+              ))}</tr>
+            ))}</tbody>
+          </table>
+        </div>
+      );
+      continue;
+    }
+
+    // ── blockquote ──
+    if (/^\s*>\s?/.test(line)) {
+      const quote = [];
+      while (i < lines.length && /^\s*>\s?/.test(lines[i])) { quote.push(lines[i].replace(/^\s*>\s?/, '')); i++; }
+      blocks.push(
+        <blockquote key={k++} style={{ margin: '8px 0', padding: '4px 12px', borderLeft: '3px solid var(--accent-green)', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+          {quote.map((q, qi) => <div key={qi}>{mdInline(q, 'q' + k + '_' + qi)}</div>)}
+        </blockquote>
+      );
+      continue;
+    }
+
+    // ── list (ordered/unordered, indent-based nesting) ──
+    if (/^\s*([-*+]|\d+[.)])\s+/.test(line)) {
+      const ordered = /^\s*\d+[.)]\s+/.test(line);
+      const items = [];
+      // Gather consecutive items of the same kind; a marker switch (− ↔ 1.) starts a new list.
+      while (i < lines.length && /^\s*([-*+]|\d+[.)])\s+/.test(lines[i])
+          && /^\s*\d+[.)]\s+/.test(lines[i]) === ordered) {
+        const m = lines[i].match(/^(\s*)(?:[-*+]|\d+[.)])\s+(.*)$/);
+        const indent = Math.floor(m[1].replace(/\t/g, '  ').length / 2);
+        items.push({ indent, text: m[2] });
+        i++;
+      }
+      const Tag = ordered ? 'ol' : 'ul';
+      blocks.push(
+        <Tag key={k++} style={{ margin: '6px 0', paddingLeft: 22, display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {items.map((it, ii) => (
+            <li key={ii} style={{ marginLeft: it.indent * 18, lineHeight: 1.55 }}>{mdInline(it.text, 'li' + k + '_' + ii)}</li>
+          ))}
+        </Tag>
+      );
+      continue;
+    }
+
+    // ── paragraph (soft line breaks preserved) ──
+    const para = [];
+    while (i < lines.length && !/^\s*$/.test(lines[i]) && !mdIsBlockStart(lines[i])
+        && !(lines[i].indexOf('|') !== -1 && i + 1 < lines.length && mdIsTableSep(lines[i + 1]))) {
+      para.push(lines[i]); i++;
+    }
+    blocks.push(
+      <div key={k++} style={{ margin: (blocks.length ? '6px' : '0') + ' 0 0', lineHeight: 1.65 }}>
+        {para.map((p, pi) => (
+          <React.Fragment key={pi}>{pi > 0 && <br />}{mdInline(p, 'p' + k + '_' + pi)}</React.Fragment>
+        ))}
+      </div>
+    );
+  }
+  return <>{blocks}</>;
+}
+
 function fmtTime(ts, tz) {
   if (!ts) return "—";
   return new Date(ts * 1000).toLocaleTimeString([], {
@@ -4947,9 +5169,6 @@ function AIPage() {
                     }
                     const confTier = confLabel ? confLabel.split('|')[0].trim() : null;
                     const confColor = confTier === 'HIGH' ? 'var(--accent-green)' : confTier === 'MEDIUM' ? '#f59e0b' : '#ef4444';
-                    // Markdown-lite: render **bold** as <strong> via React nodes (no raw HTML)
-                    const renderBold = (text) => text.split(/\*\*([^*]+)\*\*/g).map((part, pi) =>
-                      pi % 2 === 1 ? <strong key={pi}>{part}</strong> : part);
                     return (
                     <div key={m.id || i} style={{ display: 'flex', flexDirection: 'column', alignItems: m.role === 'user' ? 'flex-end' : 'flex-start', gap: 3 }}>
                       {m.role === 'assistant' ? (
@@ -4958,10 +5177,10 @@ function AIPage() {
                             maxWidth: '78%', padding: '10px 14px',
                             background: 'var(--bg-input)', border: '1px solid var(--border)',
                             borderRadius: '4px 12px 12px 12px',
-                            fontSize: 14, lineHeight: 1.65, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                            fontSize: 14, lineHeight: 1.65, wordBreak: 'break-word',
                             color: 'var(--text-primary)',
                           }}>
-                            {renderBold(msgBody)}{m.streaming && <span style={{ display: 'inline-block', width: 2, height: '1em', background: 'var(--accent-green)', marginLeft: 2, verticalAlign: 'text-bottom', animation: 'blink 1s step-end infinite' }} />}
+                            <MarkdownMessage text={msgBody} />{m.streaming && <span style={{ display: 'inline-block', width: 2, height: '1em', background: 'var(--accent-green)', marginLeft: 2, verticalAlign: 'text-bottom', animation: 'blink 1s step-end infinite' }} />}
                           </div>
                           {confLabel && (
                             <div style={{ display: 'flex', alignItems: 'center', gap: 5, paddingLeft: 4 }}>

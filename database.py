@@ -950,7 +950,28 @@ def ai_seed_documents(docs):
 
 # ── AI Settings ───────────────────────────────────────────────────────────────
 
-_AI_DEFAULTS = {
+# Shared Markdown formatting directive. Defined once here so the in-code default
+# (AI_DEFAULTS below) and the one-time migration of existing saved prompts use
+# the exact same text. Formatting is prioritized over brevity on purpose.
+AI_FORMATTING_GUIDE = (
+    "FORMATTING — Prioritize clear structure over brevity. Reply in GitHub-flavored "
+    "Markdown, and when a table, list, or headings present the answer more clearly, use "
+    "them even if the reply runs longer:\n"
+    "- **Bold** key terms; use `inline code` for commands, filenames, values, and node IDs.\n"
+    "- Use ## / ### headings to label the sections of a longer answer.\n"
+    "- Use - bullets for unordered points and 1. numbered lists for ordered steps.\n"
+    "- Put multi-line commands, config, or output in ```fenced code blocks```.\n"
+    "- Use Markdown tables for comparisons or structured data (e.g. node SNR/hops, specs, schedules).\n"
+    "- Use > blockquotes for warnings or important callouts.\n"
+    "Clarity and correct formatting come before keeping it short; still, keep a genuinely "
+    "simple one-line answer plain — don't over-format or pad with filler."
+)
+
+# Canonical AI settings defaults — the SINGLE source of truth. ai_manager imports
+# this as DEFAULT_SETTINGS, so the fresh-install defaults and the in-code fallbacks
+# can never drift. Per-box values saved in the ai_settings table override these at
+# runtime (see ai_get_settings).
+AI_DEFAULTS = {
     "model": "qwen3.5:2b",
     "embed_model": "qwen3-embedding:0.6b",
     "system_prompt": (
@@ -960,22 +981,24 @@ _AI_DEFAULTS = {
         "1. LIVE DATA sections (SYSTEM STATUS, MESH NETWORK STATE, ALERTS, CURRENT POSITION) — always current and accurate.\n"
         "2. KNOWLEDGE BASE sections — curated reference docs on survival, radio, ballistics, and off-grid topics.\n\n"
         "GUIDELINES:\n"
-        "- Be concise and direct. No filler phrases."
+        "- Be direct and practical. No filler phrases.\n\n"
+        + AI_FORMATTING_GUIDE
     ),
     "warmup_on_start": "true",
     "keep_alive_hours": "10",
     "rag_enabled": "true",
     "rag_top_k": "3",
     "inject_mesh_context": "true",
-    # Generation parameters — must stay in sync with DEFAULT_SETTINGS in ai_manager.py
+    "num_ctx": "4096",
+    "num_gpu": "-1",      # -1 = let Ollama auto-place layers (forced counts hard-fail on tight RAM)
+    "num_thread": "6",    # Jetson Orin Nano: 6× Cortex-A78AE cores
+    "num_batch": "512",   # prompt tokens processed per GPU batch
+    # Qwen3-family non-thinking sampling (official recommendation); lower
+    # temperatures cause repetition loops on Qwen3.x models.
     "temperature": "0.7",
     "top_p": "0.8",
     "top_k": "20",
     "num_predict": "512",
-    "num_ctx": "4096",
-    "num_gpu": "-1",
-    "num_thread": "6",
-    "num_batch": "512",
 }
 
 
@@ -983,7 +1006,7 @@ def ai_get_settings():
     """Return dict of all settings, with defaults filled in for missing keys."""
     db = get_db()
     rows = db.execute("SELECT key, value FROM ai_settings").fetchall()
-    settings = dict(_AI_DEFAULTS)
+    settings = dict(AI_DEFAULTS)
     for row in rows:
         settings[row["key"]] = row["value"]
     return settings

@@ -202,41 +202,10 @@ logger = logging.getLogger("ai_manager")
 # ---------------------------------------------------------------------------
 # Default settings
 # ---------------------------------------------------------------------------
-DEFAULT_SETTINGS = {
-    "model": "qwen3.5:2b",
-    "embed_model": "qwen3-embedding:0.6b",
-    "system_prompt": (
-        "You are Atlas — an AI assistant built into Atlas Control, "
-        "a Meshtastic mesh-network dashboard running on an off-grid Jetson device.\n\n"
-        "You have two sources of information:\n"
-        "1. LIVE DATA sections (SYSTEM STATUS, MESH NETWORK STATE, ALERTS, CURRENT POSITION) — always current and accurate.\n"
-        "2. KNOWLEDGE BASE sections — curated reference docs on Atlas Control app usage, survival, radio, ballistics, and off-grid topics.\n\n"
-        "GUIDELINES:\n"
-        "- A CURRENT POSITION block is always present in your context. Use it to ground every answer geographically. "
-        "Even when the user does not explicitly mention location, tailor your answer to their actual coordinates and surroundings — "
-        "for example, referencing the local region, climate zone, terrain, water sources, or regulatory context relevant to that location.\n"
-        "- When KNOWLEDGE BASE sections are provided, use them as your primary source for that topic.\n"
-        "- If the KNOWLEDGE BASE does not cover the question, answer from your training knowledge.\n"
-        "- When a KNOWLEDGE BASE section includes a SCOPE note, note its limits and supplement "
-        "with your training knowledge for anything outside that scope.\n"
-        "- Be concise and direct. No filler phrases."
-    ),
-    "warmup_on_start": "true",
-    "keep_alive_hours": "10",
-    "rag_enabled": "true",
-    "rag_top_k": "3",
-    "inject_mesh_context": "true",
-    "num_ctx": "4096",
-    "num_gpu": "-1",      # -1 = let Ollama auto-place layers (forced counts hard-fail on tight RAM)
-    "num_thread": "6",    # Jetson Orin Nano: 6× Cortex-A78AE cores
-    "num_batch": "512",   # prompt tokens processed per GPU batch
-    # Qwen3-family non-thinking sampling (official recommendation); lower
-    # temperatures cause repetition loops on Qwen3.x models.
-    "temperature": "0.7",
-    "top_p": "0.8",
-    "top_k": "20",
-    "num_predict": "512",
-}
+# AI settings defaults live in ONE place — database.AI_DEFAULTS — so the
+# fresh-install defaults and these in-code fallbacks can never drift apart.
+# Per-box values saved in the ai_settings table override these at runtime.
+from database import AI_DEFAULTS as DEFAULT_SETTINGS
 
 # Safe math namespace shared across all calculator methods
 import math as _math_mod
