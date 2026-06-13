@@ -70,8 +70,10 @@ class NetworkMonitor(private val context: Context) {
         val gw = lp.routes
             .mapNotNull { it.gateway }
             .filterIsInstance<Inet4Address>()
-            .firstOrNull { !it.isLoopbackAddress }
-            ?.hostAddress ?: return null
+            .firstOrNull { !it.isLoopbackAddress && !it.isAnyLocalAddress }
+            ?.hostAddress
+            ?.takeIf { it.isNotBlank() && !it.startsWith("0.") && it != "255.255.255.255" }
+            ?: return null
         "http://$gw:5000"
     }.getOrNull()
 

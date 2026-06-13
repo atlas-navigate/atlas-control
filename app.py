@@ -3320,20 +3320,32 @@ def _avahi_reload_quiet():
     threading.Thread(target=_run, daemon=True, name="avahi-reload").start()
 
 def _candidate_mobile_hosts():
-    # Put numeric-IP URLs first so the Android app's connection test returns an IP.
-    # Chromium WebView cannot resolve .local hostnames via mDNS, but it can reach
-    # a direct IP:5000 URL (Flask binds to 0.0.0.0:5000).
+    # Ordering matters: these become the apps' baseUrls and preferredBaseUrl
+    # (hosts[0]), and the mobile WebView loads whichever it ends up on.
+    #
+    #  - Numeric-IP URLs first: Chromium WebView cannot resolve .local via mDNS
+    #    but reaches a direct IP URL fine.
+    #  - For each IP, the plain-HTTP :5000 URL BEFORE the https one. Flask binds
+    #    0.0.0.0:5000 in the clear and is always up; the https/443 path depends
+    #    on nginx running with a cert the WebView trusts, which on a self-signed
+    #    box it does not — Chromium cancels the page (this was a primary cause of
+    #    the mobile "can't connect"/crash loop). Probing clients trust all certs
+    #    so https stays a usable fallback, just not the preferred base.
+    #
+    # IPv6 literals are bracketed so the URLs are well-formed.
     ip_hosts = []
     try:
         _, addrs = _discover_local_networks()
         for addr in addrs:
-            if not _is_local(str(addr)):
+            a = str(addr)
+            if not _is_local(a):
                 continue
-            ip_hosts.append(f"https://{addr}")
-            ip_hosts.append(f"http://{addr}:5000")
+            host = f"[{a}]" if ":" in a else a  # bracket IPv6 literals
+            ip_hosts.append(f"http://{host}:5000")
+            ip_hosts.append(f"https://{host}")
     except Exception:
         pass
-    return ip_hosts + ["https://atlas.local", "http://atlas.local:5000"]
+    return ip_hosts + ["http://atlas.local:5000", "https://atlas.local"]
 
 def _mobile_bootstrap_manifest():
     owner = {}

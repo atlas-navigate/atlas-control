@@ -237,6 +237,14 @@ struct AtlasWebViewRepresentable: UIViewRepresentable {
     final class Bridge: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
         let parent: AtlasWebViewRepresentable
 
+        // Content-process (renderer) crash recovery — see
+        // webViewWebContentProcessDidTerminate below.
+        private static let rendererCrashBackoffSeconds = 1.5
+        private static let rendererCrashMaxBackoffSeconds = 30.0
+        private static let rendererCrashResetSeconds = 60.0
+        private var rendererCrashCount = 0
+        private var lastRendererCrashAt: Date?
+
         init(parent: AtlasWebViewRepresentable) {
             self.parent = parent
         }
@@ -281,6 +289,31 @@ struct AtlasWebViewRepresentable: UIViewRepresentable {
             DispatchQueue.main.async {
                 self.parent.isLoading = false
                 self.parent.pageError = true
+            }
+        }
+
+        /// The iOS analog of Android's `onRenderProcessGone`: WKWebView's
+        /// content (renderer) process was killed — usually under memory
+        /// pressure, common on the Simulator with the heavy map page. Without
+        /// recovery the WebView is left blank. Reload on an escalating, capped
+        /// backoff: never instantly (would just re-OOM) and never permanently
+        /// giving up, so the app self-heals once pressure subsides.
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            let now = Date()
+            if let last = lastRendererCrashAt,
+               now.timeIntervalSince(last) > Self.rendererCrashResetSeconds {
+                rendererCrashCount = 0
+            }
+            lastRendererCrashAt = now
+            rendererCrashCount += 1
+            let backoff = min(
+                Self.rendererCrashBackoffSeconds * Double(rendererCrashCount),
+                Self.rendererCrashMaxBackoffSeconds
+            )
+            let target = webView.url ?? parent.url
+            DispatchQueue.main.asyncAfter(deadline: .now() + backoff) { [weak webView] in
+                guard let webView else { return }
+                webView.load(AtlasWebViewRepresentable.cacheBypassingRequest(target))
             }
         }
 
@@ -443,6 +476,7 @@ struct AtlasWebViewRepresentable: UIViewRepresentable {
                 if a == 10 { return true }
                 if a == 172 && (16...31).contains(b) { return true }
                 if a == 192 && b == 168 { return true }
+                if a == 100 && (64...127).contains(b) { return true }  // CGNAT / Tailscale
                 if a == 169 && b == 254 { return true }
                 if a == 127 { return true }
             }

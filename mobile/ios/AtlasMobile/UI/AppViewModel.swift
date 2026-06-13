@@ -93,14 +93,10 @@ final class AppViewModel: ObservableObject {
         guard !input.isEmpty else { return }
         lanSwitchPending = false
         isLanTransitioning = false
-        let url: String
-        if input.hasPrefix("http://") || input.hasPrefix("https://") {
-            url = normalize(input)
-        } else if input.contains(":") && !input.hasPrefix("[") {
-            url = normalize("http://\(input)")
-        } else {
-            url = normalize("https://\(input)")
-        }
+        // normalize handles every shape: a full URL is kept, a bare IP or
+        // IP:port becomes http://…(:5000) — Atlas's plain-HTTP Flask port, the
+        // URL WKWebView can actually load.
+        let url = normalize(input)
         let existing = savedUrls(Self.lanKey)
         if !existing.contains(url) {
             defaults.set(([url] + existing).joined(separator: ","), forKey: Self.lanKey)
@@ -267,7 +263,6 @@ final class AppViewModel: ObservableObject {
             if let gateway { directCandidates.append(gateway) }
             directCandidates.append(contentsOf: lan)
             if !isPending { directCandidates.append(contentsOf: hotspot) }
-            directCandidates.append("https://atlas.local")
             directCandidates.append("http://atlas.local:5000")
             directCandidates = directCandidates.removingDuplicates()
             let directForBackground = directCandidates    // immutable copy for child tasks
@@ -439,7 +434,6 @@ final class AppViewModel: ObservableObject {
             var withGateway: [String] = []
             if let gw = self.networkMonitor.gatewayUrl() { withGateway.append(gw) }
             withGateway.append(contentsOf: urls)
-            withGateway.append("https://atlas.local")
             withGateway.append("http://atlas.local:5000")
             let candidates = withGateway.removingDuplicates()
             let found = await Self.discoverAtlasFast(candidates: candidates)
@@ -555,7 +549,6 @@ final class AppViewModel: ObservableObject {
                 var candidates: [String] = []
                 if let gw = self.networkMonitor.gatewayUrl() { candidates.append(gw) }
                 candidates.append(contentsOf: ordered)
-                candidates.append("https://atlas.local")
                 candidates.append("http://atlas.local:5000")
                 let unique = candidates.removingDuplicates()
                 if let found = await Self.discoverAtlasFast(candidates: unique),
@@ -638,7 +631,6 @@ final class AppViewModel: ObservableObject {
             var candidates: [String] = []
             if let gw = self.networkMonitor.gatewayUrl() { candidates.append(gw) }
             candidates.append(contentsOf: ordered)
-            candidates.append("https://atlas.local")
             candidates.append("http://atlas.local:5000")
             let unique = candidates.removingDuplicates()
 

@@ -196,11 +196,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val input = rawInput.trim()
         if (input.isBlank()) return
         _isLanTransitioning.value = false
-        val url = when {
-            input.startsWith("http://") || input.startsWith("https://") -> normalizeUrl(input)
-            input.contains(":") && !input.startsWith("[")               -> normalizeUrl("http://$input")
-            else                                                        -> normalizeUrl("https://$input")
-        }
+        // normalizeUrl handles every shape: a full URL is kept as-is, a bare IP
+        // or IP:port becomes http://…(:5000) — Atlas's plain-HTTP Flask port,
+        // which is what the WebView can actually load.
+        val url = normalizeUrl(input)
         val existing = savedUrls("lan_urls")
         if (!existing.contains(url)) {
             prefs.edit().putString("lan_urls", (listOf(url) + existing).joinToString(",")).apply()
@@ -458,7 +457,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 // Omit hotspot URLs during a pending transition — the hotspot is
                 // dropping and connecting to it would give a false CONNECTED result.
                 if (!isPending) addAll(hotspot)
-                add("https://atlas.local")
                 add("http://atlas.local:5000")
             }.distinct()
 
@@ -699,7 +697,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 val candidates = buildList {
                     networkMonitor.gatewayUrl()?.let { add(it) }
                     addAll(ordered)
-                    add("https://atlas.local")
                     add("http://atlas.local:5000")
                 }.distinct()
 
@@ -740,7 +737,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 val candidates = buildList {
                     networkMonitor.gatewayUrl()?.let { add(it) }
                     addAll(ordered)
-                    add("https://atlas.local")
                     add("http://atlas.local:5000")
                 }.distinct()
 
@@ -787,7 +783,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 val withGateway = buildList {
                     networkMonitor.gatewayUrl()?.let { add(it) }
                     addAll(urls)
-                    add("https://atlas.local")
                     add("http://atlas.local:5000")
                 }.distinct()
 
@@ -926,7 +921,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun normalizeUrl(url: String): String {
         var u = url.trim()
-        if (!u.startsWith("http://") && !u.startsWith("https://")) u = "https://$u"
+        if (!u.startsWith("http://", ignoreCase = true) &&
+            !u.startsWith("https://", ignoreCase = true)
+        ) {
+            // Schemeless input (manual entry, a bare IP). Atlas's Flask serves
+            // plain HTTP on :5000, so default to http — NOT https. The probe
+            // client trusts all certs and masks the difference, but the WebView
+            // (chromium) cannot load Atlas's missing/self-signed TLS and cancels
+            // the page (onReceivedSslError), which was feeding the crash path.
+            // Insert Atlas's :5000 port after the HOST, before any path —
+            // appending it to the whole string would mangle "ip/path" input
+            // into "http://ip/path:5000". Skip when the host already has a port.
+            val slash = u.indexOf('/')
+            val host  = if (slash < 0) u else u.take(slash)
+            val rest  = if (slash < 0) "" else u.substring(slash)
+            u = "http://" + host + (if (host.contains(":")) "" else ":5000") + rest
+        }
         if (!u.endsWith("/")) u = "$u/"
         return u
     }

@@ -160,13 +160,15 @@ class SetupViewModel(application: Application) : AndroidViewModel(application) {
                 when {
                     raw.startsWith("http://") || raw.startsWith("https://") -> add(raw)
                     else -> {
-                        add("https://$raw")
+                        // http://IP:5000 first — Atlas's plain-HTTP Flask port,
+                        // and the URL the WebView can actually load. https is a
+                        // last-resort fallback (probe client trusts all certs).
                         add("http://$raw:5000")
                         add("http://$raw")
+                        add("https://$raw")
                     }
                 }
                 addAll(hotspotCandidates())
-                add("https://atlas.local")
                 add("http://atlas.local:5000")
             }.distinct()
 
@@ -395,7 +397,6 @@ class SetupViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 responseAccessUrls.forEach { add(it) }
                 addAll(pairedLanCandidates())
-                add("https://atlas.local")
                 add("http://atlas.local:5000")
             }.map { normalizeUrl(it) }
                 .filter { it.isNotBlank() && !isHotspotUrl(it) }
@@ -597,7 +598,20 @@ class SetupViewModel(application: Application) : AndroidViewModel(application) {
     private fun normalizeUrl(url: String): String {
         var u = url.trim()
         if (u.isBlank()) return u
-        if (!u.startsWith("http://") && !u.startsWith("https://")) u = "https://$u"
+        if (!u.startsWith("http://", ignoreCase = true) &&
+            !u.startsWith("https://", ignoreCase = true)
+        ) {
+            // Default schemeless input to http://…:5000, not https. Atlas's
+            // Flask serves plain HTTP on :5000; these URLs get persisted into
+            // lan_urls and loaded by the WebView (chromium), which cannot load
+            // Atlas's missing/self-signed TLS. Insert :5000 after the HOST,
+            // before any path — appending to the whole string would mangle
+            // "ip/path" into "http://ip/path:5000".
+            val slash = u.indexOf('/')
+            val host  = if (slash < 0) u else u.take(slash)
+            val rest  = if (slash < 0) "" else u.substring(slash)
+            u = "http://" + host + (if (host.contains(":")) "" else ":5000") + rest
+        }
         if (!u.endsWith("/")) u = "$u/"
         return u
     }
@@ -632,7 +646,6 @@ class SetupViewModel(application: Application) : AndroidViewModel(application) {
         }.distinct()
         val lanUrls = buildList {
             manifestUrls.filterNot { isHotspotUrl(it) }.forEach { add(it) }
-            add("https://atlas.local")
             add("http://atlas.local:5000")
         }.distinct()
 
@@ -671,7 +684,6 @@ class SetupViewModel(application: Application) : AndroidViewModel(application) {
         val lanUrls = buildList {
             _lanDiscoveredUrl.value?.let { add(it) }
             addAll(lanManifest.filterNot { isHotspotUrl(it) })
-            add("https://atlas.local")
             add("http://atlas.local:5000")
         }.distinct()
 
@@ -691,7 +703,6 @@ class SetupViewModel(application: Application) : AndroidViewModel(application) {
             // 2. Known NetworkManager hotspot gateway IPs
             addAll(hotspotCandidates())
             // 3. mDNS hostname fallback
-            add("https://atlas.local")
             add("http://atlas.local:5000")
         }.distinct()
 
@@ -789,7 +800,6 @@ class SetupViewModel(application: Application) : AndroidViewModel(application) {
         return buildList {
             manifestUrls.filterNot { isHotspotUrl(it) }.forEach { add(it) }
             _lanDiscoveredUrl.value?.let { add(it) }
-            add("https://atlas.local")
             add("http://atlas.local:5000")
         }.distinct()
     }

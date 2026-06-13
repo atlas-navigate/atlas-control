@@ -69,7 +69,20 @@ enum AtlasApiClient {
     /// `normalize` step inside Android's `ApiClient.create*` paths.
     static func normalize(_ baseUrl: String) -> String {
         var s = baseUrl.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !s.hasPrefix("http://") && !s.hasPrefix("https://") { s = "https://" + s }
+        if !s.hasPrefix("http://") && !s.hasPrefix("https://") {
+            // Atlas's Flask serves plain HTTP on :5000; default schemeless input
+            // to http (NOT https) so WKWebView loads it directly. Insert :5000
+            // after the HOST (before any path) when no explicit port is given —
+            // appending to the whole string would mangle "ip/path" input.
+            let host: String
+            let rest: String
+            if let slash = s.firstIndex(of: "/") {
+                host = String(s[..<slash]); rest = String(s[slash...])
+            } else {
+                host = s; rest = ""
+            }
+            s = "http://" + host + (host.contains(":") ? "" : ":5000") + rest
+        }
         if !s.hasSuffix("/") { s += "/" }
         return s
     }

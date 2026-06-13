@@ -131,12 +131,13 @@ final class SetupViewModel: ObservableObject {
             if target.hasPrefix("http://") || target.hasPrefix("https://") {
                 candidates.append(target)
             } else {
-                candidates.append("https://\(target)")
+                // http://IP:5000 first — Atlas's plain-HTTP Flask port and the
+                // URL WKWebView can load. https is a last-resort fallback.
                 candidates.append("http://\(target):5000")
                 candidates.append("http://\(target)")
+                candidates.append("https://\(target)")
             }
             candidates.append(contentsOf: self.hotspotCandidates())
-            candidates.append("https://atlas.local")
             candidates.append("http://atlas.local:5000")
             let unique = candidates.removingDuplicates()
 
@@ -336,7 +337,6 @@ final class SetupViewModel: ObservableObject {
             }
             direct.append(contentsOf: responseAccessUrls)
             direct.append(contentsOf: pairedLanCandidates())
-            direct.append("https://atlas.local")
             direct.append("http://atlas.local:5000")
             let directCandidates = direct
                 .map { AtlasApiClient.normalize($0) }
@@ -522,7 +522,6 @@ final class SetupViewModel: ObservableObject {
             hotspotUrls.append("https://\(ip)/")
         }
         var lanUrls: [String] = manifestUrls.filter { !Self.isHotspotUrl($0) }
-        lanUrls.append("https://atlas.local")
         lanUrls.append("http://atlas.local:5000")
 
         appVm.applySetupResult(
@@ -551,7 +550,6 @@ final class SetupViewModel: ObservableObject {
         var lanUrls: [String] = []
         if let url = lanDiscoveredUrl { lanUrls.append(url) }
         lanUrls.append(contentsOf: lanManifest.filter { !Self.isHotspotUrl($0) })
-        lanUrls.append("https://atlas.local")
         lanUrls.append("http://atlas.local:5000")
 
         appVm.applySetupResult(
@@ -582,7 +580,6 @@ final class SetupViewModel: ObservableObject {
         var candidates: [String] = []
         if let gw = gatewayUrl() { candidates.append(gw) }
         candidates.append(contentsOf: hotspotCandidates())
-        candidates.append("https://atlas.local")
         candidates.append("http://atlas.local:5000")
         let unique = candidates.removingDuplicates()
 
@@ -670,7 +667,6 @@ final class SetupViewModel: ObservableObject {
             ?? []
         var urls: [String] = manifestUrls.filter { !Self.isHotspotUrl($0) }
         if let lan = lanDiscoveredUrl { urls.append(lan) }
-        urls.append("https://atlas.local")
         urls.append("http://atlas.local:5000")
         return urls.removingDuplicates()
     }
