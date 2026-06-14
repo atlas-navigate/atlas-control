@@ -2226,11 +2226,16 @@ ATLAS_DOCS = [
     {
         "title": "AI/ML: Sampling Parameters — Temperature, Top-P, Top-K",
         "tags": (
-            "temperature,top_p,top-p,p-value,k-value,top_k,top-k,sampling,generation,"
+            "temperature,top_p,top-p,p-value,k-value,p value,k value,top_k,top-k,sampling,generation,"
             "genai,generative ai,llm,language model,ai settings,nucleus sampling,"
-            "randomness,creativity,deterministic,softmax,logits,inference,parameters"
+            "randomness,creativity,deterministic,softmax,logits,inference,parameters,ray settings"
         ),
         "content": (
+            "ALIASES USED IN ATLAS CONTROL:\n"
+            "  'temperature' = temperature (controls randomness)\n"
+            "  'p-value' or 'p value' = top_p / Top-P (nucleus sampling cutoff)\n"
+            "  'k-value' or 'k value' = top_k / Top-K (token count cap)\n"
+            "These are Ray's AI generation settings, configurable in Ray → Settings tab.\n\n"
             "These three parameters control how a language model (LLM) chooses its next token during text generation.\n\n"
             "TEMPERATURE\n"
             "Scales the model's probability distribution before sampling.\n"
@@ -2638,7 +2643,11 @@ class AIManager:
                        "venomous", "predator", "encounter", "rattlesnake", "bitten"],
         "trees":      ["tree", "native", "oak", "pine", "maple", "bark", "forest"],
         "atlas_app":  ["atlas", "dashboard", "map page", "mesh page", "ai tab",
-                       "gps page", "connection", "how do i use", "what is atlas"],
+                       "gps page", "connection", "how do i use", "what is atlas",
+                       "top_k", "top_p", "top-k", "top-p", "k-value", "p-value",
+                       "k value", "p value", "nucleus sampling", "sampling parameter",
+                       "temperature setting", "ray setting", "ai setting",
+                       "genai", "llm setting", "generation parameter"],
     }
 
     # Maps category → substrings to look for in a doc's tags field.

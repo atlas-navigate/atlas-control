@@ -235,6 +235,14 @@ def init_db():
     # default value so deliberate user changes are left untouched.
     c.execute("UPDATE ai_settings SET value='1024' WHERE key='num_predict' AND value='512'")
     c.execute("UPDATE ai_settings SET value='5'    WHERE key='rag_top_k'   AND value='3'")
+    # Migrate stale system_prompt: old default caused Ray to open responses with
+    # "As Ray, I am an AI assistant..." and produce verbose multi-option replies.
+    # The identifying phrase is "Try to provide several options" — only the old
+    # default contains it, so custom prompts are left untouched.
+    _OLD_PROMPT_FRAGMENT = "Try to provide several options"
+    row = c.execute("SELECT value FROM ai_settings WHERE key='system_prompt'").fetchone()
+    if row and _OLD_PROMPT_FRAGMENT in row[0]:
+        c.execute("DELETE FROM ai_settings WHERE key='system_prompt'")
     # Embedding-format migration v2: embeddings now include title+tags text
     # prepended to the doc body, which changes every vector. Clear stored
     # embeddings on first boot after this migration so the background re-embedder
@@ -1004,8 +1012,11 @@ AI_DEFAULTS = {
         "1. LIVE DATA sections (SYSTEM STATUS, MESH NETWORK STATE, ALERTS, CURRENT POSITION) — always current and accurate.\n"
         "2. KNOWLEDGE BASE sections — curated reference docs on survival, radio, ballistics, and off-grid topics.\n\n"
         "GUIDELINES:\n"
-        "- Open with the direct answer. Do not begin with 'I am Ray' or any self-introduction unless asked who you are.\n"
-        "- Be concise. Answer general knowledge questions from your training data without hedging about your source.\n\n"
+        "- Open with the direct answer immediately. Never start a response with 'As Ray', 'I am Ray', "
+        "'As an AI', or any variant of a self-introduction — answer the question, not who you are.\n"
+        "- Be concise. One to three sentences for simple questions; a structured list only if the topic genuinely has multiple distinct parts.\n"
+        "- When KNOWLEDGE BASE docs are present, use them as your primary source. Quote specific values and procedures from them.\n"
+        "- Do not hedge or add unnecessary caveats about being an AI or being offline.\n\n"
         + AI_FORMATTING_GUIDE
     ),
     "warmup_on_start": "true",

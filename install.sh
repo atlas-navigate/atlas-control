@@ -1228,6 +1228,14 @@ if s.get('num_predict') in (None, '', '512'):
 # rag_top_k 3→5: retrieve more docs per query so border-case docs aren't missed
 if s.get('rag_top_k') in (None, '', '3'):
     updates['rag_top_k'] = '5'
+# system_prompt: old default caused "As Ray, I am..." self-intros and verbose
+# multi-option replies. Delete the stale row so AI_DEFAULTS takes effect.
+old_prompt = s.get('system_prompt', '')
+if 'Try to provide several options' in old_prompt:
+    conn = database.get_db()
+    conn.execute("DELETE FROM ai_settings WHERE key='system_prompt'")
+    conn.commit()
+    print('Removed stale system_prompt — AI_DEFAULTS will apply')
 # Migrate the embedder to qwen3-embedding:0.6b. nomic (768-dim) and qwen3
 # (1024-dim) vectors are incompatible, so any change wipes stored doc
 # embeddings — the app re-embeds them on next startup.
