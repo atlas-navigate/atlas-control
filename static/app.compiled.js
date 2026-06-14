@@ -3998,6 +3998,7 @@ function showMapUnavailable(container, error) {
 }
 function makeAtlasMap(container, opts = {}) {
   ensurePMTilesProtocol();
+  const mobile = isAtlasMobileClient();
   try {
     var _opts$center, _opts$zoom;
     return new maplibregl.Map({
@@ -4008,7 +4009,10 @@ function makeAtlasMap(container, opts = {}) {
       maxZoom: 19,
       attributionControl: true,
       dragRotate: false,
-      touchZoomRotate: true
+      touchZoomRotate: true,
+      // Cap tile cache on mobile to avoid OOM in Android WebView renderer
+      maxTileCacheSize: mobile ? 50 : 512,
+      fadeDuration: mobile ? 0 : 300
     });
   } catch (err) {
     console.error('[atlas-map] init failed:', err);
