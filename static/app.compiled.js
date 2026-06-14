@@ -5050,6 +5050,575 @@ function drawTopology(canvas, topo) {
 }
 
 // ═══════════════════════════════════════════════
+// Knowledge Map — SVG radial graph of knowledge categories + docs
+// ═══════════════════════════════════════════════
+function KnowledgeMap() {
+  const [data, setData] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+  const [selected, setSelected] = React.useState(null); // node id
+  const [hoveredNode, setHoveredNode] = React.useState(null); // node id
+  const [docContent, setDocContent] = React.useState(null); // {id, content, tags} or null
+  const [docLoading, setDocLoading] = React.useState(false);
+  const [reading, setReading] = React.useState(false); // show doc reader vs connections
+  const [positions, setPositions] = React.useState({}); // {id: {x,y}} drag overrides
+  const [isDragging, setIsDragging] = React.useState(false);
+  const dragRef = React.useRef(null);
+  const svgRef = React.useRef(null);
+  React.useEffect(() => {
+    fetch('/api/ai/knowledge-map').then(r => r.json()).then(d => {
+      setData(d);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
+  const W = 560,
+    H = 480,
+    CX = W / 2,
+    CY = H / 2 - 10,
+    OUTER_R = 190,
+    INNER_R = 32;
+  const {
+    catGroups,
+    catCenters,
+    basePosMap
+  } = React.useMemo(() => {
+    if (!data) return {
+      catGroups: {},
+      catCenters: {},
+      basePosMap: {}
+    };
+    const cg = {};
+    data.nodes.forEach(n => {
+      if (!cg[n.category]) cg[n.category] = {
+        color: n.color,
+        label: n.cat_label,
+        docs: []
+      };
+      cg[n.category].docs.push(n);
+    });
+    const cats = Object.keys(cg);
+    const cc = {},
+      bp = {};
+    cats.forEach((cat, ci) => {
+      const angle = 2 * Math.PI * ci / cats.length - Math.PI / 2;
+      const ox = CX + OUTER_R * Math.cos(angle);
+      const oy = CY + OUTER_R * Math.sin(angle);
+      cc[cat] = {
+        x: ox,
+        y: oy
+      };
+      cg[cat].docs.forEach((doc, di) => {
+        const da = cg[cat].docs.length > 1 ? 2 * Math.PI * di / cg[cat].docs.length : 0;
+        bp[doc.id] = {
+          x: ox + INNER_R * Math.cos(da),
+          y: oy + INNER_R * Math.sin(da)
+        };
+      });
+    });
+    return {
+      catGroups: cg,
+      catCenters: cc,
+      basePosMap: bp
+    };
+  }, [data]);
+  const edgeMap = React.useMemo(() => {
+    if (!data) return {};
+    const m = {};
+    (data.edges || []).forEach(e => {
+      if (!m[e.from]) m[e.from] = [];
+      if (!m[e.to]) m[e.to] = [];
+      m[e.from].push({
+        otherId: e.to,
+        weight: e.weight
+      });
+      m[e.to].push({
+        otherId: e.from,
+        weight: e.weight
+      });
+    });
+    return m;
+  }, [data]);
+  const getPos = id => positions[id] || basePosMap[id] || {
+    x: CX,
+    y: CY
+  };
+  const connectedSet = React.useMemo(() => selected ? new Set((edgeMap[selected] || []).map(e => e.otherId)) : null, [selected, edgeMap]);
+  const connectedEdges = React.useMemo(() => selected ? (edgeMap[selected] || []).slice().sort((a, b) => b.weight - a.weight) : [], [selected, edgeMap]);
+
+  // Fetch doc content when selection changes
+  React.useEffect(() => {
+    if (!selected) {
+      setDocContent(null);
+      setReading(false);
+      return;
+    }
+    setDocLoading(true);
+    fetch(`/api/ai/documents/${selected}`).then(r => r.json()).then(d => {
+      setDocContent(d);
+      setDocLoading(false);
+    }).catch(() => setDocLoading(false));
+  }, [selected]);
+  const edgeColor = w => {
+    const t = Math.max(0, Math.min(1, (w - 0.55) / 0.45));
+    return `rgb(${Math.round(148 + 97 * t)},${Math.round(163 - 5 * t)},${Math.round(184 - 173 * t)})`;
+  };
+
+  // Drag — use a ref so mousemove handler never goes stale
+  const onNodeMouseDown = (e, nodeId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!svgRef.current) return;
+    const rect = svgRef.current.getBoundingClientRect();
+    const pos = getPos(nodeId);
+    dragRef.current = {
+      id: nodeId,
+      mx0: e.clientX,
+      my0: e.clientY,
+      ox: pos.x,
+      oy: pos.y,
+      sx: W / rect.width,
+      sy: H / rect.height,
+      moved: false
+    };
+  };
+  const onSVGMouseMove = e => {
+    const d = dragRef.current;
+    if (!d) return;
+    const dx = (e.clientX - d.mx0) * d.sx,
+      dy = (e.clientY - d.my0) * d.sy;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+      d.moved = true;
+      setIsDragging(true);
+      setPositions(p => ({
+        ...p,
+        [d.id]: {
+          x: d.ox + dx,
+          y: d.oy + dy
+        }
+      }));
+    }
+  };
+  const onSVGMouseUp = () => {
+    const d = dragRef.current;
+    if (d) {
+      if (!d.moved) {
+        // Pure click — toggle selection
+        setSelected(prev => prev === d.id ? null : d.id);
+        setReading(false);
+      }
+      dragRef.current = null;
+      setIsDragging(false);
+    }
+  };
+  if (loading) return /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: 'var(--text-muted)',
+      fontSize: 13,
+      padding: '20px 0'
+    }
+  }, "Loading knowledge map\u2026");
+  if (!data) return /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: 'var(--accent-red, #f87171)',
+      fontSize: 13
+    }
+  }, "Failed to load map.");
+  if (!data.nodes.length) return /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: 'var(--text-muted)',
+      fontSize: 13
+    }
+  }, "No documents indexed yet.");
+  const noEdges = !data.edges || data.edges.length === 0;
+  const cats = Object.keys(catGroups);
+  const selectedNode = selected ? data.nodes.find(n => n.id === selected) : null;
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 8
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      fontWeight: 700,
+      color: 'var(--text-muted)',
+      letterSpacing: '0.08em',
+      textTransform: 'uppercase'
+    }
+  }, "Knowledge Map"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 10,
+      alignItems: 'center'
+    }
+  }, Object.keys(positions).length > 0 && /*#__PURE__*/React.createElement("button", {
+    onClick: () => setPositions({}),
+    style: {
+      fontSize: 11,
+      color: 'var(--text-muted)',
+      background: 'none',
+      border: 'none',
+      cursor: 'pointer',
+      padding: 0
+    }
+  }, "Reset layout"), selected && /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      setSelected(null);
+      setReading(false);
+    },
+    style: {
+      fontSize: 11,
+      color: 'var(--text-muted)',
+      background: 'none',
+      border: 'none',
+      cursor: 'pointer',
+      padding: 0
+    }
+  }, "\u2715 Clear"))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: 'var(--text-muted)',
+      marginBottom: 12
+    }
+  }, data.nodes.length, " docs \xB7 ", data.edges.length, " connections \xB7 Drag to reposition \xB7 Click to explore"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 16,
+      flexWrap: 'wrap',
+      alignItems: 'flex-start'
+    }
+  }, /*#__PURE__*/React.createElement("svg", {
+    ref: svgRef,
+    width: W,
+    height: H,
+    style: {
+      background: 'var(--bg-card, #1a1f2e)',
+      borderRadius: 8,
+      flexShrink: 0,
+      cursor: isDragging ? 'grabbing' : 'default'
+    },
+    onMouseMove: onSVGMouseMove,
+    onMouseUp: onSVGMouseUp,
+    onMouseLeave: onSVGMouseUp
+  }, cats.map(cat => {
+    const {
+      x,
+      y
+    } = catCenters[cat];
+    const {
+      color,
+      label
+    } = catGroups[cat];
+    const hasConnected = selected && (edgeMap[selected] || []).some(e => {
+      const other = data.nodes.find(n => n.id === e.otherId);
+      return other && other.category === cat;
+    });
+    const dimCat = selected && selectedNode && selectedNode.category !== cat && !hasConnected;
+    return /*#__PURE__*/React.createElement("g", {
+      key: cat
+    }, /*#__PURE__*/React.createElement("circle", {
+      cx: x,
+      cy: y,
+      r: INNER_R + 4,
+      fill: color,
+      fillOpacity: dimCat ? 0.03 : 0.08,
+      stroke: color,
+      strokeOpacity: dimCat ? 0.12 : 0.35,
+      strokeWidth: 1
+    }), /*#__PURE__*/React.createElement("text", {
+      x: x,
+      y: y - INNER_R - 7,
+      textAnchor: "middle",
+      fontSize: 9,
+      fontWeight: 600,
+      fill: color,
+      fillOpacity: dimCat ? 0.25 : 0.9,
+      style: {
+        pointerEvents: 'none',
+        userSelect: 'none'
+      }
+    }, label));
+  }), (data.edges || []).map((e, i) => {
+    const a = getPos(e.from),
+      b = getPos(e.to);
+    if (!a || !b) return null;
+    const isHighlit = selected && (e.from === selected || e.to === selected);
+    const isDimmed = selected && !isHighlit;
+    return /*#__PURE__*/React.createElement("line", {
+      key: i,
+      x1: a.x,
+      y1: a.y,
+      x2: b.x,
+      y2: b.y,
+      stroke: isHighlit ? edgeColor(e.weight) : '#6b7280',
+      strokeWidth: isHighlit ? 1 + e.weight * 1.5 : 0.8,
+      strokeOpacity: isDimmed ? 0.04 : isHighlit ? 0.85 : 0.18,
+      style: {
+        pointerEvents: 'none'
+      }
+    });
+  }), data.nodes.map(n => {
+    const pos = getPos(n.id);
+    if (!pos) return null;
+    const isSel = n.id === selected;
+    const isConn = connectedSet && connectedSet.has(n.id);
+    const isDim = selected && !isSel && !isConn;
+    return /*#__PURE__*/React.createElement("g", {
+      key: n.id,
+      style: {
+        cursor: 'grab'
+      },
+      onMouseDown: ev => onNodeMouseDown(ev, n.id),
+      onMouseEnter: () => setHoveredNode(n.id),
+      onMouseLeave: () => setHoveredNode(null)
+    }, isSel && /*#__PURE__*/React.createElement("circle", {
+      cx: pos.x,
+      cy: pos.y,
+      r: 13,
+      fill: "none",
+      stroke: n.color,
+      strokeWidth: 1.5,
+      strokeOpacity: 0.45
+    }), /*#__PURE__*/React.createElement("circle", {
+      cx: pos.x,
+      cy: pos.y,
+      r: isSel ? 7 : isConn ? 6 : 5,
+      fill: n.color,
+      fillOpacity: isDim ? 0.15 : isSel ? 1 : isConn ? 0.92 : 0.72,
+      stroke: isSel ? '#ffffff' : n.color,
+      strokeWidth: isSel ? 2 : isConn ? 1.5 : 0.5,
+      strokeOpacity: isDim ? 0.2 : 1
+    }));
+  }), hoveredNode && (() => {
+    const pos = getPos(hoveredNode);
+    const node = data.nodes.find(n => n.id === hoveredNode);
+    if (!node || !pos) return null;
+    const label = node.title.length > 32 ? node.title.slice(0, 30) + '…' : node.title;
+    const tw = label.length * 6.2 + 16;
+    const tx = Math.max(4, Math.min(pos.x - tw / 2, W - tw - 4));
+    const ty = pos.y > 36 ? pos.y - 26 : pos.y + 16;
+    return /*#__PURE__*/React.createElement("g", {
+      style: {
+        pointerEvents: 'none'
+      }
+    }, /*#__PURE__*/React.createElement("rect", {
+      x: tx,
+      y: ty - 14,
+      width: tw,
+      height: 18,
+      rx: 4,
+      fill: "#0f172a",
+      fillOpacity: 0.93
+    }), /*#__PURE__*/React.createElement("text", {
+      x: tx + tw / 2,
+      y: ty - 2,
+      textAnchor: "middle",
+      fontSize: 10,
+      fill: "#e2e8f0",
+      style: {
+        userSelect: 'none'
+      }
+    }, label));
+  })()), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      minWidth: 180,
+      maxWidth: 280
+    }
+  }, selectedNode ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'var(--bg-card)',
+      borderRadius: 8,
+      padding: 14,
+      border: `1.5px solid ${selectedNode.color}40`
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      fontWeight: 700,
+      color: selectedNode.color,
+      textTransform: 'uppercase',
+      marginBottom: 4
+    }
+  }, selectedNode.cat_label), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: 'var(--text-primary)',
+      fontWeight: 600,
+      marginBottom: 10,
+      lineHeight: 1.4
+    }
+  }, selectedNode.title), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      marginBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => setReading(false),
+    style: {
+      fontSize: 11,
+      padding: '3px 10px',
+      borderRadius: 4,
+      border: 'none',
+      cursor: 'pointer',
+      background: !reading ? selectedNode.color : 'rgba(255,255,255,0.06)',
+      color: !reading ? '#fff' : 'var(--text-muted)'
+    }
+  }, "Related (", connectedEdges.length, ")"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setReading(true),
+    style: {
+      fontSize: 11,
+      padding: '3px 10px',
+      borderRadius: 4,
+      border: 'none',
+      cursor: 'pointer',
+      background: reading ? selectedNode.color : 'rgba(255,255,255,0.06)',
+      color: reading ? '#fff' : 'var(--text-muted)'
+    }
+  }, "Read")), reading ?
+  /*#__PURE__*/
+  /* Document reader */
+  React.createElement("div", null, docLoading && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: 'var(--text-muted)'
+    }
+  }, "Loading\u2026"), docContent && !docLoading && /*#__PURE__*/React.createElement("div", null, docContent.tags && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: 'var(--text-muted)',
+      marginBottom: 8,
+      fontStyle: 'italic'
+    }
+  }, docContent.tags), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: 'var(--text-primary)',
+      lineHeight: 1.65,
+      whiteSpace: 'pre-wrap',
+      maxHeight: 340,
+      overflowY: 'auto',
+      padding: '8px 10px',
+      borderRadius: 6,
+      background: 'rgba(255,255,255,0.03)',
+      border: '1px solid rgba(255,255,255,0.06)'
+    }
+  }, docContent.content))) : ( /* Connections list */
+  connectedEdges.length > 0 ? /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: 'var(--text-muted)',
+      textTransform: 'uppercase',
+      letterSpacing: '0.06em',
+      marginBottom: 8
+    }
+  }, "Similarity"), connectedEdges.map(({
+    otherId,
+    weight
+  }) => {
+    const other = data.nodes.find(n => n.id === otherId);
+    if (!other) return null;
+    return /*#__PURE__*/React.createElement("div", {
+      key: otherId,
+      onClick: () => {
+        setSelected(otherId);
+        setReading(false);
+      },
+      style: {
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 6,
+        marginBottom: 8,
+        cursor: 'pointer',
+        padding: '4px 6px',
+        borderRadius: 5,
+        transition: 'background 0.1s'
+      },
+      onMouseEnter: ev => ev.currentTarget.style.background = 'rgba(255,255,255,0.05)',
+      onMouseLeave: ev => ev.currentTarget.style.background = 'transparent'
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 10,
+        fontWeight: 700,
+        color: edgeColor(weight),
+        minWidth: 30,
+        paddingTop: 1
+      }
+    }, Math.round(weight * 100), "%"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        color: 'var(--text-primary)',
+        lineHeight: 1.35
+      }
+    }, other.title), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 10,
+        color: other.color,
+        marginTop: 1
+      }
+    }, other.cat_label)));
+  })) : /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: 'var(--text-muted)'
+    }
+  }, noEdges ? 'Embeddings still loading — check back in a few minutes.' : 'No connections above similarity threshold.'))) :
+  /*#__PURE__*/
+  /* Legend when nothing selected */
+  React.createElement("div", {
+    style: {
+      background: 'var(--bg-card)',
+      borderRadius: 8,
+      padding: 14,
+      fontSize: 12,
+      color: 'var(--text-muted)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 600,
+      marginBottom: 10
+    }
+  }, "Topic clusters"), cats.map(cat => /*#__PURE__*/React.createElement("div", {
+    key: cat,
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 6,
+      marginBottom: 5
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: 8,
+      height: 8,
+      borderRadius: '50%',
+      background: catGroups[cat].color,
+      flexShrink: 0
+    }
+  }), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11
+    }
+  }, catGroups[cat].label, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#4b5563'
+    }
+  }, " (", catGroups[cat].docs.length, ")")))), noEdges && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 12,
+      padding: '8px 10px',
+      borderRadius: 6,
+      background: 'rgba(245,158,11,0.08)',
+      border: '1px solid rgba(245,158,11,0.2)',
+      fontSize: 11,
+      color: '#f59e0b',
+      lineHeight: 1.5
+    }
+  }, "Re-embedding in progress \u2014 similarity lines appear when complete.")))));
+}
+
+// ═══════════════════════════════════════════════
 // AI Page — RAG + Multi-Chat
 // ═══════════════════════════════════════════════
 function AIPage() {
@@ -6183,7 +6752,7 @@ function AIPage() {
       ...inputStyle,
       width: 80
     },
-    value: settings.rag_top_k || '3',
+    value: settings.rag_top_k || '5',
     onChange: e => setSettings(p => ({
       ...p,
       rag_top_k: e.target.value
@@ -6209,7 +6778,12 @@ function AIPage() {
       color: 'var(--text-primary)',
       cursor: 'pointer'
     }
-  }, "Inject mesh network context (nodes + recent messages)")))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, "Inject mesh network context (nodes + recent messages)")))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      borderTop: '1px solid var(--border-color, #2a3040)',
+      paddingTop: 16
+    }
+  }, /*#__PURE__*/React.createElement(KnowledgeMap, null)), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       fontWeight: 700,
@@ -6306,7 +6880,7 @@ function AIPage() {
       ...inputStyle,
       width: '100%'
     },
-    value: (_settings$num_predict = settings.num_predict) !== null && _settings$num_predict !== void 0 ? _settings$num_predict : '512',
+    value: (_settings$num_predict = settings.num_predict) !== null && _settings$num_predict !== void 0 ? _settings$num_predict : '1024',
     onChange: e => setSettings(p => ({
       ...p,
       num_predict: e.target.value

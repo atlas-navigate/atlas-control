@@ -2289,17 +2289,22 @@ RAY_SELF_DOC = {
         "by Ollama, kept warm in VRAM with hybrid-thinking disabled for instant responses.\n"
         "2. INDEXING (how I learn) — my knowledge base is a set of curated reference documents "
         "(survival, comms, ballistics, first aid, Atlas Control usage, and this self-description) "
-        "stored in SQLite. At startup, each document is converted into a 1024-dim embedding vector "
-        "by the qwen3-embedding:0.6b model. The vector is a numeric fingerprint of the document's meaning, "
-        "stored alongside the text. Edited docs are automatically re-embedded.\n"
+        "stored in SQLite. At startup, each document is embedded as 'title + tags + content' by "
+        "qwen3-embedding:0.6b, producing a 1024-dim vector that captures both the metadata keywords "
+        "and the prose meaning. The vector is stored alongside the text. Edited docs and docs with "
+        "cleared embeddings are automatically re-embedded in a background thread.\n"
         "3. ROUTING (how I classify your question) — before I generate anything, fast keyword "
         "scanners decide what your message needs: live dashboard data, GPS/location grounding, "
         "math, physics/ballistics, or knowledge-base retrieval. Routing costs near-zero time and "
         "decides which of my subsystems wake up.\n"
-        "4. RETRIEVAL (RAG) — for knowledge questions, your message is embedded with the same "
-        "embedding model, then compared to every document vector by cosine similarity. The top 3 "
-        "documents scoring at least 0.30 are pasted into my context. Live-data questions skip this "
-        "step because the answer is already injected fresh.\n"
+        "4. RETRIEVAL (RAG) — for knowledge questions, your message is embedded with a query-instruction "
+        "prefix, then compared to every document by cosine similarity. Each document is indexed as "
+        "'title + tags + content' (embedding format v2) so metadata keywords are part of the "
+        "fingerprint. A topic router classifies the query's category (wildlife, medical, ballistics, "
+        "etc.) and applies a +8% score boost to docs whose tags match, so the right cluster surfaces "
+        "even when scores are close. The top 5 docs scoring ≥ 0.45 are pasted into my context. The "
+        "confidence footer uses the raw pre-boost cosine score so it cannot be inflated. "
+        "Live-data questions skip this step because the answer is already injected fresh.\n"
         "5. CONTEXT ASSEMBLY — my working memory for each reply is built from: current system "
         "stats (CPU/GPU/RAM/temps/power), my GPS fix reverse-geocoded to the nearest city (offline, "
         "from 41k US ZIP centroids + 68k world cities), live mesh state (nodes, channels, recent "
@@ -2315,6 +2320,11 @@ RAY_SELF_DOC = {
         "8. CONFIDENCE — every answer ends with a footer I cannot fake: HIGH/MEDIUM/LOW plus the "
         "actual sources used (Live Mesh Data, Knowledge Base + match score, GPS Fix, System Stats, "
         "or Training Knowledge). It is computed from what was really injected, not from my opinion.\n\n"
+        "KNOWLEDGE MAP — the Ray AI → Settings tab shows an interactive SVG visualization of my "
+        "55 knowledge documents. Nodes are colored by topic cluster; edges connect docs whose "
+        "cosine similarity is ≥ 0.55 (up to 6 per node, edge color shifts slate→amber with "
+        "similarity). Click a node to highlight its connections, see a ranked 'Related' list, or "
+        "switch to the 'Read' tab to view the full document text. Nodes can be dragged to reposition.\n\n"
         "MY MEMORY: conversations live in SQLite; I see the last 8 messages of the active chat. "
         "Document embeddings are cached in RAM for 120 s. I have no memory across separate chats.\n\n"
         "MY LIMITS: routing is keyword-based, so oddly-phrased questions can take the wrong path; "
@@ -2371,11 +2381,12 @@ except ImportError:
 # AIManager
 # ---------------------------------------------------------------------------
 _DOC_EMB_CACHE_TTL = 120  # seconds — refresh cached doc embeddings
-# Cosine similarity threshold — discard retrieved chunks below this.
-# Calibrated for qwen3-embedding:0.6b, whose cosine scores cluster much higher
-# than nomic's: on-topic queries top out at 0.48–0.70, off-topic noise at
-# ≤0.40. 0.45 sits in that gap. (nomic's old value was 0.30; do NOT reuse it —
-# at 0.30 every query, including nonsense, retrieves docs.)
+# Cosine similarity threshold — discard retrieved docs below this score.
+# Calibrated for qwen3-embedding:0.6b with embedding format v2 (title+tags+content):
+# on-topic queries score 0.48–0.85+, off-topic noise stays ≤0.40. 0.45 sits
+# comfortably above the noise floor. The confidence footer uses the raw pre-boost
+# cosine score, so it cannot be inflated by the +8% topic-router boost.
+# (nomic's old value was 0.30; do NOT reuse it — at 0.30 every query retrieves docs.)
 _RAG_MIN_SCORE = 0.45
 
 
@@ -2574,7 +2585,13 @@ class AIManager:
         for doc in docs:
             if not doc.get("embedding"):
                 try:
-                    emb = self.get_embed(doc["content"])
+                    # Prepend title and tags so keyword-rich metadata improves
+                    # cosine matching (e.g. "rattlesnake" in tags boosts recall
+                    # for specific queries that the full-body average would dilute).
+                    tags = doc.get("tags") or ""
+                    embed_text = (f"{doc['title']}\n{tags}\n\n{doc['content']}"
+                                  if tags else f"{doc['title']}\n\n{doc['content']}")
+                    emb = self.get_embed(embed_text)
                     db.ai_update_document_embedding(doc["id"], json.dumps(emb))
                     logger.info(f"Embedded doc id={doc['id']}: {doc['title']}")
                 except Exception as e:
@@ -2589,6 +2606,76 @@ class AIManager:
         "Given a question, retrieve survival, radio, navigation, and Atlas "
         "Control reference passages that answer it"
     )
+
+    # ── Topic router ───────────────────────────────────────────────────────────
+    # Keyword substrings that signal a query belongs to each knowledge category.
+    # Used by _classify_query_category() to give matching docs a small score
+    # bonus in rag_search() so the right cluster surfaces first.
+    _QUERY_CATEGORY_KEYS: dict = {
+        "water":      ["water", "purif", "drink", "hydrat", "stream", "filter", "boil"],
+        "fire":       ["fire", "tinder", "ignit", "spark", "flame", "campfire"],
+        "shelter":    ["shelter", "bivouac", "tarp", "insul", "sleep", "tent"],
+        "food":       ["food", "forag", "edible", "plant", "mushroom", "calor",
+                       "garden", "crop", "livestock", "harvest", "berr"],
+        "medical":    ["medic", "first aid", "wound", "bleed", "hemorrh", "tourni",
+                       "cpr", "shock", "airway", "infect", "fractur", "burn",
+                       "hypotherm", "trauma", "bite", "sting", "inject"],
+        "navigation": ["navigat", "compass", "bearing", "azimuth", "landmark", "orienteer"],
+        "comms":      ["mesh", "meshtastic", "radio", "frequen", "communic",
+                       "gmrs", "amateur", "transmi", "antenna"],
+        "power":      ["power", "batter", "solar", "generat", "watt", "volt", "charge"],
+        "security":   ["security", "opsec", "patrol", "defense", "threat", "surveil"],
+        "ballistics": ["ballistic", "moa", "mil", "bullet drop", "wind drift",
+                       "scope click", "dope", "hold over"],
+        "firearms":   ["firearm", "rifle", "pistol", "handgun", "malfunction",
+                       "caliber", "ammunition", "trigger", "clean"],
+        "grid_down":  ["grid-down", "grid down", "collapse", "shtf", "barter",
+                       "trade goods", "sustain", "long-term survival", "community defense"],
+        "vehicles":   ["vehicle", "fuel", "oil change", "tire", "off-road", "recover",
+                       "engine", "mainten"],
+        "wildlife":   ["wildlife", "animal", "snake", "bear", "mountain lion", "wolf",
+                       "spider", "scorpion", "tick", "rabies", "alligator", "shark",
+                       "venomous", "predator", "encounter", "rattlesnake", "bitten"],
+        "trees":      ["tree", "native", "oak", "pine", "maple", "bark", "forest"],
+        "atlas_app":  ["atlas", "dashboard", "map page", "mesh page", "ai tab",
+                       "gps page", "connection", "how do i use", "what is atlas"],
+    }
+
+    # Maps category → substrings to look for in a doc's tags field.
+    _DOC_CATEGORY_TAGS: dict = {
+        "water":      ["water", "purif", "hydrat"],
+        "fire":       ["fire", "tinder"],
+        "shelter":    ["shelter", "bivouac"],
+        "food":       ["food", "forag", "edible", "calor", "garden", "livestock"],
+        "medical":    ["medic", "trauma", "hemorrh", "wound", "first aid"],
+        "navigation": ["navigat", "compass", "land nav"],
+        "comms":      ["mesh", "meshtastic", "radio", "amateur"],
+        "power":      ["power", "batter", "solar"],
+        "security":   ["security", "opsec"],
+        "ballistics": ["ballistic", "moa", "mil", "drop", "wind"],
+        "firearms":   ["firearm", "rifle", "pistol", "caliber", "malfunction"],
+        "grid_down":  ["grid", "collapse", "barter", "sustain"],
+        "vehicles":   ["vehicle", "fuel", "maintenance"],
+        "wildlife":   ["wildlife", "snake", "bear", "spider", "venomous",
+                       "rabies", "alligator"],
+        "trees":      ["tree", "native", "species"],
+        "atlas_app":  ["atlas", "app", "ray", "dashboard"],
+    }
+
+    def _classify_query_category(self, query: str):
+        """Return the best-matching topic category slug for a query, or None.
+
+        Counts lowercase substring hits per category; returns None when no
+        category has at least one match (full-corpus search is safest when
+        the query is ambiguous).
+        """
+        q = query.lower()
+        best_cat, best_hits = None, 0
+        for cat, keywords in self._QUERY_CATEGORY_KEYS.items():
+            hits = sum(1 for kw in keywords if kw in q)
+            if hits > best_hits:
+                best_cat, best_hits = cat, hits
+        return best_cat if best_hits >= 1 else None
 
     def _embed_input(self, embed_model, text, is_query):
         """Apply model-specific input formatting before embedding.
@@ -2989,7 +3076,7 @@ class AIManager:
             return ""
 
     # ------------------------------------------------------------------
-    def rag_search(self, query, top_k=3, embed_model=None):
+    def rag_search(self, query, top_k=5, embed_model=None):
         """Return (docs, top_score) for the query using cosine similarity.
 
         docs      — list of matching doc dicts (up to top_k, score >= _RAG_MIN_SCORE)
@@ -3016,8 +3103,22 @@ class AIManager:
         if not usable:
             return [], 0.0
         scored = [(cosine_similarity(query_emb, emb), doc) for doc, emb in usable]
+        # Capture raw top score before boost so the confidence footer reflects
+        # actual cosine similarity (not the inflated boosted value).
         scored.sort(key=lambda x: x[0], reverse=True)
         top_score = scored[0][0] if scored else 0.0
+        # Topic-router boost: detect the query's category and give matching docs
+        # a small edge (+8%) so the right cluster surfaces even when border-case
+        # scores are close (e.g. "what do I do if bitten by a rattlesnake?" should
+        # preferentially pull wildlife docs over general medical docs).
+        cat = self._classify_query_category(query)
+        if cat:
+            cat_tag_hints = self._DOC_CATEGORY_TAGS.get(cat, [])
+            def _in_cat(doc):
+                tags_lower = (doc.get("tags") or "").lower()
+                return any(t in tags_lower for t in cat_tag_hints)
+            scored = [(s * 1.08 if _in_cat(doc) else s, doc) for s, doc in scored]
+            scored.sort(key=lambda x: x[0], reverse=True)
         scored = [(s, doc) for s, doc in scored if s >= _RAG_MIN_SCORE]
         return [doc for _, doc in scored[:top_k]], top_score
 

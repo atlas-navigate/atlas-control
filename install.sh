@@ -1222,6 +1222,12 @@ if s.get('model') in (None, '', 'llama3.2:3b', 'qwen3:4b', 'qwen2.5:3b', 'qwen3.
 # Stale 2048-token context truncates the system prompt once RAG + history land
 if s.get('num_ctx') == '2048':
     updates['num_ctx'] = '4096'
+# Stale 512-token limit causes mid-sentence truncation; raise to 1024
+if s.get('num_predict') in (None, '', '512'):
+    updates['num_predict'] = '1024'
+# rag_top_k 3→5: retrieve more docs per query so border-case docs aren't missed
+if s.get('rag_top_k') in (None, '', '3'):
+    updates['rag_top_k'] = '5'
 # Migrate the embedder to qwen3-embedding:0.6b. nomic (768-dim) and qwen3
 # (1024-dim) vectors are incompatible, so any change wipes stored doc
 # embeddings — the app re-embeds them on next startup.
@@ -1232,6 +1238,16 @@ if s.get('embed_model') in (None, '', 'nomic-embed-text'):
         n = conn.execute('UPDATE ai_documents SET embedding=NULL').rowcount
         conn.commit()
         print(f'Cleared {n} stale doc embedding(s) for re-embed')
+# embed_format_v 1→2: embeddings now include title+tags prefix so metadata
+# keywords are part of the semantic fingerprint. init_db() handles the
+# migration and embedding wipe; this block just surfaces it in install logs.
+if s.get('embed_format_v') not in ('2',):
+    conn = database.get_db()
+    n = conn.execute("UPDATE ai_documents SET embedding=NULL WHERE embedding IS NOT NULL").rowcount
+    conn.commit()
+    conn.execute("INSERT INTO ai_settings (key, value) VALUES ('embed_format_v', '2') ON CONFLICT(key) DO UPDATE SET value='2'")
+    conn.commit()
+    print(f'embed_format_v→2: cleared {n} doc embedding(s) for title+tags re-embed')
 if updates:
     database.ai_set_settings(updates)
     print(f'Updated AI defaults: {updates}')

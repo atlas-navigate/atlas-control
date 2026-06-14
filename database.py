@@ -229,6 +229,22 @@ def init_db():
             value TEXT
         )
     """)
+    # Migrate stale ai_settings: num_predict 512→1024, rag_top_k 3→5.
+    # These were the old code defaults that got persisted to the DB; override
+    # them now that AI_DEFAULTS has been bumped. Only migrates the exact old
+    # default value so deliberate user changes are left untouched.
+    c.execute("UPDATE ai_settings SET value='1024' WHERE key='num_predict' AND value='512'")
+    c.execute("UPDATE ai_settings SET value='5'    WHERE key='rag_top_k'   AND value='3'")
+    # Embedding-format migration v2: embeddings now include title+tags text
+    # prepended to the doc body, which changes every vector. Clear stored
+    # embeddings on first boot after this migration so the background re-embedder
+    # picks them all up with the new format.
+    if not c.execute("SELECT 1 FROM ai_settings WHERE key='embed_format_v' AND value='2'").fetchone():
+        c.execute("UPDATE ai_documents SET embedding=NULL")
+        c.execute(
+            "INSERT INTO ai_settings (key, value) VALUES ('embed_format_v', '2') "
+            "ON CONFLICT(key) DO UPDATE SET value='2'"
+        )
 
     # ── Waypoints ──────────────────────────────────────────────────────
     c.execute("""
@@ -874,6 +890,16 @@ def ai_get_document_count():
     return db.execute("SELECT COUNT(*) FROM ai_documents").fetchone()[0]
 
 
+def ai_get_document(doc_id):
+    """Return a single document by id (without embedding), or None."""
+    db = get_db()
+    row = db.execute(
+        "SELECT id, title, content, tags, created_at, is_seed FROM ai_documents WHERE id=?",
+        (doc_id,)
+    ).fetchone()
+    return dict(row) if row else None
+
+
 def ai_get_documents():
     """Return all documents without the embedding field (for display)."""
     db = get_db()
@@ -985,7 +1011,7 @@ AI_DEFAULTS = {
     "warmup_on_start": "true",
     "keep_alive_hours": "10",
     "rag_enabled": "true",
-    "rag_top_k": "3",
+    "rag_top_k": "5",
     "inject_mesh_context": "true",
     "num_ctx": "4096",
     "num_gpu": "-1",      # -1 = let Ollama auto-place layers (forced counts hard-fail on tight RAM)

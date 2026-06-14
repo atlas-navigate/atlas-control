@@ -1123,6 +1123,13 @@ def api_ai_documents_create():
         threading.Thread(target=_embed, daemon=True).start()
     return jsonify({"ok": True, "id": doc_id})
 
+@app.route("/api/ai/documents/<int:doc_id>", methods=["GET"])
+def api_ai_documents_get(doc_id):
+    doc = db.ai_get_document(doc_id)
+    if not doc:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(doc)
+
 @app.route("/api/ai/documents/<int:doc_id>", methods=["DELETE"])
 def api_ai_documents_delete(doc_id):
     db.ai_delete_document(doc_id)
@@ -1153,6 +1160,99 @@ def api_ai_warmup():
         return jsonify({"error": "AI manager not initialized"}), 503
     threading.Thread(target=ai_manager._warmup, daemon=True).start()
     return jsonify({"ok": True, "message": "Warmup triggered in background"})
+
+# Category metadata for the knowledge-map endpoint and UI visualisation.
+_KM_CATEGORIES = {
+    "water_fire":  {"label": "Water & Fire",       "color": "#06b6d4",
+                    "tags": ["water", "purif", "fire", "tinder"]},
+    "shelter":     {"label": "Shelter",             "color": "#a16207",
+                    "tags": ["shelter", "bivouac"]},
+    "food":        {"label": "Food & Foraging",     "color": "#22c55e",
+                    "tags": ["food", "forag", "edible", "calor", "garden", "livestock"]},
+    "medical":     {"label": "Medical / Trauma",    "color": "#ef4444",
+                    "tags": ["medic", "trauma", "hemorrh", "wound", "first aid"]},
+    "navigation":  {"label": "Navigation",          "color": "#3b82f6",
+                    "tags": ["navigat", "compass", "land nav"]},
+    "comms":       {"label": "Communications",      "color": "#a855f7",
+                    "tags": ["mesh", "meshtastic", "radio", "amateur"]},
+    "power":       {"label": "Power",               "color": "#eab308",
+                    "tags": ["power", "batter", "solar"]},
+    "security":    {"label": "Security / OPSEC",    "color": "#f97316",
+                    "tags": ["security", "opsec"]},
+    "ballistics":  {"label": "Ballistics",          "color": "#dc2626",
+                    "tags": ["ballistic", "moa", "mil", "drop", "wind"]},
+    "firearms":    {"label": "Firearms",            "color": "#9f1239",
+                    "tags": ["firearm", "rifle", "pistol", "caliber"]},
+    "grid_down":   {"label": "Grid-Down / Collapse","color": "#6b7280",
+                    "tags": ["grid", "collapse", "barter", "sustain"]},
+    "vehicles":    {"label": "Vehicles & Fuel",     "color": "#475569",
+                    "tags": ["vehicle", "fuel", "maintenance"]},
+    "wildlife":    {"label": "Wildlife",            "color": "#16a34a",
+                    "tags": ["wildlife", "snake", "bear", "spider", "venomous",
+                             "rabies", "alligator"]},
+    "trees":       {"label": "Native Trees",        "color": "#15803d",
+                    "tags": ["tree", "native", "species"]},
+    "atlas_app":   {"label": "Atlas App",           "color": "#6366f1",
+                    "tags": ["atlas", "app", "ray", "dashboard"]},
+}
+
+def _km_category_for(tags_str: str, title: str = ""):
+    title_lower = (title or "").lower()
+    # Atlas Control app docs are always atlas_app regardless of shared tag keywords
+    # like "navigation", "mesh", "battery", "ballistics" that overlap other categories.
+    if ("atlas control" in title_lower or "atlas control" in (tags_str or "").lower()
+            or title_lower.startswith("ray — ") or title_lower.startswith("ai/ml:")):
+        meta = _KM_CATEGORIES["atlas_app"]
+        return "atlas_app", meta["color"], meta["label"]
+    tags_lower = (tags_str or "").lower()
+    for slug, meta in _KM_CATEGORIES.items():
+        if any(kw in tags_lower for kw in meta["tags"]):
+            return slug, meta["color"], meta["label"]
+    return "other", "#94a3b8", "Other"
+
+@app.route("/api/ai/knowledge-map")
+def api_ai_knowledge_map():
+    """Return nodes and high-cosine edges for the knowledge-map visualisation."""
+    docs = db.ai_get_documents_with_embeddings()
+    nodes = []
+    emb_by_id = {}
+    for doc in docs:
+        slug, color, label = _km_category_for(doc.get("tags") or "", doc.get("title") or "")
+        nodes.append({
+            "id":       doc["id"],
+            "title":    doc["title"],
+            "category": slug,
+            "cat_label": label,
+            "color":    color,
+        })
+        if doc.get("embedding"):
+            try:
+                emb_by_id[doc["id"]] = json.loads(doc["embedding"])
+            except Exception:
+                pass
+
+    # Precompute L2 norms once; avoids recomputing each vector ~55× in the inner loop.
+    norms = {id_: math.sqrt(sum(x * x for x in v)) for id_, v in emb_by_id.items()}
+    edges = []
+    ids = list(emb_by_id.keys())
+    for id1 in ids:
+        a, ma = emb_by_id[id1], norms[id1]
+        top_peers = []
+        for id2 in ids:
+            if id2 == id1:
+                continue
+            b, mb = emb_by_id[id2], norms[id2]
+            s = sum(x * y for x, y in zip(a, b)) / (ma * mb) if ma and mb else 0.0
+            if s >= 0.55:
+                top_peers.append((s, id2))
+        top_peers.sort(reverse=True)
+        for s, id2 in top_peers[:6]:   # at most 6 edges per node
+            if id1 < id2:              # deduplicate (only emit each pair once)
+                edges.append({"from": id1, "to": id2, "weight": round(s, 3)})
+
+    return jsonify({"nodes": nodes, "edges": edges,
+                    "categories": {k: {"label": v["label"], "color": v["color"]}
+                                   for k, v in _KM_CATEGORIES.items()}})
 
 # ------------------------------------------------------------------ API: System stats
 @app.route("/api/system/stats")

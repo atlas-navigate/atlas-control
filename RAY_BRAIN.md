@@ -33,8 +33,8 @@ Everything below lives in [`ai_manager.py`](ai_manager.py).
         │   on/offline      │ │ reverse- │ │ cosine  │ │  zero/round →   │ │
         │ • channels        │ │ geocode  │ │ vs every│ │  G1 drag-model  │ │
         │ • recent messages │ │ (41k US  │ │ doc →   │ │  simulation     │ │
-        │ • telemetry       │ │ ZIPs +   │ │ top-3   │ │ general math? ─┤ │
-        │ • topology/SNR    │ │ 68k world│ │ ≥ 0.30  │ │  LLM extracts  │ │
+        │ • telemetry       │ │ ZIPs +   │ │ top-5   │ │ general math? ─┤ │
+        │ • topology/SNR    │ │ 68k world│ │ ≥ 0.45  │ │  LLM extracts  │ │
         │ • alerts          │ │ cities)  │ │ score   │ │  [CALC:] exprs │ │
         │                   │ │          │ │         │ │  → sandboxed   │ │
         │ (SQLite, fresh)   │ │          │ │         │ │  evaluator     │ │
@@ -89,7 +89,7 @@ flowchart TD
     U[User message] --> R{1. Routing<br/>keyword scanners}
     R -->|always| S[2. Live senses<br/>system stats + mesh state]
     R -->|always| G[3. GPS + offline<br/>reverse geocode]
-    R -->|knowledge question| RAG[4. RAG recall<br/>embed query, cosine top-3 ≥ 0.45]
+    R -->|knowledge question| RAG[4. RAG recall<br/>embed query, cosine top-5 ≥ 0.45]
     R -->|physics / ballistics| C[5. Calc agent<br/>G1 drag sim / sandboxed eval]
     R -->|asks about Ray itself| SK[Self-knowledge doc<br/>force-injected]
     S --> CTX[6. Context assembly<br/>+ last 8 chat messages]
@@ -133,10 +133,16 @@ metropolis. If you type coordinates or a place name, that overrides the device f
 ### 4. Indexing & retrieval (RAG) — `_embed_unembedded_docs`, `rag_search`
 **Indexing:** at startup, every seeded knowledge doc is run through `qwen3-embedding:0.6b`,
 producing a 1024-dim vector "fingerprint of meaning" stored next to the text in SQLite.
-Changed docs are automatically re-embedded.
-**Retrieval:** your question is embedded the same way — with a Qwen3-Embedding query
-instruction prefix that documents don't get — and compared against every doc by cosine
-similarity. The top 3 docs scoring ≥ 0.45 are pasted into the context. Embeddings are
+Each document is embedded as `"title\ntags\n\ncontent"` (embedding format v2) so metadata
+keywords like species names and category tags are baked into the semantic fingerprint, not
+just the prose body. Changed docs are automatically re-embedded.
+**Retrieval:** your question is embedded with a Qwen3-Embedding query-instruction prefix
+and compared against every doc by cosine similarity. Before sorting, a keyword-based
+**topic router** (`_classify_query_category`) detects the query's category (wildlife,
+medical, ballistics, etc.) and applies a **+8% score boost** to docs whose tags match —
+so the right cluster surfaces even when border-case scores are close. The top 5 docs
+scoring ≥ 0.45 (after boost) are pasted into the context. The confidence footer is
+computed from the raw pre-boost cosine score so it can't be inflated. Embeddings are
 cached in RAM for 120 s so repeated queries don't hit the database.
 
 ### 5. The calculator agent — `_calc_agent_pass`, `_ballistic_direct_compute`
@@ -173,9 +179,30 @@ footer is appended after generation.
 | Model weights | VRAM | `keep_alive` (default 10 h) |
 | Across separate chats | — | None — each chat is isolated |
 
+## Knowledge Map
+
+The **Knowledge Map** (Ray AI → Settings sub-tab) is a live SVG visualization of the
+55 seed documents and how they relate to each other.
+
+- **Nodes** = documents, colored and grouped by topic cluster (Wildlife, Medical, Ballistics,
+  Atlas App, etc.).
+- **Edges** = cosine similarity ≥ 0.55 between document embeddings (up to 6 per node).
+  Edge color shifts from slate (55 %) to amber (100 %) — warmer = more similar.
+- **Click a node** to highlight its connections and see a ranked "Related" panel. Switch to
+  the **"Read"** tab to view the full document text inline.
+- **Drag nodes** to reposition; "Reset layout" restores the original radial arrangement.
+- Edges appear only after re-embedding completes on startup; a notice is shown while
+  embeddings are loading.
+
+The map is powered by `GET /api/ai/knowledge-map` (precomputes L2 norms, returns up to
+6 edges per node) and `GET /api/ai/documents/<id>` (per-doc content fetch for the reader).
+
+---
+
 ## Honest limits
 
 - Routing is keyword-based; an oddly-phrased question can take the wrong path.
 - Documents are embedded whole — no chunking — so retrieval is per-topic, not per-paragraph.
+  The topic-router +8% boost and top-5 retrieval reduce misses but can't eliminate them.
 - Anything outside the knowledge base comes from the model's training data (marked LOW confidence).
 - No internet: Ray cannot look anything up that isn't on the device.
