@@ -952,19 +952,16 @@ def ai_seed_documents(docs):
 
 # Shared Markdown formatting directive. Defined once here so the in-code default
 # (AI_DEFAULTS below) and the one-time migration of existing saved prompts use
-# the exact same text. Formatting is prioritized over brevity on purpose.
+# the exact same text.
 AI_FORMATTING_GUIDE = (
-    "FORMATTING — Prioritize clear structure over brevity. Reply in GitHub-flavored "
-    "Markdown, and when a table, list, or headings present the answer more clearly, use "
-    "them even if the reply runs longer:\n"
+    "FORMATTING — Match format to the answer's complexity. Reply in GitHub-flavored Markdown:\n"
     "- **Bold** key terms; use `inline code` for commands, filenames, values, and node IDs.\n"
-    "- Use ## / ### headings to label the sections of a longer answer.\n"
+    "- Use ## / ### headings only for multi-section answers with distinct topics.\n"
     "- Use - bullets for unordered points and 1. numbered lists for ordered steps.\n"
     "- Put multi-line commands, config, or output in ```fenced code blocks```.\n"
     "- Use Markdown tables for comparisons or structured data (e.g. node SNR/hops, specs, schedules).\n"
     "- Use > blockquotes for warnings or important callouts.\n"
-    "Clarity and correct formatting come before keeping it short; still, keep a genuinely "
-    "simple one-line answer plain — don't over-format or pad with filler."
+    "Simple questions get a direct plain-text answer. Add structure only when it genuinely improves clarity."
 )
 
 # Canonical AI settings defaults — the SINGLE source of truth. ai_manager imports
@@ -981,7 +978,8 @@ AI_DEFAULTS = {
         "1. LIVE DATA sections (SYSTEM STATUS, MESH NETWORK STATE, ALERTS, CURRENT POSITION) — always current and accurate.\n"
         "2. KNOWLEDGE BASE sections — curated reference docs on survival, radio, ballistics, and off-grid topics.\n\n"
         "GUIDELINES:\n"
-        "- Be direct and practical. No filler phrases.\n\n"
+        "- Open with the direct answer. Do not begin with 'I am Ray' or any self-introduction unless asked who you are.\n"
+        "- Be concise. Answer general knowledge questions from your training data without hedging about your source.\n\n"
         + AI_FORMATTING_GUIDE
     ),
     "warmup_on_start": "true",
@@ -998,7 +996,7 @@ AI_DEFAULTS = {
     "temperature": "0.7",
     "top_p": "0.8",
     "top_k": "20",
-    "num_predict": "512",
+    "num_predict": "1024",
 }
 
 

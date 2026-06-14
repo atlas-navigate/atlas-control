@@ -2223,6 +2223,47 @@ ATLAS_DOCS = [
             "Restart with: sudo systemctl restart atlas-control"
         ),
     },
+    {
+        "title": "AI/ML: Sampling Parameters — Temperature, Top-P, Top-K",
+        "tags": (
+            "temperature,top_p,top-p,p-value,k-value,top_k,top-k,sampling,generation,"
+            "genai,generative ai,llm,language model,ai settings,nucleus sampling,"
+            "randomness,creativity,deterministic,softmax,logits,inference,parameters"
+        ),
+        "content": (
+            "These three parameters control how a language model (LLM) chooses its next token during text generation.\n\n"
+            "TEMPERATURE\n"
+            "Scales the model's probability distribution before sampling.\n"
+            "- Range: 0.0 – 2.0+ (typical: 0.6–1.0)\n"
+            "- Low (0.0–0.3): near-deterministic, picks the highest-probability token each time. "
+            "Best for factual Q&A, code, structured data.\n"
+            "- High (1.0–2.0): flattens the distribution — more surprising, creative, or random outputs. "
+            "Risk of incoherence increases above ~1.5.\n"
+            "- Exactly 0.0: greedy decoding (always picks the single most likely token).\n\n"
+            "TOP-P (Nucleus Sampling)\n"
+            "After temperature scaling, keeps only the smallest set of tokens whose cumulative probability sums to ≥ p, "
+            "then samples from that set.\n"
+            "- Range: 0.0 – 1.0 (typical: 0.8–0.95)\n"
+            "- Low (0.5): very focused — only the most likely tokens are eligible.\n"
+            "- High (0.95–1.0): nearly all tokens are eligible; less filtering.\n"
+            "- Acts as a dynamic vocabulary cap: adapts to how 'confident' the model is on a given token.\n\n"
+            "TOP-K\n"
+            "Keeps only the K most probable tokens (by raw probability) and samples from those.\n"
+            "- Range: 1 – vocab_size (typical: 20–80)\n"
+            "- K=1: greedy (same as temperature 0).\n"
+            "- K=40: consider the 40 most likely tokens. Balances diversity and coherence.\n"
+            "- Unlike top-p, top-k is a fixed count regardless of probability spread.\n\n"
+            "HOW THEY INTERACT:\n"
+            "All three are applied in sequence: temperature → top-k → top-p → sample.\n"
+            "Typical quality settings: temperature=0.7, top_k=20, top_p=0.8 (Ray's defaults).\n"
+            "Typical creative settings: temperature=1.0, top_k=40, top_p=0.95.\n"
+            "Deterministic/factual: temperature=0.0–0.2, top_k=1, top_p=1.0.\n\n"
+            "COMMON MISCONCEPTION: 'p-value' in the GenAI/LLM context means top_p (nucleus sampling), "
+            "not the statistical hypothesis-testing p-value. They are unrelated concepts.\n\n"
+            "ATLAS CONTROL AI SETTINGS: Ray's sampling parameters are configurable in the Ray (AI) page → "
+            "Settings tab. Changes take effect on the next message."
+        ),
+    },
 ]
 
 # ---------------------------------------------------------------------------
