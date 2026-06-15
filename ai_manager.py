@@ -495,7 +495,7 @@ _COMMON_ROUNDS = {
     "338lm_250": (905,  0.587, ".338 Lapua Magnum 250gr BTHP",         250,  0.338, 1.590, 10.0),
     "338lm_300": (850,  0.730, ".338 Lapua Magnum 300gr BTHP",         300,  0.338, 1.750, 10.0),
     "50bmg_750": (895,  1.050, ".50 BMG 750gr APIT",                   750,  0.510, 4.180, 15.0),
-    "9mm_115":   (370,  0.145, "9mm Luger 115gr FMJ",                  115,  0.355, 0.680, 16.0),
+    "9mm_115":   (370,  0.145, "9mm Luger 115gr FMJ",                  115,  0.355, 0.680, 10.0),
     "45acp_230": (259,  0.195, ".45 ACP 230gr FMJ",                    230,  0.452, 0.800, 16.0),
 }
 
@@ -2929,9 +2929,15 @@ class AIManager:
         return any(kw in msg_lower for kw in _MATH_KEYWORDS)
 
     def _is_physics_query(self, user_message):
-        """Return True if the query involves physics/ballistics — triggers the agent loop."""
+        """Return True if the query involves physics/ballistics — triggers the agent loop.
+
+        Ballistic queries ALWAYS qualify: compose the two gates so a keyword gap in
+        _PHYSICS_KEYWORDS can never starve the compute path (this exact drift between
+        _is_ballistic_query and _is_physics_query is what let "spin drift of a 9mm…"
+        fall through to the bare model)."""
         msg_lower = user_message.lower()
-        return any(kw in msg_lower for kw in _PHYSICS_KEYWORDS)
+        return (self._is_ballistic_query(user_message)
+                or any(kw in msg_lower for kw in _PHYSICS_KEYWORDS))
 
     def _is_ballistic_query(self, user_message):
         """Return True if the query is specifically about bullet trajectory / ballistic drop."""
@@ -3131,22 +3137,18 @@ class AIManager:
         return "\n".join(lines)
 
     # ------------------------------------------------------------------
-    def _ballistic_direct_compute(self, user_message):
+    def _ballistic_resolve(self, user_message):
         """
-        Directly compute bullet drop + spin drift for a ballistic trajectory question.
-        Parses range, zero, and round from the message; runs G1 physics; returns a
-        pre-formatted context block.  No LLM involvement in the maths.
-        Always outputs both metric and imperial so there is no unit ambiguity.
+        Parse a ballistic query into resolved parameters — the SINGLE source of
+        truth shared by the LLM-context block and the deterministic user-facing
+        answer.  Parsing duplicated across two formatters is exactly the kind of
+        drift that caused earlier ballistics bugs.
+
+        Returns a dict {is_dope, range_m, zero_m, v0, bc, desc, m_gr, d_in, l_in,
+        twist_in, twist_src, round_identified}, or None if neither a target range
+        nor a DOPE-card request could be parsed.
         """
         import re
-        import database as _db
-
-        # Angular unit constants — computed once, shared by ALL conversions.
-        # 1 MOA = 1.04720" per 100 yd = 2.90888 cm per 100 m.
-        # 1 mrad = 10 cm per 100 m exactly.
-        _MOA_CM_PER_100M  = 2.90888
-        _MRAD_CM_PER_100M = 10.0
-
         msg = user_message.lower()
 
         # ── DOPE card shortcut (no specific range needed) ───────────────────
@@ -3174,8 +3176,8 @@ class AIManager:
                     break
 
         if range_m is None and not _is_dope:
-            logger.debug("Ballistic direct compute: could not parse range from message")
-            return ""
+            logger.debug("Ballistic resolve: could not parse range from message")
+            return None
 
         # ── Extract zero distance ───────────────────────────────────────────
         # Unit extracted from the regex capture, NOT from the whole message,
@@ -3205,12 +3207,13 @@ class AIManager:
 
         # ── Identify round ──────────────────────────────────────────────────
         round_data = self._identify_round(user_message)
+        round_identified = round_data is not None
         if round_data:
             v0, bc, desc, m_gr, d_in, l_in, ref_twist = round_data
         else:
             v0, bc, desc = 975, 0.269, "5.56mm 55gr (assumed)"
             m_gr, d_in, l_in, ref_twist = 55, 0.224, 0.910, 7.0
-            logger.debug("Ballistic direct compute: round not identified, using 5.56 55gr defaults")
+            logger.debug("Ballistic resolve: round not identified, using 5.56 55gr defaults")
 
         # ── Parse twist rate from message (overrides round default) ────────
         twist_in = ref_twist
@@ -3226,15 +3229,185 @@ class AIManager:
                     twist_in = _t
                     twist_explicit = True
                     break
-
-        # twist_src is shared by both DOPE and single-range paths
         twist_src = "user-specified" if twist_explicit else "standard barrel for this round"
 
+        return {
+            "is_dope": _is_dope, "range_m": range_m, "zero_m": zero_m,
+            "v0": v0, "bc": bc, "desc": desc, "m_gr": m_gr, "d_in": d_in,
+            "l_in": l_in, "twist_in": twist_in, "twist_src": twist_src,
+            "round_identified": round_identified,
+        }
+
+    # ------------------------------------------------------------------
+    def _ballistic_single_compute(self, p):
+        """
+        Compute drop + spin drift for a single range from resolved params `p`.
+        ONE physics path feeds both the LLM-context block and the user answer.
+        Returns a dict of every derived quantity (cm/in/ft + MOA/mrad).
+        """
+        # Angular unit constants — 1 MOA = 2.90888 cm / 100 m, 1 mrad = 10 cm / 100 m.
+        _MOA_CM_PER_100M  = 2.90888
+        _MRAD_CM_PER_100M = 10.0
+        range_m, zero_m = p["range_m"], p["zero_m"]
+        v0, bc = p["v0"], p["bc"]
+
+        drop_cm, tof_s = _ballistic_sim(range_m, zero_m, v0, bc)
+
+        # Angular conversion factors for this range — derived once, used for BOTH
+        # drop and spin drift.  One source of truth eliminates unit drift.
+        moa_per_cm  = 1.0 / (range_m * _MOA_CM_PER_100M  / 100.0)
+        mrad_per_cm = 1.0 / (range_m * _MRAD_CM_PER_100M / 100.0)
+
+        drop_abs_cm = abs(drop_cm)
+        # Spin drift — Litz: SD_in = 1.25 × Sg × TOF^1.83
+        sg    = _miller_sg(p["m_gr"], p["d_in"], p["l_in"], p["twist_in"], v0)
+        sd_in = round(1.25 * sg * tof_s ** 1.83, 2)
+        sd_cm = round(sd_in * 2.54, 1)
+
+        return {
+            "drop_cm": drop_cm, "drop_abs_cm": drop_abs_cm, "tof_s": tof_s,
+            "drop_in":   round(drop_abs_cm / 2.54,  2),
+            "drop_ft":   round(drop_abs_cm / 30.48, 2),
+            "drop_moa":  round(drop_abs_cm * moa_per_cm,  1),
+            "drop_mrad": round(drop_abs_cm * mrad_per_cm, 2),
+            "direction": "below" if drop_cm < 0 else "above",
+            "sg": sg, "sd_in": sd_in, "sd_cm": sd_cm,
+            "sd_moa":  round(sd_cm * moa_per_cm,  2),
+            "sd_mrad": round(sd_cm * mrad_per_cm, 3),
+            "moa_per_cm": moa_per_cm, "mrad_per_cm": mrad_per_cm,
+        }
+
+    # Unambiguous ballistic phrases — collision-free enough to act on even when
+    # the round or range is missing.  A bare "spin"/"drift" is NOT here (it shows
+    # up in "spin up a server"), so those stay on the LLM fallback path.
+    _BALLISTIC_STRONG_PHRASES = (
+        "spin drift", "gyroscopic", "bullet drop", "holdover", "come-up",
+        "scope dial", "zeroed", " moa", " mrad", "windage hold", "elevation hold",
+        "dope card", "dope table",
+    )
+
+    def _ballistic_clarify(self, has_round, has_range):
+        """Deterministic prompt asking for the inputs a ballistic solution needs.
+        Keeps the workflow predictable: a confidently-ballistic query never reaches
+        the 2b model to be answered (or hallucinated) without its key parameters."""
+        need = []
+        if not has_round:
+            need.append("the **round / caliber** — e.g. `.308 168gr`, `5.56 55gr`, `9mm 115gr`")
+        if not has_range:
+            need.append("the **target range** — e.g. `300 m` or `500 yd`")
+        bullets = "\n".join(f"- {n}" for n in need)
+        return (
+            "I can compute a full ballistic solution (drop, spin drift, MOA/mrad, "
+            "time of flight) straight from verified physics — I just need:\n"
+            f"{bullets}\n\n"
+            "Optional: zero distance (default 100 m) and barrel twist (e.g. `1:8\"`).\n"
+            "Example: *\"spin drift of .308 168gr at 600 yd zeroed 100\"*"
+        )
+
+    # ------------------------------------------------------------------
+    def _ballistic_user_answer(self, user_message):
+        """
+        Deterministic, user-facing ballistic answer — the verified physics IS the
+        answer, not context for the chat model to narrate.  The small model
+        mis-states these numbers (see the ballistics commit history), so we bypass
+        it for every confidently-ballistic query: a full solution when the round +
+        range are known, otherwise a deterministic prompt for the missing inputs.
+
+        Returns markdown, or None to fall back to the LLM only when the query is
+        NOT confidently ballistic (a stray "spin"/"drift" with no round and no
+        strong phrase — e.g. "spin up a server at 5 m").
+        """
+        p = self._ballistic_resolve(user_message)
+
+        # Is this *confidently* ballistic?  A named round, or an unambiguous
+        # ballistic phrase.  Anything weaker falls through to the normal pipeline.
+        msg = user_message.lower()
+        has_round = self._identify_round(user_message) is not None
+        confident = has_round or any(s in msg for s in self._BALLISTIC_STRONG_PHRASES)
+
+        if p is None:
+            # No target range and not a DOPE request.
+            if confident:
+                return self._ballistic_clarify(has_round, has_range=False)
+            return None
+
+        if not p["round_identified"]:
+            # Range (or DOPE) present but no specific round.  Range is already
+            # satisfied here (parsed, or not needed for a DOPE card), so we only
+            # need the round — ask rather than silently assume 5.56.
+            if confident:
+                return self._ballistic_clarify(has_round=False, has_range=True)
+            return None
+
+        # ── DOPE card — return the table verbatim in a code block ───────────
+        if p["is_dope"]:
+            try:
+                card = self._generate_dope_card(
+                    p["v0"], p["bc"], p["desc"], p["m_gr"], p["d_in"],
+                    p["l_in"], p["twist_in"], p["twist_src"], p["zero_m"]
+                )
+                return "```\n" + card + "\n```"
+            except Exception as ex:
+                logger.warning(f"DOPE card (user answer) failed: {ex}")
+                return None
+
+        # ── Single-range solution ───────────────────────────────────────────
+        try:
+            c = self._ballistic_single_compute(p)
+        except Exception as ex:
+            logger.warning(f"Ballistic user answer failed: {ex}")
+            return None
+
+        range_m, zero_m = p["range_m"], p["zero_m"]
+        range_yd = round(range_m * 1.09361)
+        zero_yd  = round(zero_m  * 1.09361)
+        v0_fps   = _mps_to_fps(p["v0"])
+        twist_in = p["twist_in"]
+
+        # Spin drift is sub-tenth-inch at pistol/short range — say so plainly
+        # rather than presenting a meaningless 0.02" figure as actionable.
+        sd_note = "  _(negligible at this range)_" if c["sd_in"] < 0.25 else ""
+
+        lines = [
+            f"**Ballistic solution — {p['desc']}**",
+            "",
+            f"- Muzzle velocity **{p['v0']} m/s** ({v0_fps} fps) · BC (G1) {p['bc']}",
+            f"- Zero **{zero_m:.0f} m** ({zero_yd} yd) · Target **{range_m:.0f} m** ({range_yd} yd)",
+            f"- Barrel twist 1:{twist_in:.0f}\" RH [{p['twist_src']}] · Miller Sg {c['sg']:.2f}",
+            "",
+            f"**Bullet drop:** {c['drop_abs_cm']} cm / {c['drop_in']} in {c['direction']} line of "
+            f"sight  ({c['drop_moa']} MOA · {c['drop_mrad']} mrad)",
+            f"**Time of flight:** {c['tof_s']} s",
+            f"**Spin drift:** {c['sd_in']} in / {c['sd_cm']} cm to the RIGHT  "
+            f"({c['sd_moa']} MOA · {c['sd_mrad']} mrad){sd_note}",
+            "",
+            "_G1 drag model · sea level · standard atmosphere. RH twist drifts right — "
+            "specify your barrel twist if it differs._",
+        ]
+        logger.info(
+            f"Ballistic user answer: {p['desc']} {range_m:.0f}m zero={zero_m:.0f}m "
+            f"drop={c['drop_cm']}cm tof={c['tof_s']}s sg={c['sg']:.2f} sd={c['sd_in']}in"
+        )
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    def _ballistic_direct_compute(self, user_message):
+        """
+        LLM-context block of pre-computed ballistic results, injected only on the
+        fallback path (e.g. round not identified, so _ballistic_user_answer
+        declined).  No LLM involvement in the maths; always both metric and
+        imperial so there is no unit ambiguity.
+        """
+        p = self._ballistic_resolve(user_message)
+        if p is None:
+            return ""
+
         # ── DOPE card request — generate full multi-range table ─────────────
-        if _is_dope:
+        if p["is_dope"]:
             try:
                 return self._generate_dope_card(
-                    v0, bc, desc, m_gr, d_in, l_in, twist_in, twist_src, zero_m
+                    p["v0"], p["bc"], p["desc"], p["m_gr"], p["d_in"],
+                    p["l_in"], p["twist_in"], p["twist_src"], p["zero_m"]
                 )
             except Exception as ex:
                 logger.warning(f"DOPE card generation failed: {ex}")
@@ -3242,27 +3415,17 @@ class AIManager:
 
         # ── Single-range physics ─────────────────────────────────────────────
         try:
-            drop_cm, tof_s = _ballistic_sim(range_m, zero_m, v0, bc)
-
-            # Angular conversion factors for this range — derived once, used for
-            # BOTH drop and spin drift.  One source of truth eliminates unit drift.
-            moa_per_cm  = 1.0 / (range_m * _MOA_CM_PER_100M  / 100.0)
-            mrad_per_cm = 1.0 / (range_m * _MRAD_CM_PER_100M / 100.0)
-
-            # Bullet drop (all representations derived from drop_cm)
-            drop_abs_cm = abs(drop_cm)
-            drop_in     = round(drop_abs_cm / 2.54,  2)
-            drop_ft     = round(drop_abs_cm / 30.48, 2)
-            drop_moa    = round(drop_abs_cm * moa_per_cm,  1)
-            drop_mrad   = round(drop_abs_cm * mrad_per_cm, 2)
-            direction   = "below" if drop_cm < 0 else "above"
-
-            # Spin drift — Litz: SD_in = 1.25 × Sg × TOF^1.83
-            sg      = _miller_sg(m_gr, d_in, l_in, twist_in, v0)
-            sd_in   = round(1.25 * sg * tof_s ** 1.83, 2)
-            sd_cm   = round(sd_in * 2.54, 1)
-            sd_moa  = round(sd_cm * moa_per_cm,  2)
-            sd_mrad = round(sd_cm * mrad_per_cm, 3)
+            c = self._ballistic_single_compute(p)
+            v0, bc, desc       = p["v0"], p["bc"], p["desc"]
+            range_m, zero_m    = p["range_m"], p["zero_m"]
+            d_in, l_in         = p["d_in"], p["l_in"]
+            twist_in, twist_src = p["twist_in"], p["twist_src"]
+            drop_cm = c["drop_cm"]
+            drop_abs_cm, drop_in, drop_ft = c["drop_abs_cm"], c["drop_in"], c["drop_ft"]
+            drop_moa, drop_mrad, direction = c["drop_moa"], c["drop_mrad"], c["direction"]
+            tof_s, sg = c["tof_s"], c["sg"]
+            sd_in, sd_cm, sd_moa, sd_mrad = c["sd_in"], c["sd_cm"], c["sd_moa"], c["sd_mrad"]
+            moa_per_cm = c["moa_per_cm"]
 
             # Range/zero in both units for the header
             range_yd = round(range_m * 1.09361)
@@ -3846,6 +4009,33 @@ class AIManager:
         keep_alive = f"{settings.get('keep_alive_hours', DEFAULT_SETTINGS['keep_alive_hours'])}h"
         base_system = settings.get("system_prompt", DEFAULT_SETTINGS["system_prompt"])
 
+        # ── Deterministic ballistic short-circuit ───────────────────────────
+        # A ballistic query naming a specific round is answered straight from
+        # verified G1 physics — the chat model is bypassed entirely because it
+        # narrates/hallucinates these numbers (242 ft of spin drift for a 9mm…).
+        # Falls through to the normal pipeline when no round was identified.
+        if self._is_ballistic_query(user_message):
+            ballistic_answer = self._ballistic_user_answer(user_message)
+            if ballistic_answer:
+                ballistic_answer += (
+                    "\n\n---\nConfidence: HIGH | "
+                    "Source: Ballistic Calculator (verified G1 physics)"
+                )
+                db.ai_add_message(chat_id, "user", user_message)
+                db.ai_add_message(chat_id, "assistant", ballistic_answer,
+                                  tokens=None, duration_ms=0)
+                chat = db.ai_get_chat(chat_id)
+                if chat and chat.get("title") == "New Chat":
+                    short_title = user_message[:40].strip()
+                    if len(user_message) > 40:
+                        short_title += "…"
+                    db.ai_update_chat_title(chat_id, short_title)
+                return {
+                    "content": ballistic_answer, "model": model,
+                    "eval_count": None, "eval_duration": None,
+                    "duration_ms": 0, "tok_per_sec": None,
+                }
+
         # Build augmented system prompt (settings already loaded — no extra DB call)
         context, ctx_meta = self.build_context(user_message, settings=settings)
 
@@ -3966,6 +4156,30 @@ class AIManager:
         model = settings.get("model", DEFAULT_SETTINGS["model"])
         keep_alive = f"{settings.get('keep_alive_hours', DEFAULT_SETTINGS['keep_alive_hours'])}h"
         base_system = settings.get("system_prompt", DEFAULT_SETTINGS["system_prompt"])
+
+        # ── Deterministic ballistic short-circuit (see chat() for rationale) ──
+        # Verified physics is yielded as a single chunk; the chat model is never
+        # called, so it cannot mis-state drop/spin-drift/TOF.
+        if self._is_ballistic_query(user_message):
+            ballistic_answer = self._ballistic_user_answer(user_message)
+            if ballistic_answer:
+                ballistic_answer += (
+                    "\n\n---\nConfidence: HIGH | "
+                    "Source: Ballistic Calculator (verified G1 physics)"
+                )
+                db.ai_add_message(chat_id, "user", user_message)
+                yield ballistic_answer
+                db.ai_add_message(chat_id, "assistant", ballistic_answer,
+                                  tokens=None, duration_ms=0)
+                chat = db.ai_get_chat(chat_id)
+                if chat and chat.get("title") == "New Chat":
+                    short_title = user_message[:40].strip()
+                    if len(user_message) > 40:
+                        short_title += "…"
+                    db.ai_update_chat_title(chat_id, short_title)
+                yield {"done": True, "model": model, "eval_count": None,
+                       "eval_duration": None, "duration_ms": 0, "tok_per_sec": None}
+                return
 
         context, ctx_meta = self.build_context(user_message, settings=settings)
 
