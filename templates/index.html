@@ -15,9 +15,10 @@
 <script src="/static/vendor/pmtiles.js"></script>
 <script src="/static/vendor/protomaps-themes-base.js"></script>
 <script src="/static/vendor/katex.min.js"></script>
+<link rel="stylesheet" href="/static/vendor/katex.min.css"/>
 <style>
-/* KaTeX MathML display block centering */
-mjx-container[display="true"], .katex-display { display:block; text-align:center; margin:10px 0; overflow-x:auto; }
+/* KaTeX display equation spacing */
+.katex-display { margin: 10px 0 !important; overflow-x: auto; }
 :root {
   --font-sans: "Avenir Next", "Segoe UI Variable", "SF Pro Display", "IBM Plex Sans", "Helvetica Neue", sans-serif;
   --font-mono: "SFMono-Regular", "JetBrains Mono", "IBM Plex Mono", "Courier New", monospace;
@@ -1570,7 +1571,7 @@ function mdInline(text, kp) {
           flush();
           if (window.katex) {
             try {
-              const html = window.katex.renderToString(math, { output: 'mathml', throwOnError: false, displayMode: false });
+              const html = window.katex.renderToString(math, { output: 'html', throwOnError: false, displayMode: false });
               out.push(<span key={kp + 'mx' + i} dangerouslySetInnerHTML={{ __html: html }} />);
             } catch(e) { out.push(<code key={kp + 'mx' + i}>{math}</code>); }
           } else { out.push(<code key={kp + 'mx' + i}>{math}</code>); }
@@ -1636,8 +1637,8 @@ function MarkdownMessage({ text }) {
       }
       if (window.katex) {
         try {
-          const html = window.katex.renderToString(latex.trim(), { output: 'mathml', throwOnError: false, displayMode: true });
-          blocks.push(<div key={k++} style={{ textAlign:'center', margin:'12px 0', overflowX:'auto', fontSize:'1.05em' }} dangerouslySetInnerHTML={{ __html: html }} />);
+          const html = window.katex.renderToString(latex.trim(), { output: 'html', throwOnError: false, displayMode: true });
+          blocks.push(<div key={k++} style={{ overflowX:'auto' }} dangerouslySetInnerHTML={{ __html: html }} />);
         } catch(e) { blocks.push(<pre key={k++} style={{ textAlign:'center' }}>{latex.trim()}</pre>); }
       } else { blocks.push(<pre key={k++} style={{ textAlign:'center' }}>{latex.trim()}</pre>); }
       continue;

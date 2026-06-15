@@ -892,29 +892,29 @@ SURVIVAL_DOCS = [
             "PHYSICS: g = 386 in/s². Total fall from bore line: fall_in = 0.5 × 386 × TOF²\n"
             "Drop below LOS ≠ total fall (zero angle offsets part of it).\n"
             "With 100-yd zero: bullet crosses LOS at ~25 yd (rising) and 100 yd (falling).\n\n"
-            "TOF — .308 Win 168gr BTHP, MV=2600 fps, G1 BC=0.47, sea level:\n"
-            " 100 yd: TOF=0.117 s, vel=2540 fps\n"
-            " 200 yd: TOF=0.243 s, vel=2370 fps\n"
-            " 300 yd: TOF=0.381 s, vel=2210 fps\n"
-            " 400 yd: TOF=0.521 s, vel=2060 fps\n"
-            " 500 yd: TOF=0.643 s, vel=1910 fps  ← NOT 1.8 s (that is beyond 1200 yd)\n"
-            " 700 yd: TOF=0.967 s, vel=1640 fps\n"
-            "1000 yd: TOF=1.547 s, vel=1300 fps\n\n"
-            "DOPE CARD — .308 Win 168gr 2600fps, 100-yd zero, sea level:\n"
-            "Range  | Drop(in) | MOA UP | 10mph wind | TOF\n"
-            "100 yd |   0.0    |  0.0   |  0.3 MOA   | 0.12 s\n"
-            "200 yd |  -3.4    |  1.6   |  0.7 MOA   | 0.25 s\n"
-            "300 yd | -10.9    |  3.5   |  1.0 MOA   | 0.38 s\n"
-            "400 yd | -23.5    |  5.6   |  1.5 MOA   | 0.52 s\n"
-            "500 yd | -41.8    |  8.0   |  2.2 MOA   | 0.64 s\n"
-            "600 yd | -67.0    | 10.7   |  3.0 MOA   | 0.78 s\n"
-            "700 yd |-100.5    | 13.8   |  3.8 MOA   | 0.97 s\n"
-            "800 yd |-143.0    | 17.1   |  4.7 MOA   | 1.17 s\n"
-            "1000yd |-266.0    | 25.4   |  6.5 MOA   | 1.55 s\n\n"
-            ".223 Rem 55gr 3240fps (unstable/transonic ~600–700 yd):\n"
-            "300 yd: -7.8 in / 2.5 MOA. 500 yd: -25.0 in / 4.8 MOA.\n\n"
-            "ENERGY: E_ftlbs = (mass_gr × vel_fps²) ÷ 450,400\n"
-            ".308 168gr @ 2600fps = 2,521 ft-lbs. @ 1300fps (1000yd) = 630 ft-lbs."
+            "TOF — .308 Win 168gr BTHP, MV=792 m/s, G1 BC=0.47, sea level:\n"
+            "  91 m: TOF=0.117 s, vel=774 m/s\n"
+            " 183 m: TOF=0.243 s, vel=722 m/s\n"
+            " 274 m: TOF=0.381 s, vel=674 m/s\n"
+            " 366 m: TOF=0.521 s, vel=628 m/s\n"
+            " 457 m: TOF=0.643 s, vel=582 m/s\n"
+            " 640 m: TOF=0.967 s, vel=500 m/s\n"
+            " 914 m: TOF=1.547 s, vel=396 m/s\n\n"
+            "DOPE CARD — .308 Win 168gr 792 m/s, 100 m zero, sea level:\n"
+            "Range  | Drop(cm) | MOA UP | 10mph wind | TOF\n"
+            " 91 m  |    0.0   |  0.0   |  0.3 MOA   | 0.12 s\n"
+            "183 m  |   -8.6   |  1.6   |  0.7 MOA   | 0.25 s\n"
+            "274 m  |  -27.7   |  3.5   |  1.0 MOA   | 0.38 s\n"
+            "366 m  |  -59.7   |  5.6   |  1.5 MOA   | 0.52 s\n"
+            "457 m  | -106.2   |  8.0   |  2.2 MOA   | 0.64 s\n"
+            "549 m  | -170.2   | 10.7   |  3.0 MOA   | 0.78 s\n"
+            "640 m  | -255.3   | 13.8   |  3.8 MOA   | 0.97 s\n"
+            "732 m  | -363.2   | 17.1   |  4.7 MOA   | 1.17 s\n"
+            "914 m  | -675.6   | 25.4   |  6.5 MOA   | 1.55 s\n\n"
+            ".223 Rem 55gr 988 m/s (unstable/transonic ~550–640 m):\n"
+            "274 m: -19.8 cm / 2.5 MOA. 457 m: -63.5 cm / 4.8 MOA.\n\n"
+            "ENERGY: KE (joules) = 0.5 × mass_kg × vel_mps²\n"
+            ".308 168gr @ 792 m/s = 3,417 J. @ 396 m/s (914 m) = 854 J."
         ),
     },
     {
@@ -2999,6 +2999,8 @@ class AIManager:
         Returns a pre-formatted context block string, or "" if params not found.
         """
         import re
+        import database as _db
+        _units = _db.get_app_settings().get("units", "metric")
 
         msg = user_message.lower()
 
@@ -3064,25 +3066,31 @@ class AIManager:
 
             direction = "below" if drop_cm < 0 else "above"
 
+            if _units == "imperial":
+                drop_primary   = f"{abs(drop_ft)} ft ({drop_cm} cm)"
+                vel_primary    = f"{_mps_to_fps(v0)} fps ({v0} m/s)"
+            else:
+                drop_primary   = f"{drop_cm} cm ({abs(drop_in)} in)"
+                vel_primary    = f"{v0} m/s ({_mps_to_fps(v0)} fps)"
+
             block = (
                 f"=== BALLISTIC CALCULATOR RESULTS ===\n"
                 f"Round     : {desc}\n"
-                f"Muzzle vel: {v0} m/s ({_mps_to_fps(v0)} fps)\n"
+                f"Muzzle vel: {vel_primary}\n"
                 f"BC (G1)   : {bc}\n"
                 f"Zero range: {zero_m:.0f} m\n"
                 f"Target    : {range_m:.0f} m\n"
                 f"\n"
                 f"Bullet drop at {range_m:.0f} m (relative to line of sight, zeroed at {zero_m:.0f} m):\n"
-                f"  {drop_cm} cm  {direction} line of sight\n"
-                f"  {abs(drop_in)} inches  {direction} line of sight\n"
-                f"  {abs(drop_ft)} feet  {direction} line of sight\n"
+                f"  {drop_primary}  {direction} line of sight\n"
                 f"Correction needed:\n"
                 f"  {drop_moa} MOA  ({direction})\n"
                 f"  {drop_mrad} mrad ({direction})\n"
                 f"Approx. time of flight: {tof_approx} s\n"
                 f"\n"
                 f"These are G1 drag-model results at sea level, standard atmosphere.\n"
-                f"Actual drop may vary with altitude, temperature, and barrel length."
+                f"Actual drop may vary with altitude, temperature, and barrel length.\n"
+                f"NOTE: All ranges above are in METERS. Do not conflate with yards."
             )
             logger.info(
                 f"Ballistic direct compute: {desc} {range_m:.0f}m zero={zero_m:.0f}m "
