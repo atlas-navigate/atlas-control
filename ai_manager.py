@@ -3064,14 +3064,22 @@ class AIManager:
             drop_mrad = round(abs(drop_cm) / (range_m * 0.1), 2)       # 1 mrad = 10 cm/100 m
             tof_approx = round(range_m / (v0 * 0.72), 2)               # rough ToF estimate
 
+            # Spin drift (Litz simplified): SD_in = 1.25 * SG * TOF²
+            # SG ≈ 1.5 for typical rifle bullets; drift is rightward for RH twist
+            sd_in = round(1.25 * 1.5 * tof_approx ** 2, 2)
+            sd_cm = round(sd_in * 2.54, 1)
+            sd_moa = round(sd_in / (range_m / 100 * 1.047), 2)
+
             direction = "below" if drop_cm < 0 else "above"
 
             if _units == "imperial":
                 drop_primary   = f"{abs(drop_ft)} ft ({drop_cm} cm)"
                 vel_primary    = f"{_mps_to_fps(v0)} fps ({v0} m/s)"
+                sd_primary     = f"{sd_in} in ({sd_cm} cm)"
             else:
                 drop_primary   = f"{drop_cm} cm ({abs(drop_in)} in)"
                 vel_primary    = f"{v0} m/s ({_mps_to_fps(v0)} fps)"
+                sd_primary     = f"{sd_cm} cm ({sd_in} in)"
 
             block = (
                 f"=== BALLISTIC CALCULATOR RESULTS ===\n"
@@ -3087,9 +3095,10 @@ class AIManager:
                 f"  {drop_moa} MOA  ({direction})\n"
                 f"  {drop_mrad} mrad ({direction})\n"
                 f"Approx. time of flight: {tof_approx} s\n"
+                f"Spin drift (RH twist, Litz approx.): {sd_primary} right  [{sd_moa} MOA]\n"
                 f"\n"
                 f"These are G1 drag-model results at sea level, standard atmosphere.\n"
-                f"Actual drop may vary with altitude, temperature, and barrel length.\n"
+                f"Actual values may vary with altitude, temperature, barrel length, and twist rate.\n"
                 f"NOTE: All ranges above are in METERS. Do not conflate with yards."
             )
             logger.info(
@@ -3649,9 +3658,10 @@ class AIManager:
                 # Override instruction: tell model the numbers are already computed
                 context += (
                     "\n\n=== INSTRUCTION FOR THIS RESPONSE ===\n"
-                    "The CALCULATOR AGENT RESULTS above contain pre-verified values. "
-                    "Use those exact numbers — do NOT recompute. "
-                    "If you need any additional calculation not listed, use [CALC: expr]."
+                    "The CALCULATOR AGENT RESULTS above contain pre-verified drop, correction, spin drift, and time-of-flight values. "
+                    "Use those exact numbers as-is — do NOT recalculate the values listed. "
+                    "Present them directly to the user without deliberation. "
+                    "For any quantity not listed above, answer from your knowledge."
                 )
 
         # Append unit directive to system prompt as a single sentence — small models
@@ -3766,9 +3776,10 @@ class AIManager:
                 context = (context + "\n\n" + calc_block).strip()
                 context += (
                     "\n\n=== INSTRUCTION FOR THIS RESPONSE ===\n"
-                    "The CALCULATOR AGENT RESULTS above contain pre-verified values. "
-                    "Use those exact numbers — do NOT recompute. "
-                    "If you need any additional calculation not listed, use [CALC: expr]."
+                    "The CALCULATOR AGENT RESULTS above contain pre-verified drop, correction, spin drift, and time-of-flight values. "
+                    "Use those exact numbers as-is — do NOT recalculate the values listed. "
+                    "Present them directly to the user without deliberation. "
+                    "For any quantity not listed above, answer from your knowledge."
                 )
 
         _units = ctx_meta.get("units", "metric")

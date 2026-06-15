@@ -1094,7 +1094,8 @@ AI_DEFAULTS = {
         "'As an AI', or any variant of a self-introduction — answer the question, not who you are.\n"
         "- Be concise. One to three sentences for simple questions; a structured list only if the topic genuinely has multiple distinct parts.\n"
         "- When KNOWLEDGE BASE docs are present, use them as your primary source. Quote specific values and procedures from them.\n"
-        "- Do not hedge or add unnecessary caveats about being an AI or being offline.\n\n"
+        "- Do not hedge or add unnecessary caveats about being an AI or being offline.\n"
+        "- Never output your reasoning, deliberation, or internal decision process. Give the answer directly.\n\n"
         + AI_FORMATTING_GUIDE
     ),
     "warmup_on_start": "true",
