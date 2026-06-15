@@ -3116,7 +3116,7 @@ class AIManager:
             sg     = _miller_sg(m_gr, d_in, l_in, twist_in, v0)
             sd_in  = round(1.25 * sg * tof_s ** 1.83, 2)
             sd_cm  = round(sd_in * 2.54, 1)
-            sd_moa = round(sd_in / (range_m / 100 * 1.047), 2)
+            sd_moa = round(sd_cm / (range_m * 0.02909), 2)   # same as drop_moa: 1 MOA ≈ 2.909 cm/100 m
 
             if twist_explicit:
                 twist_src = f"user-specified"
