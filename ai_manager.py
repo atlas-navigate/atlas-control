@@ -3201,38 +3201,14 @@ class AIManager:
             "gps_fix": None,
         }
 
-        # Unit preference (from app settings — governs all Ray answers)
+        # Unit preference — read here for GPS source-conversion; the text
+        # directive is injected into base_system by the caller (not into parts[])
+        # so the model follows it silently rather than narrating it.
         try:
-            _app_settings = db.get_app_settings()
-            _units = _app_settings.get("units", "metric")
+            _units = db.get_app_settings().get("units", "metric")
         except Exception:
             _units = "metric"
-        if _units == "imperial":
-            parts.append(
-                "=== UNIT PREFERENCE (USER SETTING: IMPERIAL) ===\n"
-                "Express ALL real-world measurements in IMPERIAL units — this is mandatory for every answer.\n"
-                "  • Distances / elevations: feet (ft), yards (yd), miles (mi), inches (in)\n"
-                "  • Speeds: feet per second (fps) or miles per hour (mph)\n"
-                "  • Weights / mass: pounds (lb), ounces (oz)\n"
-                "  • Ambient / cooking / weather temperature: Fahrenheit (°F)\n"
-                "  • Volumes: gallons (gal), fluid ounces (fl oz)\n"
-                "  • Pressure: pounds per square inch (psi)\n"
-                "Metric equivalents may follow in parentheses if helpful. Always lead with imperial.\n"
-                "Exception: hardware/sensor temperatures (CPU, GPU) stay in °C per convention."
-            )
-        else:
-            parts.append(
-                "=== UNIT PREFERENCE (USER SETTING: METRIC) ===\n"
-                "Express ALL real-world measurements in METRIC (SI) units — this is mandatory for every answer.\n"
-                "  • Distances / elevations: meters (m), kilometers (km), centimeters (cm)\n"
-                "  • Speeds: meters per second (m/s) or kilometers per hour (km/h)\n"
-                "  • Weights / mass: kilograms (kg), grams (g)\n"
-                "  • Ambient / cooking / weather temperature: Celsius (°C)\n"
-                "  • Volumes: liters (L), milliliters (mL)\n"
-                "  • Pressure: kilopascals (kPa) or hectopascals (hPa)\n"
-                "Imperial equivalents may follow in parentheses if helpful. Always lead with metric.\n"
-                "Exception: hardware/sensor temperatures (CPU, GPU) stay in °C per convention."
-            )
+        meta["units"] = _units
 
         # System stats context
         try:
@@ -3670,6 +3646,14 @@ class AIManager:
                     "If you need any additional calculation not listed, use [CALC: expr]."
                 )
 
+        # Append unit directive to system prompt as a single sentence — small models
+        # follow one-line system directives silently; annotated context blocks get narrated.
+        _units = ctx_meta.get("units", "metric")
+        if _units == "imperial":
+            base_system += "\nAlways express real-world measurements in imperial units (feet, miles, lb, °F, gallons). Show metric only in parentheses."
+        else:
+            base_system += "\nAlways express real-world measurements in metric units (meters, km, kg, °C, liters). Show imperial only in parentheses."
+
         system_content = base_system
         if context:
             system_content = base_system + "\n\n" + context
@@ -3778,6 +3762,12 @@ class AIManager:
                     "Use those exact numbers — do NOT recompute. "
                     "If you need any additional calculation not listed, use [CALC: expr]."
                 )
+
+        _units = ctx_meta.get("units", "metric")
+        if _units == "imperial":
+            base_system += "\nAlways express real-world measurements in imperial units (feet, miles, lb, °F, gallons). Show metric only in parentheses."
+        else:
+            base_system += "\nAlways express real-world measurements in metric units (meters, km, kg, °C, liters). Show imperial only in parentheses."
 
         system_content = base_system
         if context:
