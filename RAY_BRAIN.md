@@ -28,11 +28,11 @@ Everything below lives in [`ai_manager.py`](ai_manager.py).
         │ 2. LIVE SENSES    │ │ 3. GPS / │ │ 4. RAG  │ │ 5. CALC AGENT     │
         │                   │ │ LOCATION │ │ RECALL  │ │ (math cortex)     │
         │ • CPU/GPU/RAM/    │ │          │ │         │ │                   │
-        │   temps/power     │ │ M9N fix +│ │ embed   │ │ ballistic? ─────┐ │
-        │ • mesh nodes      │ │ offline  │ │ query → │ │  parse range/   │ │
-        │   on/offline      │ │ reverse- │ │ cosine  │ │  zero/round →   │ │
-        │ • channels        │ │ geocode  │ │ vs every│ │  G1 drag-model  │ │
-        │ • recent messages │ │ (41k US  │ │ doc →   │ │  simulation     │ │
+        │   temps/power     │ │ M9N fix +│ │ hybrid  │ │ ballistic? ─────┐ │
+        │ • mesh nodes      │ │ offline  │ │ cosine  │ │  parse range/   │ │
+        │   on/offline      │ │ reverse- │ │ + BM25  │ │  zero/round →   │ │
+        │ • channels        │ │ geocode  │ │ gate    │ │  G1 drag-model  │ │
+        │ • recent messages │ │ (41k US  │ │ v≥0.35  │ │  simulation     │ │
         │ • telemetry       │ │ ZIPs +   │ │ top-5   │ │ general math? ─┤ │
         │ • topology/SNR    │ │ 68k world│ │ ≥ 0.45  │ │  LLM extracts  │ │
         │ • alerts          │ │ cities)  │ │ score   │ │  [CALC:] exprs │ │
@@ -89,7 +89,7 @@ flowchart TD
     U[User message] --> R{1. Routing<br/>keyword scanners}
     R -->|always| S[2. Live senses<br/>system stats + mesh state]
     R -->|always| G[3. GPS + offline<br/>reverse geocode]
-    R -->|knowledge question| RAG[4. RAG recall<br/>embed query, cosine top-5 ≥ 0.45]
+    R -->|knowledge question| RAG[4. RAG recall<br/>hybrid BM25+cosine, gate v≥0.35, top-5 ≥ 0.45]
     R -->|physics / ballistics| C[5. Calc agent<br/>G1 drag sim / sandboxed eval]
     R -->|asks about Ray itself| SK[Self-knowledge doc<br/>force-injected]
     S --> CTX[6. Context assembly<br/>+ last 8 chat messages]
@@ -130,20 +130,26 @@ military-base names when a civilian ZIP is close), everywhere else uses a
 gravity-weighted lookup over 68,000 world cities so a nearby town beats a distant
 metropolis. If you type coordinates or a place name, that overrides the device fix.
 
-### 4. Indexing & retrieval (RAG) — `_embed_unembedded_docs`, `rag_search`
+### 4. Indexing & retrieval (RAG, hybrid BM25 + cosine) — `_embed_unembedded_docs`, `rag_search`, `ai_fts_search`
 **Indexing:** at startup, every seeded knowledge doc is run through `qwen3-embedding:0.6b`,
 producing a 1024-dim vector "fingerprint of meaning" stored next to the text in SQLite.
 Each document is embedded as `"title\ntags\n\ncontent"` (embedding format v2) so metadata
-keywords like species names and category tags are baked into the semantic fingerprint, not
-just the prose body. Changed docs are automatically re-embedded.
-**Retrieval:** your question is embedded with a Qwen3-Embedding query-instruction prefix
-and compared against every doc by cosine similarity. Before sorting, a keyword-based
-**topic router** (`_classify_query_category`) detects the query's category (wildlife,
-medical, ballistics, etc.) and applies a **+8% score boost** to docs whose tags match —
+keywords like species names and category tags are baked into the semantic fingerprint.
+A parallel **FTS5 full-text index** (`ai_documents_fts`) is maintained in the same database
+for BM25 keyword search (title weighted 10×, tags 5×, content 1×).
+Changed docs are automatically re-embedded and re-indexed.
+**Retrieval:** uses a two-pass hybrid approach:
+1. Cosine similarity of the query embedding vs every doc.
+2. BM25 keyword search across the FTS index.
+Hybrid score = `max(v, 0.6·v + 0.4·bm25_norm)` — but only when the cosine similarity
+`v ≥ 0.35` (the **semantic plausibility gate**). This means BM25 can rescue a near-miss
+semantic candidate (e.g. exact term in doc title) but cannot surface an unrelated doc on
+keyword coincidence alone. A keyword-based **topic router** (`_classify_query_category`)
+then applies a **+8% score boost** to docs whose tags match the detected category —
 so the right cluster surfaces even when border-case scores are close. The top 5 docs
-scoring ≥ 0.45 (after boost) are pasted into the context. The confidence footer is
-computed from the raw pre-boost cosine score so it can't be inflated. Embeddings are
-cached in RAM for 120 s so repeated queries don't hit the database.
+with hybrid score ≥ 0.45 are pasted into the context. The confidence footer is computed
+from the raw pre-BM25 cosine score so it can't be inflated. Embeddings are cached in
+RAM for 120 s so repeated queries don't hit the database.
 
 ### 5. The calculator agent — `_calc_agent_pass`, `_ballistic_direct_compute`
 Ray does not trust a 3B-parameter model with arithmetic:

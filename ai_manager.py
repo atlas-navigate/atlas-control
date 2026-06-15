@@ -205,6 +205,7 @@ logger = logging.getLogger("ai_manager")
 # AI settings defaults live in ONE place — database.AI_DEFAULTS — so the
 # fresh-install defaults and these in-code fallbacks can never drift apart.
 # Per-box values saved in the ai_settings table override these at runtime.
+import database
 from database import AI_DEFAULTS as DEFAULT_SETTINGS
 
 # Safe math namespace shared across all calculator methods
@@ -2302,13 +2303,16 @@ RAY_SELF_DOC = {
         "scanners decide what your message needs: live dashboard data, GPS/location grounding, "
         "math, physics/ballistics, or knowledge-base retrieval. Routing costs near-zero time and "
         "decides which of my subsystems wake up.\n"
-        "4. RETRIEVAL (RAG) — for knowledge questions, your message is embedded with a query-instruction "
-        "prefix, then compared to every document by cosine similarity. Each document is indexed as "
-        "'title + tags + content' (embedding format v2) so metadata keywords are part of the "
-        "fingerprint. A topic router classifies the query's category (wildlife, medical, ballistics, "
+        "4. RETRIEVAL (RAG, hybrid BM25 + cosine) — for knowledge questions, your message is embedded "
+        "with a query-instruction prefix and compared to every document by cosine similarity. In "
+        "parallel, a BM25 keyword search runs against a full-text index (title weighted 10×, tags 5×, "
+        "content 1×). The hybrid score is max(v, 0.6·v + 0.4·bm25_norm) — but only for documents "
+        "whose cosine similarity is ≥ 0.35 (the semantic plausibility gate). BM25 can only boost "
+        "near-miss semantic candidates; it cannot surface an unrelated doc on keyword coincidence. "
+        "On top of that, a topic router classifies the query's category (wildlife, medical, ballistics, "
         "etc.) and applies a +8% score boost to docs whose tags match, so the right cluster surfaces "
-        "even when scores are close. The top 5 docs scoring ≥ 0.45 are pasted into my context. The "
-        "confidence footer uses the raw pre-boost cosine score so it cannot be inflated. "
+        "even when scores are close. The top 5 docs with hybrid score ≥ 0.45 are pasted into my "
+        "context. The confidence footer uses the raw pre-BM25 cosine score so it cannot be inflated. "
         "Live-data questions skip this step because the answer is already injected fresh.\n"
         "5. CONTEXT ASSEMBLY — my working memory for each reply is built from: current system "
         "stats (CPU/GPU/RAM/temps/power), my GPS fix reverse-geocoded to the nearest city (offline, "
@@ -2393,6 +2397,11 @@ _DOC_EMB_CACHE_TTL = 120  # seconds — refresh cached doc embeddings
 # cosine score, so it cannot be inflated by the +8% topic-router boost.
 # (nomic's old value was 0.30; do NOT reuse it — at 0.30 every query retrieves docs.)
 _RAG_MIN_SCORE = 0.45
+
+# Minimum vector similarity before BM25 is allowed to contribute. Below this
+# the doc is semantically unrelated to the query; keyword overlap is coincidental
+# and the BM25 boost would manufacture a false positive.
+_BM25_GATE = 0.35
 
 
 class AIManager:
@@ -3086,10 +3095,15 @@ class AIManager:
 
     # ------------------------------------------------------------------
     def rag_search(self, query, top_k=5, embed_model=None):
-        """Return (docs, top_score) for the query using cosine similarity.
+        """Return (docs, top_score) using BM25-boosted cosine similarity.
 
-        docs      — list of matching doc dicts (up to top_k, score >= _RAG_MIN_SCORE)
-        top_score — highest cosine similarity seen (0.0 if no docs matched)
+        docs      — list of matching doc dicts (up to top_k, hybrid score >= _RAG_MIN_SCORE)
+        top_score — raw cosine similarity of the best retrieved doc (0.0 if none)
+
+        Hybrid score = max(v, 0.6*v + 0.4*bm25_norm) when v >= _BM25_GATE, else v.
+        BM25 can only boost semantically plausible candidates — never surface an
+        unrelated doc on keyword coincidence (e.g. "temperature" in an AI-params doc
+        matching a cooking question when the vector similarity is near zero).
         """
         doc_embs = self._get_doc_embeddings()
         if not doc_embs:
@@ -3111,24 +3125,52 @@ class AIManager:
             )
         if not usable:
             return [], 0.0
-        scored = [(cosine_similarity(query_emb, emb), doc) for doc, emb in usable]
-        # Capture raw top score before boost so the confidence footer reflects
-        # actual cosine similarity (not the inflated boosted value).
+
+        # Vector scores for all docs
+        vec_scores = {doc["id"]: cosine_similarity(query_emb, emb) for doc, emb in usable}
+        doc_by_id  = {doc["id"]: doc for doc, emb in usable}
+
+        # BM25 scores — normalise to [0, 1] (bm25() returns negative; more negative = better)
+        bm25_raw = database.ai_fts_search(query, max_results=top_k * 4)
+        if bm25_raw:
+            min_s = min(s for _, s in bm25_raw)
+            max_s = max(s for _, s in bm25_raw)
+            bm25_norm = (
+                {did: (s - max_s) / (min_s - max_s) for did, s in bm25_raw}
+                if min_s < max_s else
+                {did: 1.0 for did, _ in bm25_raw}
+            )
+        else:
+            bm25_norm = {}
+
+        # Hybrid scoring: BM25 only applied to semantically plausible candidates
+        scored = []
+        for doc_id, v in vec_scores.items():
+            b = bm25_norm.get(doc_id, 0.0)
+            if v >= _BM25_GATE and b > 0.0:
+                hybrid = max(v, 0.6 * v + 0.4 * b)
+            else:
+                hybrid = v
+            scored.append((hybrid, v, doc_by_id[doc_id]))
+
+        # Sort; capture raw cosine of the top doc so the confidence footer
+        # reflects actual semantic similarity, not BM25-inflated hybrid score.
         scored.sort(key=lambda x: x[0], reverse=True)
-        top_score = scored[0][0] if scored else 0.0
+        top_score = scored[0][1] if scored else 0.0
+
         # Topic-router boost: detect the query's category and give matching docs
         # a small edge (+8%) so the right cluster surfaces even when border-case
-        # scores are close (e.g. "what do I do if bitten by a rattlesnake?" should
-        # preferentially pull wildlife docs over general medical docs).
+        # scores are close.
         cat = self._classify_query_category(query)
         if cat:
             cat_tag_hints = self._DOC_CATEGORY_TAGS.get(cat, [])
             def _in_cat(doc):
                 tags_lower = (doc.get("tags") or "").lower()
                 return any(t in tags_lower for t in cat_tag_hints)
-            scored = [(s * 1.08 if _in_cat(doc) else s, doc) for s, doc in scored]
+            scored = [(h * 1.08 if _in_cat(doc) else h, v, doc) for h, v, doc in scored]
             scored.sort(key=lambda x: x[0], reverse=True)
-        scored = [(s, doc) for s, doc in scored if s >= _RAG_MIN_SCORE]
+
+        scored = [(h, doc) for h, v, doc in scored if h >= _RAG_MIN_SCORE]
         return [doc for _, doc in scored[:top_k]], top_score
 
     # ------------------------------------------------------------------

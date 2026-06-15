@@ -2,6 +2,7 @@ import sqlite3
 import json
 import time
 import os
+import re
 import threading
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "data", "meshtastic.db")
@@ -253,6 +254,23 @@ def init_db():
             "INSERT INTO ai_settings (key, value) VALUES ('embed_format_v', '2') "
             "ON CONFLICT(key) DO UPDATE SET value='2'"
         )
+
+    # FTS5 index for BM25 hybrid search (title weighted 10×, tags 5×, content 1×)
+    c.execute("""
+        CREATE VIRTUAL TABLE IF NOT EXISTS ai_documents_fts USING fts5(
+            title,
+            tags,
+            content,
+            tokenize='unicode61 remove_diacritics 2'
+        )
+    """)
+    # Rebuild FTS if empty — happens on first boot after this schema ships or after a reset
+    if c.execute("SELECT COUNT(*) FROM ai_documents_fts").fetchone()[0] == 0:
+        c.execute("""
+            INSERT INTO ai_documents_fts(rowid, title, tags, content)
+            SELECT id, COALESCE(title,''), COALESCE(tags,''), COALESCE(content,'')
+            FROM ai_documents
+        """)
 
     # ── Waypoints ──────────────────────────────────────────────────────
     c.execute("""
@@ -924,6 +942,62 @@ def ai_get_documents_with_embeddings():
     return [dict(r) for r in rows]
 
 
+def _ai_fts_sync(doc_id, title, tags, content):
+    """Upsert one doc into the FTS index. No commit — caller must commit."""
+    db = get_db()
+    db.execute("DELETE FROM ai_documents_fts WHERE rowid=?", (doc_id,))
+    db.execute(
+        "INSERT INTO ai_documents_fts(rowid, title, tags, content) VALUES (?, ?, ?, ?)",
+        (doc_id, title or "", tags or "", content or "")
+    )
+
+
+def _ai_fts_remove(doc_id):
+    """Remove one doc from the FTS index. No commit — caller must commit."""
+    db = get_db()
+    db.execute("DELETE FROM ai_documents_fts WHERE rowid=?", (doc_id,))
+
+
+def ai_fts_search(query_text, max_results=20):
+    """BM25 keyword search over ai_documents_fts.
+
+    Returns list of (doc_id, raw_bm25_score) sorted best-first.
+    bm25() returns negative values; more negative = stronger match.
+    Returns [] if FTS5 is unavailable or query produces no tokens.
+    """
+    STOP = frozenset({
+        'what', 'does', 'do', 'is', 'are', 'the', 'a', 'an', 'in', 'of',
+        'and', 'or', 'how', 'me', 'my', 'we', 'tell', 'explain', 'about',
+        'mean', 'means', 'show', 'give', 'can', 'you', 'it', 'this',
+        'that', 'to', 'for', 'on', 'at', 'by', 'with', 'from', 'be',
+        'i', 'if', 'he', 'she', 'they', 'his', 'her', 'its', 'their',
+        'was', 'were', 'have', 'has', 'had', 'will', 'would', 'could',
+        'should', 'not', 'no', 'but', 'as', 'so', 'when', 'where', 'which',
+    })
+    tokens = re.findall(r'[a-zA-Z0-9]+', query_text)
+    # Keep meaningful single-char tokens (e.g. 'k', 'p') — only strip full stopwords
+    tokens = [t.lower() for t in tokens if t.lower() not in STOP]
+    if not tokens:
+        return []
+    seen, unique = set(), []
+    for t in tokens:
+        if t not in seen:
+            seen.add(t)
+            unique.append(t)
+    fts_query = ' OR '.join(f'"{t}"' for t in unique)
+    try:
+        db = get_db()
+        rows = db.execute(
+            "SELECT rowid, bm25(ai_documents_fts, 10.0, 5.0, 1.0) AS score "
+            "FROM ai_documents_fts WHERE ai_documents_fts MATCH ? "
+            "ORDER BY score LIMIT ?",
+            (fts_query, max_results)
+        ).fetchall()
+        return [(row["rowid"], row["score"]) for row in rows]
+    except Exception:
+        return []
+
+
 def ai_add_document(title, content, tags="", embedding=None, is_seed=False):
     """Insert a document and return its id."""
     db = get_db()
@@ -932,6 +1006,7 @@ def ai_add_document(title, content, tags="", embedding=None, is_seed=False):
         "INSERT INTO ai_documents (title, content, tags, embedding, created_at, is_seed) VALUES (?, ?, ?, ?, ?, ?)",
         (title, content, tags, embedding, now, 1 if is_seed else 0)
     )
+    _ai_fts_sync(cur.lastrowid, title, tags, content)
     db.commit()
     return cur.lastrowid
 
@@ -945,6 +1020,7 @@ def ai_update_document_embedding(doc_id, embedding_json):
 def ai_delete_document(doc_id):
     db = get_db()
     db.execute("DELETE FROM ai_documents WHERE id=?", (doc_id,))
+    _ai_fts_remove(doc_id)
     db.commit()
 
 
@@ -962,11 +1038,12 @@ def ai_seed_documents(docs):
         ).fetchone()
         if row is None:
             # New document — insert it
-            db.execute(
+            cur = db.execute(
                 "INSERT INTO ai_documents (title, content, tags, embedding, created_at, is_seed) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 (doc["title"], doc["content"], doc.get("tags", ""), None, now, 1)
             )
+            _ai_fts_sync(cur.lastrowid, doc["title"], doc.get("tags", ""), doc["content"])
             changed += 1
         else:
             # Existing document — update if content or tags changed, clear embedding to re-embed
@@ -977,6 +1054,7 @@ def ai_seed_documents(docs):
                     "UPDATE ai_documents SET content=?, tags=?, embedding=NULL WHERE id=?",
                     (new_content, new_tags, row["id"])
                 )
+                _ai_fts_sync(row["id"], doc["title"], new_tags, new_content)
                 changed += 1
     if changed:
         db.commit()
