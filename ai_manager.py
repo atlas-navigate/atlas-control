@@ -3201,6 +3201,39 @@ class AIManager:
             "gps_fix": None,
         }
 
+        # Unit preference (from app settings — governs all Ray answers)
+        try:
+            _app_settings = db.get_app_settings()
+            _units = _app_settings.get("units", "metric")
+        except Exception:
+            _units = "metric"
+        if _units == "imperial":
+            parts.append(
+                "=== UNIT PREFERENCE (USER SETTING: IMPERIAL) ===\n"
+                "Express ALL real-world measurements in IMPERIAL units — this is mandatory for every answer.\n"
+                "  • Distances / elevations: feet (ft), yards (yd), miles (mi), inches (in)\n"
+                "  • Speeds: feet per second (fps) or miles per hour (mph)\n"
+                "  • Weights / mass: pounds (lb), ounces (oz)\n"
+                "  • Ambient / cooking / weather temperature: Fahrenheit (°F)\n"
+                "  • Volumes: gallons (gal), fluid ounces (fl oz)\n"
+                "  • Pressure: pounds per square inch (psi)\n"
+                "Metric equivalents may follow in parentheses if helpful. Always lead with imperial.\n"
+                "Exception: hardware/sensor temperatures (CPU, GPU) stay in °C per convention."
+            )
+        else:
+            parts.append(
+                "=== UNIT PREFERENCE (USER SETTING: METRIC) ===\n"
+                "Express ALL real-world measurements in METRIC (SI) units — this is mandatory for every answer.\n"
+                "  • Distances / elevations: meters (m), kilometers (km), centimeters (cm)\n"
+                "  • Speeds: meters per second (m/s) or kilometers per hour (km/h)\n"
+                "  • Weights / mass: kilograms (kg), grams (g)\n"
+                "  • Ambient / cooking / weather temperature: Celsius (°C)\n"
+                "  • Volumes: liters (L), milliliters (mL)\n"
+                "  • Pressure: kilopascals (kPa) or hectopascals (hPa)\n"
+                "Imperial equivalents may follow in parentheses if helpful. Always lead with metric.\n"
+                "Exception: hardware/sensor temperatures (CPU, GPU) stay in °C per convention."
+            )
+
         # System stats context
         try:
             s = system_stats.get_stats()
@@ -3277,9 +3310,15 @@ class AIManager:
                     if city:
                         gps_line += f" | location: {city}"
                     if alt is not None:
-                        gps_line += f" | altitude: {alt:.1f} m"
+                        if _units == "imperial":
+                            gps_line += f" | altitude: {alt * 3.28084:.1f} ft"
+                        else:
+                            gps_line += f" | altitude: {alt:.1f} m"
                     if spd is not None:
-                        gps_line += f" | speed: {spd:.1f} m/s"
+                        if _units == "imperial":
+                            gps_line += f" | speed: {spd * 2.23694:.1f} mph"
+                        else:
+                            gps_line += f" | speed: {spd:.1f} m/s"
                     if hdg is not None:
                         gps_line += f" | heading: {hdg:.1f}°"
                     if sats is not None:

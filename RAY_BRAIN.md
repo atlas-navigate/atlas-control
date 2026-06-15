@@ -47,6 +47,7 @@ Everything below lives in [`ai_manager.py`](ai_manager.py).
               │              memory for this reply)       │
               │                                           │
               │  system prompt                            │
+              │   + UNIT PREFERENCE (metric/imperial)     │
               │   + SYSTEM STATUS                         │
               │   + CURRENT POSITION (+ nearest city)     │
               │   + MESH NETWORK STATE                    │
@@ -118,10 +119,17 @@ physics questions trigger the calculator agent, and questions about Ray itself f
 the self-architecture doc.
 
 ### 2. Live senses — `build_context()`
-Every reply gets fresh system stats (per-core CPU, GPU, RAM, disk, temperatures, power
-draw, uptime) and the live mesh picture from SQLite: node online/offline status, battery,
-SNR, channels, the last 10 messages, and active alerts. Telemetry, positions, and topology
-are injected only when the question asks for them — keeping the context window lean.
+The **first** thing injected is a `=== UNIT PREFERENCE ===` block read from the app
+settings (`units`: `metric` or `imperial`). This governs every measurement Ray expresses
+in its answer — distances, speeds, weights, volumes, ambient temperature — and is
+mandatory (not a suggestion). Hardware temperatures (CPU, GPU) always stay in °C.
+GPS altitude and speed are also converted to the preferred system before injection.
+
+Every reply then gets fresh system stats (per-core CPU, GPU, RAM, disk, temperatures,
+power draw, uptime) and the live mesh picture from SQLite: node online/offline status,
+battery, SNR, channels, the last 10 messages, and active alerts. Telemetry, positions,
+and topology are injected only when the question asks for them — keeping the context
+window lean.
 
 ### 3. Location grounding — `_build_location_prefix`, `_reverse_geocode`
 The SparkFun M9N GPS fix is injected into **every** prompt, reverse-geocoded entirely
