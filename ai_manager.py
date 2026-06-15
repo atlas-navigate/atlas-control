@@ -355,12 +355,12 @@ def _g1_cd(v_mps):
             return cd0 + t * (cd1 - cd0)
     return tbl[-1][1]
 
-def _ballistic_drop(range_m, zero_m=100.0, v0_mps=975.0, bc_g1=0.269, dt=0.005):
+def _ballistic_sim(range_m, zero_m=100.0, v0_mps=975.0, bc_g1=0.269, dt=0.005):
     """
     Point-mass trajectory with G1 aerodynamic drag model.
 
-    Returns bullet drop in CENTIMETERS at range_m relative to line of sight
-    when zeroed at zero_m. Negative = bullet is below line of sight.
+    Returns (drop_cm, tof_s) at range_m relative to line of sight when zeroed at zero_m.
+    drop_cm is negative when bullet is below line of sight.
 
     Args:
         range_m  : Target range in meters
@@ -369,50 +369,70 @@ def _ballistic_drop(range_m, zero_m=100.0, v0_mps=975.0, bc_g1=0.269, dt=0.005):
         bc_g1    : G1 ballistic coefficient  (default 0.269, 55gr .224 bullet)
         dt       : Integration time step (seconds; smaller = more accurate)
     """
-    _g  = 9.80665
-    rho = 1.225                  # kg/m³ standard sea-level air density
-    bc_si = bc_g1 * 703.07       # convert G1 lb/in² → kg/m²
+    _g    = 9.80665
+    rho   = 1.225                  # kg/m³ standard sea-level air density
+    bc_si = bc_g1 * 703.07         # convert G1 lb/in² → kg/m²
 
     def _sim(elev_rad, target_x):
-        """Simulate and return y-height (m) when trajectory crosses target_x."""
-        x, y   = 0.0, 0.0
-        vx     = v0_mps * _math_mod.cos(elev_rad)
-        vy     = v0_mps * _math_mod.sin(elev_rad)
-        px, py = x, y
+        """Simulate to target_x, return (y_m, tof_s)."""
+        x, y, t    = 0.0, 0.0, 0.0
+        vx         = v0_mps * _math_mod.cos(elev_rad)
+        vy         = v0_mps * _math_mod.sin(elev_rad)
+        px, py, pt = x, y, t
         while True:
             v = _math_mod.sqrt(vx * vx + vy * vy)
             if v < 1.0:
-                return y           # bullet stalled
+                return y, t        # bullet stalled
             cd = _g1_cd(v)
-            k  = cd * rho / (2.0 * bc_si)   # drag constant (1/m)
-            # Component accelerations
+            k  = cd * rho / (2.0 * bc_si)
             ax = -k * v * vx
             ay = -_g - k * v * vy
-            px, py = x, y
+            px, py, pt = x, y, t
             vx += ax * dt
             vy += ay * dt
             x  += vx * dt
             y  += vy * dt
+            t  += dt
             if x >= target_x:
-                # Linear interpolation to exact target_x
                 if x != px:
                     frac = (target_x - px) / (x - px)
-                    return py + frac * (y - py)
-                return y
+                    return py + frac * (y - py), pt + frac * (t - pt)
+                return y, t
 
     # Bisection: find elevation angle that gives y=0 at zero_m
     lo = _math_mod.radians(-1.0)
     hi = _math_mod.radians(8.0)
     for _ in range(64):
         mid = (lo + hi) * 0.5
-        if _sim(mid, zero_m) > 0.0:
+        y_z, _ = _sim(mid, zero_m)
+        if y_z > 0.0:
             hi = mid
         else:
             lo = mid
     zero_elev = (lo + hi) * 0.5
 
-    drop_m = _sim(zero_elev, range_m)
-    return round(drop_m * 100.0, 1)   # → centimetres, 1 decimal place
+    drop_m, tof_s = _sim(zero_elev, range_m)
+    return round(drop_m * 100.0, 1), round(tof_s, 3)
+
+
+def _ballistic_drop(range_m, zero_m=100.0, v0_mps=975.0, bc_g1=0.269, dt=0.005):
+    """Drop in cm at range_m zeroed at zero_m (backward-compatible wrapper for CALC namespace)."""
+    drop_cm, _ = _ballistic_sim(range_m, zero_m, v0_mps, bc_g1, dt)
+    return drop_cm
+
+
+def _miller_sg(weight_gr, diam_in, length_in, twist_in, v0_mps):
+    """
+    Miller gyroscopic stability factor (Don Miller, 2005).
+    Formula: Sg = 30·m / (n² · d³ · L_cal · (1 + L_cal²)) × (v_fps/2800)^(1/3)
+    where n = twist_in/diam_in (calibers per turn), L_cal = length_in/diam_in.
+    Returns Sg (> 1.5 is stable; > 2.0 is well-stabilized for rifle bullets).
+    """
+    l_cal = length_in / diam_in           # bullet length in calibers
+    n     = twist_in  / diam_in           # twist rate in calibers per turn
+    sg    = (30.0 * weight_gr) / (n**2 * diam_in**3 * l_cal * (1.0 + l_cal**2))
+    sg   *= (v0_mps * 3.28084 / 2800.0) ** (1.0 / 3.0)   # velocity correction
+    return max(sg, 0.1)
 
 
 def _mps_to_fps(v): return round(v * 3.28084, 1)
@@ -456,26 +476,27 @@ _CALC_SAFE_NAMES = {
 }
 
 # ---------------------------------------------------------------------------
-# Common ammunition reference data: (muzzle_velocity_mps, bc_g1)
-# These are standard SAAMI/NATO values at sea level from typical barrel lengths.
+# Common ammunition reference data.
+# Physical bullet dimensions come from Sierra/Hornady/NATO published specs.
+# Twist references are standard SAAMI/NATO barrel specs for each load.
 # ---------------------------------------------------------------------------
 _COMMON_ROUNDS = {
-    # label: (v0_mps, bc_g1, description)
-    "5.56_55":   (975,  0.269, "5.56mm/.223 Rem 55gr FMJ (M193)"),
-    "5.56_62":   (930,  0.307, "5.56mm/.223 Rem 62gr FMJ (M855/SS109)"),
-    "5.56_77":   (884,  0.372, "5.56mm/.223 Rem 77gr OTM (Mk262)"),
-    "308_147":   (838,  0.412, ".308 Win/7.62x51 147gr FMJ (M80)"),
-    "308_168":   (820,  0.447, ".308 Win/7.62x51 168gr BTHP (M118LR)"),
-    "308_175":   (808,  0.505, ".308 Win/7.62x51 175gr BTHP"),
-    "300wm_190": (932,  0.560, ".300 Win Mag 190gr BTHP"),
-    "300wm_220": (884,  0.640, ".300 Win Mag 220gr BTHP"),
-    "65cm_140":  (869,  0.626, "6.5mm Creedmoor 140gr BTHP"),
-    "65cm_130":  (884,  0.583, "6.5mm Creedmoor 130gr BTHP"),
-    "338lm_250": (905,  0.587, ".338 Lapua Magnum 250gr BTHP"),
-    "338lm_300": (850,  0.730, ".338 Lapua Magnum 300gr BTHP"),
-    "50bmg_750": (895,  1.050, ".50 BMG 750gr APIT"),
-    "9mm_115":   (370,  0.145, "9mm Luger 115gr FMJ"),
-    "45acp_230": (259,  0.195, ".45 ACP 230gr FMJ"),
+    # label: (v0_mps, bc_g1, description, weight_gr, diam_in, length_in, ref_twist_in)
+    "5.56_55":   (975,  0.269, "5.56mm/.223 Rem 55gr FMJ (M193)",       55,  0.224, 0.910,  9.0),
+    "5.56_62":   (930,  0.307, "5.56mm/.223 Rem 62gr FMJ (M855/SS109)", 62,  0.224, 0.990,  7.0),
+    "5.56_77":   (884,  0.372, "5.56mm/.223 Rem 77gr OTM (Mk262)",      77,  0.224, 1.060,  8.0),
+    "308_147":   (838,  0.412, ".308 Win/7.62x51 147gr FMJ (M80)",     147,  0.308, 1.140, 12.0),
+    "308_168":   (820,  0.447, ".308 Win/7.62x51 168gr BTHP (M118LR)", 168,  0.308, 1.226, 10.0),
+    "308_175":   (808,  0.505, ".308 Win/7.62x51 175gr BTHP",          175,  0.308, 1.240, 10.0),
+    "300wm_190": (932,  0.560, ".300 Win Mag 190gr BTHP",              190,  0.308, 1.350, 10.0),
+    "300wm_220": (884,  0.640, ".300 Win Mag 220gr BTHP",              220,  0.308, 1.450, 10.0),
+    "65cm_140":  (869,  0.626, "6.5mm Creedmoor 140gr BTHP",           140,  0.264, 1.196,  8.0),
+    "65cm_130":  (884,  0.583, "6.5mm Creedmoor 130gr BTHP",           130,  0.264, 1.150,  8.0),
+    "338lm_250": (905,  0.587, ".338 Lapua Magnum 250gr BTHP",         250,  0.338, 1.590, 10.0),
+    "338lm_300": (850,  0.730, ".338 Lapua Magnum 300gr BTHP",         300,  0.338, 1.750, 10.0),
+    "50bmg_750": (895,  1.050, ".50 BMG 750gr APIT",                   750,  0.510, 4.180, 15.0),
+    "9mm_115":   (370,  0.145, "9mm Luger 115gr FMJ",                  115,  0.355, 0.680, 16.0),
+    "45acp_230": (259,  0.195, ".45 ACP 230gr FMJ",                    230,  0.452, 0.800, 16.0),
 }
 
 # Keyword fragments for identifying specific rounds in a query
@@ -2298,39 +2319,47 @@ RAY_SELF_DOC = {
         "stored in SQLite. At startup, each document is embedded as 'title + tags + content' by "
         "qwen3-embedding:0.6b, producing a 1024-dim vector that captures both the metadata keywords "
         "and the prose meaning. The vector is stored alongside the text. Edited docs and docs with "
-        "cleared embeddings are automatically re-embedded in a background thread.\n"
+        "cleared embeddings are automatically re-embedded in a background thread. A parallel FTS5 "
+        "full-text index (ai_documents_fts) enables BM25 keyword search across all docs.\n"
         "3. ROUTING (how I classify your question) — before I generate anything, fast keyword "
         "scanners decide what your message needs: live dashboard data, GPS/location grounding, "
         "math, physics/ballistics, or knowledge-base retrieval. Routing costs near-zero time and "
-        "decides which of my subsystems wake up.\n"
+        "decides which of my subsystems wake up. If a question requires specific parameters I do "
+        "not have (barrel twist rate, zero distance, custom load data), I answer with best "
+        "available defaults and ask for the missing detail.\n"
         "4. RETRIEVAL (RAG, hybrid BM25 + cosine) — for knowledge questions, your message is embedded "
         "with a query-instruction prefix and compared to every document by cosine similarity. In "
         "parallel, a BM25 keyword search runs against a full-text index (title weighted 10×, tags 5×, "
         "content 1×). The hybrid score is max(v, 0.6·v + 0.4·bm25_norm) — but only for documents "
         "whose cosine similarity is ≥ 0.35 (the semantic plausibility gate). BM25 can only boost "
         "near-miss semantic candidates; it cannot surface an unrelated doc on keyword coincidence. "
-        "On top of that, a topic router classifies the query's category (wildlife, medical, ballistics, "
-        "etc.) and applies a +8% score boost to docs whose tags match, so the right cluster surfaces "
-        "even when scores are close. The top 5 docs with hybrid score ≥ 0.45 are pasted into my "
-        "context. The confidence footer uses the raw pre-BM25 cosine score so it cannot be inflated. "
-        "Live-data questions skip this step because the answer is already injected fresh.\n"
+        "A topic router classifies the query (wildlife, medical, ballistics, etc.) and applies a "
+        "+8% score boost to docs whose tags match. The top 5 docs with hybrid score ≥ 0.45 are "
+        "pasted into my context. The confidence footer uses the raw cosine score, not the boosted "
+        "hybrid, so it cannot be inflated. Live-data questions skip RAG because the answer is "
+        "already injected fresh.\n"
         "5. CONTEXT ASSEMBLY — my working memory for each reply is built from: current system "
         "stats (CPU/GPU/RAM/temps/power), my GPS fix reverse-geocoded to the nearest city (offline, "
         "from 41k US ZIP centroids + 68k world cities), live mesh state (nodes, channels, recent "
         "messages, telemetry, topology, alerts), any retrieved knowledge docs, and the last 8 "
         "messages of our conversation.\n"
-        "6. CALCULATOR AGENT — I do not trust myself with arithmetic. For ballistics I parse range, "
-        "zero and round, then a real G1 drag-model physics simulation computes the drop before I "
-        "ever speak. For general math, a first low-temperature pass extracts pure expressions, a "
-        "sandboxed evaluator computes them, and the verified numbers are handed to me with orders "
-        "not to recompute. I can also emit [CALC: expr] tags that get replaced by computed values.\n"
+        "6. CALCULATOR AGENT (physics/math cortex) — I do not trust myself with arithmetic. "
+        "For ballistics: I parse range, zero distance, and round from your message; then a real "
+        "point-mass G1 drag-model simulation integrates the trajectory and returns drop (cm) and "
+        "exact time of flight (s). Spin drift is computed from Don Miller's (2005) gyroscopic "
+        "stability formula: Sg = 30·m / (n²·d³·L·(1+L²)) × (v/2800)^(1/3), then applied via "
+        "Litz's formula SD_in = 1.25·Sg·TOF^1.83. Sg depends on the bullet's weight, diameter, "
+        "length, and barrel twist rate — if you specify your twist (e.g. '1:7 twist'), I use it; "
+        "otherwise I use the standard reference twist for that round. For general math, a first "
+        "low-temperature pass extracts pure [CALC: expr] expressions, a sandboxed evaluator "
+        "computes them, and the verified numbers are handed to me with orders not to recompute.\n"
         "7. GENERATION — the assembled context becomes my system prompt and I stream the answer "
         "token by token within a 4096-token context window.\n"
         "8. CONFIDENCE — every answer ends with a footer I cannot fake: HIGH/MEDIUM/LOW plus the "
         "actual sources used (Live Mesh Data, Knowledge Base + match score, GPS Fix, System Stats, "
         "or Training Knowledge). It is computed from what was really injected, not from my opinion.\n\n"
         "KNOWLEDGE MAP — the Ray AI → Settings tab shows an interactive SVG visualization of my "
-        "55 knowledge documents. Nodes are colored by topic cluster; edges connect docs whose "
+        "knowledge documents. Nodes are colored by topic cluster; edges connect docs whose "
         "cosine similarity is ≥ 0.55 (up to 6 per node, edge color shifts slate→amber with "
         "similarity). Click a node to highlight its connections, see a ranked 'Related' list, or "
         "switch to the 'Read' tab to view the full document text. Nodes can be dragged to reposition.\n\n"
@@ -2843,13 +2872,12 @@ class AIManager:
     def _identify_round(self, user_message):
         """
         Attempt to identify the ammunition from the user's message.
-        Returns (v0_mps, bc_g1, description) or None if unknown.
+        Returns (v0_mps, bc_g1, description, weight_gr, diam_in, length_in, ref_twist_in) or None.
         """
         msg_lower = user_message.lower()
         for keywords, key in _ROUND_HINTS:
             if all(k in msg_lower for k in keywords):
-                v0, bc, desc = _COMMON_ROUNDS[key]
-                return v0, bc, desc
+                return _COMMON_ROUNDS[key]
         return None
 
     # ------------------------------------------------------------------
@@ -2907,7 +2935,7 @@ class AIManager:
         # Build a specialized extraction prompt when round data is available
         round_info = self._identify_round(user_message)
         if round_info:
-            v0, bc, desc = round_info
+            v0, bc, desc, *_ = round_info
             round_hint = (
                 f"The round in the question is {desc}.\n"
                 f"Use these values: v0_mps={v0}, bc_g1={bc}\n"
@@ -3049,29 +3077,48 @@ class AIManager:
         # ── Identify round ──────────────────────────────────────────────────
         round_data = self._identify_round(user_message)
         if round_data:
-            v0, bc, desc = round_data
+            v0, bc, desc, m_gr, d_in, l_in, ref_twist = round_data
         else:
             # Fallback defaults: 5.56mm 55gr
             v0, bc, desc = 975, 0.269, "5.56mm 55gr (assumed)"
+            m_gr, d_in, l_in, ref_twist = 55, 0.224, 0.910, 9.0
             logger.debug("Ballistic direct compute: round not identified, using 5.56 55gr defaults")
+
+        # ── Parse twist rate from user message (overrides round default) ────
+        twist_in = ref_twist
+        twist_explicit = False
+        _twist_m = re.search(
+            r'\b1\s*[:/]\s*(\d+(?:\.\d+)?)\s*(?:["\']|\btwist\b|\bturn\b|\brifling\b)?',
+            user_message, re.IGNORECASE
+        )
+        if not _twist_m:
+            _twist_m = re.search(
+                r'\bone[\s-]+in[\s-]+(\d+(?:\.\d+)?)\s*(?:["\']|\btwist\b|\bturn\b)?',
+                user_message, re.IGNORECASE
+            )
+        if _twist_m:
+            _t = float(_twist_m.group(1))
+            if 4.0 <= _t <= 40.0:
+                twist_in = _t
+                twist_explicit = True
 
         # ── Run the physics simulation ──────────────────────────────────────
         try:
-            drop_cm   = _ballistic_drop(range_m, zero_m, v0, bc)
+            drop_cm, tof_s = _ballistic_sim(range_m, zero_m, v0, bc)
             drop_in   = _cm_to_inches(drop_cm)
             drop_ft   = round(drop_cm / 30.48, 2)
             drop_moa  = round(abs(drop_cm) / (range_m * 0.02909), 1)   # 1 MOA ≈ 2.909 cm/100 m
             drop_mrad = round(abs(drop_cm) / (range_m * 0.1), 2)       # 1 mrad = 10 cm/100 m
-            tof_approx = round(range_m / (v0 * 0.72), 2)               # rough ToF estimate
 
-            # Spin drift (Litz simplified): SD_in = 1.25 * SG * TOF²
-            # SG = 3.35 calibrated from .308 Win 168gr known drift (~10 in at 914m).
-            # Actual drift depends on barrel twist rate; faster twist = more drift.
-            # Drift is rightward for RH-twist barrels; reverse for LH-twist.
-            sd_in = round(1.25 * 3.35 * tof_approx ** 2, 2)
-            sd_cm = round(sd_in * 2.54, 1)
+            # Spin drift: Litz formula SD_in = 1.25 × Sg × TOF^1.83
+            # Sg is the Miller gyroscopic stability factor for this bullet/twist combination.
+            # Faster twist → higher Sg → more rightward drift (RH barrel). LH twist reverses direction.
+            sg     = _miller_sg(m_gr, d_in, l_in, twist_in, v0)
+            sd_in  = round(1.25 * sg * tof_s ** 1.83, 2)
+            sd_cm  = round(sd_in * 2.54, 1)
             sd_moa = round(sd_in / (range_m / 100 * 1.047), 2)
 
+            twist_label = f"1:{twist_in:.0f}\" twist" + ("" if twist_explicit else " (standard ref.)")
             direction = "below" if drop_cm < 0 else "above"
 
             if _units == "imperial":
@@ -3096,17 +3143,18 @@ class AIManager:
                 f"Correction needed:\n"
                 f"  {drop_moa} MOA  ({direction})\n"
                 f"  {drop_mrad} mrad ({direction})\n"
-                f"Approx. time of flight: {tof_approx} s\n"
-                f"Spin drift (RH twist, Litz approx., 1:10 reference twist): {sd_primary} right  [{sd_moa} MOA]\n"
-                f"  Note: faster twist (e.g. 1:7) drifts ~40% more; LH twist drifts left.\n"
+                f"Time of flight: {tof_s} s\n"
+                f"Spin drift (RH {twist_label}, Miller Sg={sg:.2f}, Litz formula): {sd_primary} right  [{sd_moa} MOA]\n"
+                f"  Note: faster twist = higher Sg = more drift; slower twist = less drift. LH twist drifts left.\n"
+                f"  Specify your barrel twist (e.g. '1:7 twist') for a round-specific result.\n"
                 f"\n"
                 f"These are G1 drag-model results at sea level, standard atmosphere.\n"
-                f"Actual values may vary with altitude, temperature, barrel length, and twist rate.\n"
+                f"Actual values may vary with altitude, temperature, and barrel length.\n"
                 f"NOTE: All ranges above are in METERS. Do not conflate with yards."
             )
             logger.info(
                 f"Ballistic direct compute: {desc} {range_m:.0f}m zero={zero_m:.0f}m "
-                f"drop={drop_cm}cm ({drop_in}in)"
+                f"drop={drop_cm}cm ({drop_in}in) tof={tof_s}s sg={sg:.2f} twist={twist_in}\""
             )
             return block
         except Exception as ex:

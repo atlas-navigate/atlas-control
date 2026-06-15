@@ -538,6 +538,41 @@ function mdInline(text, kp) {
         }
       }
     }
+    if (c === '$') {
+      // $inline math$
+      const end = text.indexOf('$', i + 1);
+      if (end > i + 1) {
+        const math = text.slice(i + 1, end);
+        if (math.includes('\\') || math.includes('^') || math.includes('_') && math.includes('{') || math.includes('\\frac')) {
+          flush();
+          if (window.katex) {
+            try {
+              const html = window.katex.renderToString(math, {
+                output: 'html',
+                throwOnError: false,
+                displayMode: false
+              });
+              out.push( /*#__PURE__*/React.createElement("span", {
+                key: kp + 'mx' + i,
+                dangerouslySetInnerHTML: {
+                  __html: html
+                }
+              }));
+            } catch (e) {
+              out.push( /*#__PURE__*/React.createElement("code", {
+                key: kp + 'mx' + i
+              }, math));
+            }
+          } else {
+            out.push( /*#__PURE__*/React.createElement("code", {
+              key: kp + 'mx' + i
+            }, math));
+          }
+          i = end + 1;
+          continue;
+        }
+      }
+    }
     buf += c;
     i++;
   }
@@ -582,6 +617,61 @@ function MarkdownMessage({
   let k = 0;
   while (i < lines.length) {
     const line = lines[i];
+
+    // ── display math $$...$$ ──
+    if (/^\s*\$\$/.test(line)) {
+      const afterOpen = line.replace(/^\s*\$\$/, '');
+      let latex;
+      if (afterOpen.trimEnd().endsWith('$$')) {
+        latex = afterOpen.trimEnd().slice(0, -2); // same-line $$..$$
+        i++;
+      } else if (afterOpen.trim() === '') {
+        i++;
+        const mlines = [];
+        while (i < lines.length && !/^\s*\$\$\s*$/.test(lines[i])) {
+          mlines.push(lines[i]);
+          i++;
+        }
+        if (i < lines.length) i++;
+        latex = mlines.join('\n');
+      } else {
+        latex = afterOpen;
+        i++;
+      }
+      if (window.katex) {
+        try {
+          const html = window.katex.renderToString(latex.trim(), {
+            output: 'html',
+            throwOnError: false,
+            displayMode: true
+          });
+          blocks.push( /*#__PURE__*/React.createElement("div", {
+            key: k++,
+            style: {
+              overflowX: 'auto'
+            },
+            dangerouslySetInnerHTML: {
+              __html: html
+            }
+          }));
+        } catch (e) {
+          blocks.push( /*#__PURE__*/React.createElement("pre", {
+            key: k++,
+            style: {
+              textAlign: 'center'
+            }
+          }, latex.trim()));
+        }
+      } else {
+        blocks.push( /*#__PURE__*/React.createElement("pre", {
+          key: k++,
+          style: {
+            textAlign: 'center'
+          }
+        }, latex.trim()));
+      }
+      continue;
+    }
 
     // ── fenced code block ──
     const fence = line.match(/^\s*```(.*)$/);

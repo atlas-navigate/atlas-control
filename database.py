@@ -244,6 +244,13 @@ def init_db():
     row = c.execute("SELECT value FROM ai_settings WHERE key='system_prompt'").fetchone()
     if row and _OLD_PROMPT_FRAGMENT in row[0]:
         c.execute("DELETE FROM ai_settings WHERE key='system_prompt'")
+    # Migrate: add ask-for-clarification guideline (Jun 2026). Clear stored default
+    # if it's the old default (contains the anchor phrase but not the new directive).
+    _ASK_ANCHOR   = "Never output your reasoning"
+    _ASK_NEW_FRAG = "standard defaults AND ask the user"
+    row = c.execute("SELECT value FROM ai_settings WHERE key='system_prompt'").fetchone()
+    if row and _ASK_ANCHOR in row[0] and _ASK_NEW_FRAG not in row[0]:
+        c.execute("DELETE FROM ai_settings WHERE key='system_prompt'")
     # Embedding-format migration v2: embeddings now include title+tags text
     # prepended to the doc body, which changes every vector. Clear stored
     # embeddings on first boot after this migration so the background re-embedder
@@ -1095,7 +1102,10 @@ AI_DEFAULTS = {
         "- Be concise. One to three sentences for simple questions; a structured list only if the topic genuinely has multiple distinct parts.\n"
         "- When KNOWLEDGE BASE docs are present, use them as your primary source. Quote specific values and procedures from them.\n"
         "- Do not hedge or add unnecessary caveats about being an AI or being offline.\n"
-        "- Never output your reasoning, deliberation, or internal decision process. Give the answer directly.\n\n"
+        "- Never output your reasoning, deliberation, or internal decision process. Give the answer directly.\n"
+        "- When a question requires specific parameters for an accurate answer (e.g. barrel twist rate for "
+        "spin drift, muzzle velocity for a custom load, zero distance), provide the best answer using "
+        "standard defaults AND ask the user for the missing detail so follow-up answers can be exact.\n\n"
         + AI_FORMATTING_GUIDE
     ),
     "warmup_on_start": "true",
