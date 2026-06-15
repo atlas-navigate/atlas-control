@@ -482,7 +482,7 @@ _CALC_SAFE_NAMES = {
 # ---------------------------------------------------------------------------
 _COMMON_ROUNDS = {
     # label: (v0_mps, bc_g1, description, weight_gr, diam_in, length_in, ref_twist_in)
-    "5.56_55":   (975,  0.269, "5.56mm/.223 Rem 55gr FMJ (M193)",       55,  0.224, 0.910,  9.0),
+    "5.56_55":   (975,  0.269, "5.56mm/.223 Rem 55gr FMJ (M193)",       55,  0.224, 0.910,  7.0),
     "5.56_62":   (930,  0.307, "5.56mm/.223 Rem 62gr FMJ (M855/SS109)", 62,  0.224, 0.990,  7.0),
     "5.56_77":   (884,  0.372, "5.56mm/.223 Rem 77gr OTM (Mk262)",      77,  0.224, 1.060,  8.0),
     "308_147":   (838,  0.412, ".308 Win/7.62x51 147gr FMJ (M80)",     147,  0.308, 1.140, 12.0),
@@ -3081,7 +3081,7 @@ class AIManager:
         else:
             # Fallback defaults: 5.56mm 55gr
             v0, bc, desc = 975, 0.269, "5.56mm 55gr (assumed)"
-            m_gr, d_in, l_in, ref_twist = 55, 0.224, 0.910, 9.0
+            m_gr, d_in, l_in, ref_twist = 55, 0.224, 0.910, 7.0
             logger.debug("Ballistic direct compute: round not identified, using 5.56 55gr defaults")
 
         # ── Parse twist rate from user message (overrides round default) ────
@@ -3118,7 +3118,10 @@ class AIManager:
             sd_cm  = round(sd_in * 2.54, 1)
             sd_moa = round(sd_in / (range_m / 100 * 1.047), 2)
 
-            twist_label = f"1:{twist_in:.0f}\" twist" + ("" if twist_explicit else " (standard ref.)")
+            if twist_explicit:
+                twist_src = f"user-specified"
+            else:
+                twist_src = f"standard barrel for this round"
             direction = "below" if drop_cm < 0 else "above"
 
             if _units == "imperial":
@@ -3143,14 +3146,20 @@ class AIManager:
                 f"Correction needed:\n"
                 f"  {drop_moa} MOA  ({direction})\n"
                 f"  {drop_mrad} mrad ({direction})\n"
-                f"Time of flight: {tof_s} s\n"
-                f"Spin drift (RH {twist_label}, Miller Sg={sg:.2f}, Litz formula): {sd_primary} right  [{sd_moa} MOA]\n"
-                f"  Note: faster twist = higher Sg = more drift; slower twist = less drift. LH twist drifts left.\n"
-                f"  Specify your barrel twist (e.g. '1:7 twist') for a round-specific result.\n"
+                f"Time of flight (from G1 sim): {tof_s} s\n"
+                f"\n"
+                f"=== SPIN DRIFT (verified physics, do not recalculate) ===\n"
+                f"Barrel twist assumed: 1:{twist_in:.0f}\" RH  [{twist_src}]\n"
+                f"Miller Sg: {sg:.3f}  (Sg = 30·{m_gr}/(n²·{d_in}³·{l_in/d_in:.3f}·(1+{l_in/d_in:.3f}²)) × (v/2800)^(1/3))\n"
+                f"Litz formula: SD = 1.25 × {sg:.3f} × {tof_s}^1.83 = {sd_in} in\n"
+                f"SPIN DRIFT RESULT: {sd_primary} to the RIGHT  [{sd_moa} MOA]\n"
+                f"Direction: RH twist → bullet drifts RIGHT. LH twist → bullet drifts LEFT.\n"
+                f"Twist effect: faster twist (lower number) = higher Sg = more drift.\n"
+                f"If your barrel twist differs from 1:{twist_in:.0f}\", specify it for an exact answer.\n"
                 f"\n"
                 f"These are G1 drag-model results at sea level, standard atmosphere.\n"
                 f"Actual values may vary with altitude, temperature, and barrel length.\n"
-                f"NOTE: All ranges above are in METERS. Do not conflate with yards."
+                f"NOTE: All distances above are in METERS. Do not conflate with yards."
             )
             logger.info(
                 f"Ballistic direct compute: {desc} {range_m:.0f}m zero={zero_m:.0f}m "
