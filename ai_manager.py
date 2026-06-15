@@ -3021,149 +3021,155 @@ class AIManager:
     # ------------------------------------------------------------------
     def _ballistic_direct_compute(self, user_message):
         """
-        Directly compute bullet drop for a ballistic trajectory question.
-        Parses range, zero distance, and round from the message, then calls
-        the G1 drag model calculator — no LLM involvement in the maths.
-        Returns a pre-formatted context block string, or "" if params not found.
+        Directly compute bullet drop + spin drift for a ballistic trajectory question.
+        Parses range, zero, and round from the message; runs G1 physics; returns a
+        pre-formatted context block.  No LLM involvement in the maths.
+        Always outputs both metric and imperial so there is no unit ambiguity.
         """
         import re
         import database as _db
-        _units = _db.get_app_settings().get("units", "metric")
+
+        # Angular unit constants — computed once, shared by ALL conversions.
+        # 1 MOA = 1.04720" per 100 yd = 2.90888 cm per 100 m.
+        # 1 mrad = 10 cm per 100 m exactly.
+        _MOA_CM_PER_100M  = 2.90888
+        _MRAD_CM_PER_100M = 10.0
 
         msg = user_message.lower()
 
         # ── Extract range (target distance) ────────────────────────────────
+        # Explicit unit spellings tried first; bare 'm' is lowest-priority
+        # (most ambiguous — could appear in calibre labels like "9mm").
         range_m = None
-        # Patterns: "600 meters", "600m", "600 meter", "600 metres"
-        # Note: `meters?` / `yards?` etc. handle plural forms
-        for pat in [
-            r'(\d+(?:\.\d+)?)\s*(?:meters?|metres?|m)\b',
-            r'(\d+(?:\.\d+)?)\s*(?:yards?|yd)\b',
-            r'(\d+(?:\.\d+)?)\s*(?:feet|foot|ft)\b',
+        for _pat, _scale in [
+            (r'(\d+(?:\.\d+)?)\s*(?:meters?|metres?)',  1.0),
+            (r'(\d+(?:\.\d+)?)\s*(?:yards?|yds?)\b',   0.9144),
+            (r'(\d+(?:\.\d+)?)\s*(?:feet|foot)\b',     0.3048),
+            (r'(\d+(?:\.\d+)?)\s*ft\b',                0.3048),
+            (r'(\d+(?:\.\d+)?)\s*yd\b',                0.9144),
+            (r'(\d+(?:\.\d+)?)\s*m\b',                 1.0),
         ]:
-            hits = re.findall(pat, msg)
+            hits = re.findall(_pat, msg)
             if hits:
-                # The largest distance is likely the target range
-                vals = [float(h) for h in hits]
-                if 'yard' in pat or 'yd' in pat:
-                    vals = [v * 0.9144 for v in vals]
-                elif 'feet' in pat or 'foot' in pat or 'ft' in pat:
-                    vals = [v * 0.3048 for v in vals]
-                # Filter to plausible rifle ranges (20–5000 m)
+                vals = [float(h) * _scale for h in hits]
                 vals = [v for v in vals if 20 <= v <= 5000]
                 if vals:
                     range_m = max(vals)
                     break
 
-        # ── Extract zero distance ───────────────────────────────────────────
-        zero_m = 100.0  # default
-        zero_pat = re.search(
-            r'zero(?:ed)?\s+at\s+(\d+(?:\.\d+)?)\s*(?:meter|metre|m|yard|yd|feet|foot|ft)?\b',
-            msg
-        )
-        if zero_pat:
-            z = float(zero_pat.group(1))
-            if 'yard' in msg or 'yd' in msg:
-                z *= 0.9144
-            elif 'feet' in msg or 'foot' in msg or 'ft' in msg:
-                z *= 0.3048
-            if 5 <= z <= 1000:
-                zero_m = z
-
         if range_m is None:
             logger.debug("Ballistic direct compute: could not parse range from message")
             return ""
+
+        # ── Extract zero distance ───────────────────────────────────────────
+        # Unit extracted from the regex capture, NOT from the whole message,
+        # to avoid cross-contaminating range units with zero units.
+        zero_m = 100.0
+        _zpat = re.search(
+            r'zero(?:ed)?\s+(?:at\s+)?(\d+(?:\.\d+)?)\s*'
+            r'(meters?|metres?|yards?|yds?|feet|foot|ft|yd|m)?\b',
+            msg
+        )
+        if _zpat:
+            _zval  = float(_zpat.group(1))
+            _zunit = (_zpat.group(2) or "m").rstrip("s")   # strip plural suffix
+            if _zunit in ("yard", "yd", "yds"):
+                _zval *= 0.9144
+            elif _zunit in ("feet", "foot", "ft"):
+                _zval *= 0.3048
+            if 5 <= _zval <= 1000:
+                zero_m = _zval
 
         # ── Identify round ──────────────────────────────────────────────────
         round_data = self._identify_round(user_message)
         if round_data:
             v0, bc, desc, m_gr, d_in, l_in, ref_twist = round_data
         else:
-            # Fallback defaults: 5.56mm 55gr
             v0, bc, desc = 975, 0.269, "5.56mm 55gr (assumed)"
             m_gr, d_in, l_in, ref_twist = 55, 0.224, 0.910, 7.0
             logger.debug("Ballistic direct compute: round not identified, using 5.56 55gr defaults")
 
-        # ── Parse twist rate from user message (overrides round default) ────
+        # ── Parse twist rate from message (overrides round default) ────────
         twist_in = ref_twist
         twist_explicit = False
-        _twist_m = re.search(
+        for _tpat in [
             r'\b1\s*[:/]\s*(\d+(?:\.\d+)?)\s*(?:["\']|\btwist\b|\bturn\b|\brifling\b)?',
-            user_message, re.IGNORECASE
-        )
-        if not _twist_m:
-            _twist_m = re.search(
-                r'\bone[\s-]+in[\s-]+(\d+(?:\.\d+)?)\s*(?:["\']|\btwist\b|\bturn\b)?',
-                user_message, re.IGNORECASE
-            )
-        if _twist_m:
-            _t = float(_twist_m.group(1))
-            if 4.0 <= _t <= 40.0:
-                twist_in = _t
-                twist_explicit = True
+            r'\bone[\s-]+in[\s-]+(\d+(?:\.\d+)?)\s*(?:["\']|\btwist\b|\bturn\b)?',
+        ]:
+            _tm = re.search(_tpat, user_message, re.IGNORECASE)
+            if _tm:
+                _t = float(_tm.group(1))
+                if 4.0 <= _t <= 40.0:
+                    twist_in = _t
+                    twist_explicit = True
+                    break
 
-        # ── Run the physics simulation ──────────────────────────────────────
+        # ── Physics ─────────────────────────────────────────────────────────
         try:
             drop_cm, tof_s = _ballistic_sim(range_m, zero_m, v0, bc)
-            drop_in   = _cm_to_inches(drop_cm)
-            drop_ft   = round(drop_cm / 30.48, 2)
-            drop_moa  = round(abs(drop_cm) / (range_m * 0.02909), 1)   # 1 MOA ≈ 2.909 cm/100 m
-            drop_mrad = round(abs(drop_cm) / (range_m * 0.1), 2)       # 1 mrad = 10 cm/100 m
 
-            # Spin drift: Litz formula SD_in = 1.25 × Sg × TOF^1.83
-            # Sg is the Miller gyroscopic stability factor for this bullet/twist combination.
-            # Faster twist → higher Sg → more rightward drift (RH barrel). LH twist reverses direction.
-            sg     = _miller_sg(m_gr, d_in, l_in, twist_in, v0)
-            sd_in  = round(1.25 * sg * tof_s ** 1.83, 2)
-            sd_cm  = round(sd_in * 2.54, 1)
-            sd_moa = round(sd_cm / (range_m * 0.02909), 2)   # same as drop_moa: 1 MOA ≈ 2.909 cm/100 m
+            # Angular conversion factors for this range — derived once, used for
+            # BOTH drop and spin drift.  One source of truth eliminates unit drift.
+            moa_per_cm  = 1.0 / (range_m * _MOA_CM_PER_100M  / 100.0)
+            mrad_per_cm = 1.0 / (range_m * _MRAD_CM_PER_100M / 100.0)
 
-            if twist_explicit:
-                twist_src = f"user-specified"
-            else:
-                twist_src = f"standard barrel for this round"
-            direction = "below" if drop_cm < 0 else "above"
+            # Bullet drop (all representations derived from drop_cm)
+            drop_abs_cm = abs(drop_cm)
+            drop_in     = round(drop_abs_cm / 2.54,  2)
+            drop_ft     = round(drop_abs_cm / 30.48, 2)
+            drop_moa    = round(drop_abs_cm * moa_per_cm,  1)
+            drop_mrad   = round(drop_abs_cm * mrad_per_cm, 2)
+            direction   = "below" if drop_cm < 0 else "above"
 
-            if _units == "imperial":
-                drop_primary   = f"{abs(drop_ft)} ft ({drop_cm} cm)"
-                vel_primary    = f"{_mps_to_fps(v0)} fps ({v0} m/s)"
-                sd_primary     = f"{sd_in} in ({sd_cm} cm)"
-            else:
-                drop_primary   = f"{drop_cm} cm ({abs(drop_in)} in)"
-                vel_primary    = f"{v0} m/s ({_mps_to_fps(v0)} fps)"
-                sd_primary     = f"{sd_cm} cm ({sd_in} in)"
+            # Spin drift — Litz: SD_in = 1.25 × Sg × TOF^1.83
+            sg      = _miller_sg(m_gr, d_in, l_in, twist_in, v0)
+            sd_in   = round(1.25 * sg * tof_s ** 1.83, 2)
+            sd_cm   = round(sd_in * 2.54, 1)
+            sd_moa  = round(sd_cm * moa_per_cm,  2)
+            sd_mrad = round(sd_cm * mrad_per_cm, 3)
+
+            twist_src = "user-specified" if twist_explicit else "standard barrel for this round"
+
+            # Range/zero in both units for the header
+            range_yd = round(range_m * 1.09361)
+            zero_yd  = round(zero_m  * 1.09361)
+            v0_fps   = _mps_to_fps(v0)
+
+            # Cross-check: back-convert sd_moa → cm to expose any formula divergence
+            _sd_check_cm = round(sd_moa / moa_per_cm, 1)
 
             block = (
                 f"=== BALLISTIC CALCULATOR RESULTS ===\n"
                 f"Round     : {desc}\n"
-                f"Muzzle vel: {vel_primary}\n"
+                f"Muzzle vel: {v0} m/s  ({v0_fps} fps)\n"
                 f"BC (G1)   : {bc}\n"
-                f"Zero range: {zero_m:.0f} m\n"
-                f"Target    : {range_m:.0f} m\n"
+                f"Zero      : {zero_m:.0f} m  ({zero_yd} yd)\n"
+                f"Target    : {range_m:.0f} m  ({range_yd} yd)\n"
                 f"\n"
-                f"Bullet drop at {range_m:.0f} m (relative to line of sight, zeroed at {zero_m:.0f} m):\n"
-                f"  {drop_primary}  {direction} line of sight\n"
-                f"Correction needed:\n"
-                f"  {drop_moa} MOA  ({direction})\n"
-                f"  {drop_mrad} mrad ({direction})\n"
-                f"Time of flight (from G1 sim): {tof_s} s\n"
+                f"BULLET DROP at {range_m:.0f} m / {range_yd} yd  (zeroed {zero_m:.0f} m):\n"
+                f"  {drop_abs_cm} cm  |  {drop_in} in  |  {drop_ft} ft  — {direction} LoS\n"
+                f"  {drop_moa} MOA {direction}  |  {drop_mrad} mrad {direction}\n"
                 f"\n"
-                f"=== SPIN DRIFT (verified physics, do not recalculate) ===\n"
-                f"Barrel twist assumed: 1:{twist_in:.0f}\" RH  [{twist_src}]\n"
-                f"Miller Sg: {sg:.3f}  (Sg = 30·{m_gr}/(n²·{d_in}³·{l_in/d_in:.3f}·(1+{l_in/d_in:.3f}²)) × (v/2800)^(1/3))\n"
-                f"Litz formula: SD = 1.25 × {sg:.3f} × {tof_s}^1.83 = {sd_in} in\n"
-                f"SPIN DRIFT RESULT: {sd_primary} to the RIGHT  [{sd_moa} MOA]\n"
-                f"Direction: RH twist → bullet drifts RIGHT. LH twist → bullet drifts LEFT.\n"
-                f"Twist effect: faster twist (lower number) = higher Sg = more drift.\n"
-                f"If your barrel twist differs from 1:{twist_in:.0f}\", specify it for an exact answer.\n"
+                f"Time of flight (G1 sim): {tof_s} s\n"
                 f"\n"
-                f"These are G1 drag-model results at sea level, standard atmosphere.\n"
-                f"Actual values may vary with altitude, temperature, and barrel length.\n"
-                f"NOTE: All distances above are in METERS. Do not conflate with yards."
+                f"=== SPIN DRIFT (verified physics — do not recalculate) ===\n"
+                f"Barrel twist : 1:{twist_in:.0f}\" RH  [{twist_src}]\n"
+                f"Miller Sg    : {sg:.3f}  "
+                f"(n={twist_in/d_in:.2f} cal/turn, L={l_in/d_in:.3f} cal)\n"
+                f"Litz formula : SD = 1.25 × {sg:.3f} × {tof_s}^1.83\n"
+                f"RESULT       : {sd_in} in  ({sd_cm} cm)  to the RIGHT\n"
+                f"Angular      : {sd_moa} MOA  |  {sd_mrad} mrad\n"
+                f"Cross-check  : {sd_moa} MOA × {round(1.0/moa_per_cm, 2)} cm/MOA"
+                f" = {_sd_check_cm} cm  (expect {sd_cm} cm)\n"
+                f"Direction    : RH twist → RIGHT.  LH twist → LEFT.\n"
+                f"If barrel twist differs from 1:{twist_in:.0f}\", specify it.\n"
+                f"\n"
+                f"G1 drag model · sea level · standard atmosphere.\n"
+                f"Ranges shown in both m and yd — no unit conflation."
             )
             logger.info(
                 f"Ballistic direct compute: {desc} {range_m:.0f}m zero={zero_m:.0f}m "
-                f"drop={drop_cm}cm ({drop_in}in) tof={tof_s}s sg={sg:.2f} twist={twist_in}\""
+                f"drop={drop_cm}cm/{drop_in}in tof={tof_s}s sg={sg:.2f} twist={twist_in}\""
             )
             return block
         except Exception as ex:
