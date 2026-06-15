@@ -527,7 +527,7 @@ _MATH_KEYWORDS = {
     "calculat", "comput", "solv", "equation", "formula", "convert", "conversion",
     "how many", "how much", "how far", "how fast", "how long",
     "plus", "minus", "multipl", "divid", "add", "subtract", "total",
-    "sum", "average", "percent", "ratio", "proportion",
+    "sum", "average", "percent", "%", "ratio", "proportion",
     "velocity", "acceleration", "force", "mass", "weight", "gravity",
     "energy", "momentum", "pressure", "density",
     "kinetic", "potential", "ballistic", "trajectory", "projectile",
