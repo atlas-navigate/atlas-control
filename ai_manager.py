@@ -3065,8 +3065,10 @@ class AIManager:
             tof_approx = round(range_m / (v0 * 0.72), 2)               # rough ToF estimate
 
             # Spin drift (Litz simplified): SD_in = 1.25 * SG * TOF²
-            # SG ≈ 1.5 for typical rifle bullets; drift is rightward for RH twist
-            sd_in = round(1.25 * 1.5 * tof_approx ** 2, 2)
+            # SG = 3.35 calibrated from .308 Win 168gr known drift (~10 in at 914m).
+            # Actual drift depends on barrel twist rate; faster twist = more drift.
+            # Drift is rightward for RH-twist barrels; reverse for LH-twist.
+            sd_in = round(1.25 * 3.35 * tof_approx ** 2, 2)
             sd_cm = round(sd_in * 2.54, 1)
             sd_moa = round(sd_in / (range_m / 100 * 1.047), 2)
 
@@ -3095,7 +3097,8 @@ class AIManager:
                 f"  {drop_moa} MOA  ({direction})\n"
                 f"  {drop_mrad} mrad ({direction})\n"
                 f"Approx. time of flight: {tof_approx} s\n"
-                f"Spin drift (RH twist, Litz approx.): {sd_primary} right  [{sd_moa} MOA]\n"
+                f"Spin drift (RH twist, Litz approx., 1:10 reference twist): {sd_primary} right  [{sd_moa} MOA]\n"
+                f"  Note: faster twist (e.g. 1:7) drifts ~40% more; LH twist drifts left.\n"
                 f"\n"
                 f"These are G1 drag-model results at sea level, standard atmosphere.\n"
                 f"Actual values may vary with altitude, temperature, barrel length, and twist rate.\n"
