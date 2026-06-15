@@ -530,6 +530,8 @@ _ROUND_HINTS = [
     (["7.62x51"],             "308_147"),
     (["6.5", "creed"],        "65cm_140"),
     (["338", "lapua"],        "338lm_250"),
+    (["9mm"],                 "9mm_115"),
+    ([".45"],                 "45acp_230"),
 ]
 
 # Keywords that specifically indicate a ballistics trajectory question
@@ -539,8 +541,11 @@ _BALLISTIC_SPECIFIC_KEYWORDS = {
     "moa", "mrad", "mil", "scope dial",
     "trajectory", "ballistic", "flight path",
     "5.56", ".223", ".308", "7.62", "6.5 creedmoor", ".338", ".50 bmg",
+    "9mm", ".45 acp", ".45", "45 acp",
     "grain", "gr bullet", "gr round",
     "fps", "feet per second",
+    "spin drift", "gyroscopic drift", "spin", "drift",
+    "dope", "dope card", "dope table",
 }
 
 # Keywords that trigger injection of the [CALC:] tag fallback instruction
@@ -905,37 +910,101 @@ SURVIVAL_DOCS = [
         ),
     },
     {
-        "title": "Ballistics: Bullet Drop, TOF, and DOPE Card",
-        "tags": "ballistics,bullet drop,TOF,time of flight,DOPE card,trajectory,308 Win,223 Rem,gravity,zero",
+        "title": "Ballistics: DOPE Cards — Multiple Calibers",
+        "tags": "ballistics,bullet drop,TOF,time of flight,DOPE card,trajectory,308 Win,223 Rem,5.56,9mm,6.5 creedmoor,300 win mag,338 lapua,gravity,zero,spin drift",
         "content": (
-            "SCOPE: values in this doc are for .308 Win 168gr BTHP and .223 Rem 55gr at sea level only. "
-            "Altitude, temperature, and different loads change all figures.\n\n"
-            "PHYSICS: g = 386 in/s². Total fall from bore line: fall_in = 0.5 × 386 × TOF²\n"
-            "Drop below LOS ≠ total fall (zero angle offsets part of it).\n"
-            "With 100-yd zero: bullet crosses LOS at ~25 yd (rising) and 100 yd (falling).\n\n"
-            "TOF — .308 Win 168gr BTHP, MV=792 m/s, G1 BC=0.47, sea level:\n"
-            "  91 m: TOF=0.117 s, vel=774 m/s\n"
-            " 183 m: TOF=0.243 s, vel=722 m/s\n"
-            " 274 m: TOF=0.381 s, vel=674 m/s\n"
-            " 366 m: TOF=0.521 s, vel=628 m/s\n"
-            " 457 m: TOF=0.643 s, vel=582 m/s\n"
-            " 640 m: TOF=0.967 s, vel=500 m/s\n"
-            " 914 m: TOF=1.547 s, vel=396 m/s\n\n"
-            "DOPE CARD — .308 Win 168gr 792 m/s, 100 m zero, sea level:\n"
-            "Range  | Drop(cm) | MOA UP | 10mph wind | TOF\n"
-            " 91 m  |    0.0   |  0.0   |  0.3 MOA   | 0.12 s\n"
-            "183 m  |   -8.6   |  1.6   |  0.7 MOA   | 0.25 s\n"
-            "274 m  |  -27.7   |  3.5   |  1.0 MOA   | 0.38 s\n"
-            "366 m  |  -59.7   |  5.6   |  1.5 MOA   | 0.52 s\n"
-            "457 m  | -106.2   |  8.0   |  2.2 MOA   | 0.64 s\n"
-            "549 m  | -170.2   | 10.7   |  3.0 MOA   | 0.78 s\n"
-            "640 m  | -255.3   | 13.8   |  3.8 MOA   | 0.97 s\n"
-            "732 m  | -363.2   | 17.1   |  4.7 MOA   | 1.17 s\n"
-            "914 m  | -675.6   | 25.4   |  6.5 MOA   | 1.55 s\n\n"
-            ".223 Rem 55gr 988 m/s (unstable/transonic ~550–640 m):\n"
-            "274 m: -19.8 cm / 2.5 MOA. 457 m: -63.5 cm / 4.8 MOA.\n\n"
-            "ENERGY: KE (joules) = 0.5 × mass_kg × vel_mps²\n"
-            ".308 168gr @ 792 m/s = 3,417 J. @ 396 m/s (914 m) = 854 J."
+            "All tables: G1 drag model, sea level, std atmosphere, 100 m zero. "
+            "Altitude/temperature/barrel length will shift values. "
+            "Spin drift column = gyroscopic drift RIGHT (RH barrel). "
+            "Columns: Range | Drop cm | MOA↑ | mrad | TOF(s) | Drift cm\n\n"
+
+            "5.56mm 55gr FMJ M193 — 975 m/s, BC=0.269, 1:7\" twist:\n"
+            " 100m |    0.0 |  0.0 | 0.00 | 0.108 |  0.1R\n"
+            " 200m |  -12.5 |  2.1 | 0.62 | 0.225 |  0.5R\n"
+            " 300m |  -40.0 |  4.6 | 1.33 | 0.355 |  1.1R\n"
+            " 400m |  -85.7 |  7.4 | 2.14 | 0.498 |  2.0R\n"
+            " 500m | -153.6 | 10.6 | 3.07 | 0.656 |  3.2R\n"
+            " 600m | -248.9 | 14.3 | 4.15 | 0.832 |  5.0R\n"
+            " 700m | -378.2 | 18.6 | 5.40 | 1.028 |  7.4R\n"
+            " 800m | -550.4 | 23.7 | 6.88 | 1.250 | 10.6R\n"
+            " 900m | -778.3 | 29.7 | 8.65 | 1.505 | 14.8R\n"
+            "1000m |-1079.9 | 37.1 |10.80 | 1.797 | 20.5R\n\n"
+
+            "5.56mm 62gr FMJ M855 — 930 m/s, BC=0.307, 1:7\" twist:\n"
+            " 100m |    0.0 |  0.0 | 0.00 | 0.112 |  0.1R\n"
+            " 200m |  -13.4 |  2.3 | 0.67 | 0.234 |  0.4R\n"
+            " 300m |  -42.6 |  4.9 | 1.42 | 0.366 |  1.0R\n"
+            " 400m |  -90.6 |  7.8 | 2.26 | 0.510 |  1.8R\n"
+            " 500m | -160.9 | 11.1 | 3.22 | 0.668 |  2.9R\n"
+            " 600m | -258.0 | 14.8 | 4.30 | 0.840 |  4.4R\n"
+            " 700m | -387.4 | 19.0 | 5.53 | 1.031 |  6.5R\n"
+            " 800m | -556.2 | 23.9 | 6.95 | 1.242 |  9.1R\n"
+            " 900m | -774.1 | 29.6 | 8.60 | 1.478 | 12.5R\n"
+            "1000m |-1054.1 | 36.2 |10.54 | 1.745 | 16.9R\n\n"
+
+            "5.56mm 77gr OTM Mk262 — 884 m/s, BC=0.372, 1:8\" twist:\n"
+            " 100m |    0.0 |  0.0 | 0.00 | 0.117 |  0.1R\n"
+            " 200m |  -14.4 |  2.5 | 0.72 | 0.243 |  0.4R\n"
+            " 300m |  -45.4 |  5.2 | 1.51 | 0.377 |  0.8R\n"
+            " 400m |  -95.5 |  8.2 | 2.39 | 0.521 |  1.4R\n"
+            " 500m | -167.6 | 11.5 | 3.35 | 0.677 |  2.3R\n"
+            " 600m | -265.3 | 15.2 | 4.42 | 0.844 |  3.4R\n"
+            " 700m | -392.7 | 19.3 | 5.61 | 1.025 |  4.9R\n"
+            " 800m | -555.0 | 23.8 | 6.94 | 1.221 |  6.7R\n"
+            " 900m | -758.8 | 29.0 | 8.43 | 1.436 |  9.1R\n"
+            "1000m |-1012.0 | 34.8 |10.12 | 1.671 | 12.0R\n\n"
+
+            ".308 Win 168gr BTHP M118LR — 820 m/s, BC=0.447, 1:10\" twist:\n"
+            " 100m |    0.0 |  0.0 | 0.00 | 0.126 |  0.2R\n"
+            " 200m |  -16.4 |  2.8 | 0.82 | 0.259 |  0.6R\n"
+            " 300m |  -51.3 |  5.9 | 1.71 | 0.400 |  1.4R\n"
+            " 400m | -107.0 |  9.2 | 2.67 | 0.550 |  2.6R\n"
+            " 500m | -186.2 | 12.8 | 3.72 | 0.709 |  4.1R\n"
+            " 600m | -291.9 | 16.7 | 4.86 | 0.879 |  6.0R\n"
+            " 700m | -428.0 | 21.0 | 6.11 | 1.060 |  8.5R\n"
+            " 800m | -598.5 | 25.7 | 7.48 | 1.254 | 11.6R\n"
+            " 900m | -808.8 | 30.9 | 8.99 | 1.463 | 15.3R\n"
+            "1000m |-1065.0 | 36.6 |10.65 | 1.688 | 19.9R\n\n"
+
+            "6.5 Creedmoor 140gr BTHP — 869 m/s, BC=0.626, 1:8\" twist:\n"
+            " 100m |    0.0 |  0.0 | 0.00 | 0.117 |  0.2R\n"
+            " 200m |  -14.1 |  2.4 | 0.70 | 0.240 |  0.6R\n"
+            " 300m |  -43.5 |  5.0 | 1.45 | 0.367 |  1.3R\n"
+            " 400m |  -89.5 |  7.7 | 2.24 | 0.500 |  2.3R\n"
+            " 500m | -153.6 | 10.6 | 3.07 | 0.638 |  3.6R\n"
+            " 600m | -237.3 | 13.6 | 3.96 | 0.783 |  5.2R\n"
+            " 700m | -342.3 | 16.8 | 4.89 | 0.934 |  7.2R\n"
+            " 800m | -470.7 | 20.2 | 5.88 | 1.091 |  9.5R\n"
+            " 900m | -624.6 | 23.9 | 6.94 | 1.256 | 12.4R\n"
+            "1000m | -806.4 | 27.7 | 8.06 | 1.428 | 15.6R\n\n"
+
+            ".300 Win Mag 190gr BTHP — 932 m/s, BC=0.560, 1:10\" twist:\n"
+            " 100m |    0.0 |  0.0 | 0.00 | 0.110 |  0.1R\n"
+            " 200m |  -12.4 |  2.1 | 0.62 | 0.224 |  0.4R\n"
+            " 300m |  -38.2 |  4.4 | 1.27 | 0.344 |  1.0R\n"
+            " 400m |  -78.9 |  6.8 | 1.97 | 0.470 |  1.7R\n"
+            " 500m | -135.7 |  9.3 | 2.71 | 0.601 |  2.7R\n"
+            " 600m | -210.3 | 12.0 | 3.51 | 0.739 |  3.9R\n"
+            " 700m | -304.4 | 14.9 | 4.35 | 0.883 |  5.4R\n"
+            " 800m | -420.0 | 18.0 | 5.25 | 1.035 |  7.3R\n"
+            " 900m | -559.2 | 21.4 | 6.21 | 1.194 |  9.4R\n"
+            "1000m | -724.6 | 24.9 | 7.25 | 1.361 | 12.0R\n\n"
+
+            ".338 Lapua Magnum 250gr BTHP — 905 m/s, BC=0.587, 1:10\" twist:\n"
+            " 100m |    0.0 |  0.0 | 0.00 | 0.113 |  0.1R\n"
+            " 200m |  -13.1 |  2.3 | 0.66 | 0.231 |  0.5R\n"
+            " 300m |  -40.4 |  4.6 | 1.35 | 0.354 |  1.0R\n"
+            " 400m |  -83.2 |  7.2 | 2.08 | 0.482 |  1.7R\n"
+            " 500m | -142.9 |  9.8 | 2.86 | 0.617 |  2.7R\n"
+            " 600m | -221.2 | 12.7 | 3.69 | 0.757 |  4.0R\n"
+            " 700m | -319.7 | 15.7 | 4.57 | 0.904 |  5.5R\n"
+            " 800m | -440.4 | 18.9 | 5.50 | 1.058 |  7.3R\n"
+            " 900m | -585.5 | 22.4 | 6.51 | 1.219 |  9.5R\n"
+            "1000m | -757.5 | 26.0 | 7.58 | 1.389 | 12.0R\n\n"
+
+            "PHYSICS NOTE: drop is relative to line of sight at 100 m zero. "
+            "Bullet is above LoS between ~25 m and 100 m (rising through bore-line offset). "
+            "For on-demand DOPE card: ask 'give me a dope card for [caliber]'."
         ),
     },
     {
@@ -3019,6 +3088,49 @@ class AIManager:
         return block, True
 
     # ------------------------------------------------------------------
+    def _generate_dope_card(self, v0, bc, desc, m_gr, d_in, l_in,
+                             twist_in, twist_src, zero_m=100.0):
+        """Generate a full DOPE table for a given round across 100–1000 m."""
+        _MOA_CM = 2.90888
+        ranges_m = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
+        v0_fps  = _mps_to_fps(v0)
+        zero_yd = round(zero_m * 1.09361)
+        sg      = _miller_sg(m_gr, d_in, l_in, twist_in, v0)
+
+        rows = []
+        for r in ranges_m:
+            drop_cm, tof_s = _ballistic_sim(r, zero_m, v0, bc)
+            moa_f    = r * _MOA_CM / 100.0
+            mrad_f   = r * 10.0   / 100.0
+            drop_moa  = round(abs(drop_cm) / moa_f,  1)
+            drop_mrad = round(abs(drop_cm) / mrad_f, 2)
+            sd_in = 1.25 * sg * tof_s ** 1.83
+            sd_cm = round(sd_in * 2.54, 1)
+            rows.append((r, drop_cm, drop_moa, drop_mrad, tof_s, sd_cm))
+
+        sep = "─" * 66
+        lines = [
+            f"=== DOPE CARD: {desc} ===",
+            f"MV: {v0} m/s ({v0_fps} fps)  BC(G1): {bc}  Zero: {zero_m:.0f} m ({zero_yd} yd)",
+            f"Barrel: 1:{twist_in:.0f}\" RH [{twist_src}]  Sea level · std atmosphere.",
+            "",
+            f"{'Range':>6} | {'Drop cm':>7} | {'In':>6} | {'MOA↑':>5} | {'mrad':>5} | {'TOF(s)':>6} | {'Drift cm':>8}",
+            sep,
+        ]
+        for r, drop_cm, drop_moa, drop_mrad, tof_s, sd_cm in rows:
+            drop_in = round(abs(drop_cm) / 2.54, 1)
+            dir_s   = "↓" if drop_cm < 0 else "↑"
+            lines.append(
+                f"{r:>5}m | {abs(drop_cm):>6.1f}{dir_s} | {drop_in:>5.1f}\" | {drop_moa:>5.1f} | {drop_mrad:>5.2f} | {tof_s:>6.3f} | {sd_cm:>7.1f}R"
+            )
+        lines += [
+            sep,
+            "MOA↑/mrad = elevation correction up from zero. Drift = gyroscopic spin drift RIGHT.",
+            "Actual values vary with altitude, temperature, and lot-to-lot velocity spread.",
+        ]
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------
     def _ballistic_direct_compute(self, user_message):
         """
         Directly compute bullet drop + spin drift for a ballistic trajectory question.
@@ -3037,6 +3149,10 @@ class AIManager:
 
         msg = user_message.lower()
 
+        # ── DOPE card shortcut (no specific range needed) ───────────────────
+        # Identified early so we don't bail on missing range.
+        _is_dope = bool(re.search(r'\bdope\b', msg))
+
         # ── Extract range (target distance) ────────────────────────────────
         # Explicit unit spellings tried first; bare 'm' is lowest-priority
         # (most ambiguous — could appear in calibre labels like "9mm").
@@ -3052,12 +3168,12 @@ class AIManager:
             hits = re.findall(_pat, msg)
             if hits:
                 vals = [float(h) * _scale for h in hits]
-                vals = [v for v in vals if 20 <= v <= 5000]
+                vals = [v for v in vals if 1 <= v <= 5000]
                 if vals:
                     range_m = max(vals)
                     break
 
-        if range_m is None:
+        if range_m is None and not _is_dope:
             logger.debug("Ballistic direct compute: could not parse range from message")
             return ""
 
@@ -3079,6 +3195,13 @@ class AIManager:
                 _zval *= 0.3048
             if 5 <= _zval <= 1000:
                 zero_m = _zval
+
+        # ── Clamp zero distance ─────────────────────────────────────────────
+        # If the target is inside the zero distance (e.g. 60 ft shot with
+        # default 100 m zero), the bullet would still be rising — use half
+        # the range as a near-zero so the physics makes sense.
+        if range_m is not None and zero_m >= range_m:
+            zero_m = max(range_m * 0.5, 5.0)
 
         # ── Identify round ──────────────────────────────────────────────────
         round_data = self._identify_round(user_message)
@@ -3104,7 +3227,20 @@ class AIManager:
                     twist_explicit = True
                     break
 
-        # ── Physics ─────────────────────────────────────────────────────────
+        # twist_src is shared by both DOPE and single-range paths
+        twist_src = "user-specified" if twist_explicit else "standard barrel for this round"
+
+        # ── DOPE card request — generate full multi-range table ─────────────
+        if _is_dope:
+            try:
+                return self._generate_dope_card(
+                    v0, bc, desc, m_gr, d_in, l_in, twist_in, twist_src, zero_m
+                )
+            except Exception as ex:
+                logger.warning(f"DOPE card generation failed: {ex}")
+                return ""
+
+        # ── Single-range physics ─────────────────────────────────────────────
         try:
             drop_cm, tof_s = _ballistic_sim(range_m, zero_m, v0, bc)
 
@@ -3127,8 +3263,6 @@ class AIManager:
             sd_cm   = round(sd_in * 2.54, 1)
             sd_moa  = round(sd_cm * moa_per_cm,  2)
             sd_mrad = round(sd_cm * mrad_per_cm, 3)
-
-            twist_src = "user-specified" if twist_explicit else "standard barrel for this round"
 
             # Range/zero in both units for the header
             range_yd = round(range_m * 1.09361)
