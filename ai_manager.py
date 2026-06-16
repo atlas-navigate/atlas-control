@@ -2842,6 +2842,7 @@ class AIManager:
                 "temperature": float(settings.get("temperature", DEFAULT_SETTINGS["temperature"])),
                 "top_p":      float(settings.get("top_p",    DEFAULT_SETTINGS["top_p"])),
                 "top_k":      int(settings.get("top_k",      DEFAULT_SETTINGS["top_k"])),
+                "repeat_penalty": float(settings.get("repeat_penalty", DEFAULT_SETTINGS["repeat_penalty"])),
                 "num_predict": int(settings.get("num_predict", DEFAULT_SETTINGS["num_predict"])),
             },
         })).encode()
@@ -4397,6 +4398,7 @@ class AIManager:
                 "temperature": float(settings.get("temperature", DEFAULT_SETTINGS["temperature"])),
                 "top_p":      float(settings.get("top_p",    DEFAULT_SETTINGS["top_p"])),
                 "top_k":      int(settings.get("top_k",      DEFAULT_SETTINGS["top_k"])),
+                "repeat_penalty": float(settings.get("repeat_penalty", DEFAULT_SETTINGS["repeat_penalty"])),
                 "num_predict": int(settings.get("num_predict", DEFAULT_SETTINGS["num_predict"])),
             },
         })).encode()
@@ -4534,6 +4536,7 @@ class AIManager:
                 "temperature": float(settings.get("temperature", DEFAULT_SETTINGS["temperature"])),
                 "top_p":      float(settings.get("top_p",    DEFAULT_SETTINGS["top_p"])),
                 "top_k":      int(settings.get("top_k",      DEFAULT_SETTINGS["top_k"])),
+                "repeat_penalty": float(settings.get("repeat_penalty", DEFAULT_SETTINGS["repeat_penalty"])),
                 "num_predict": int(settings.get("num_predict", DEFAULT_SETTINGS["num_predict"])),
             },
         })).encode()

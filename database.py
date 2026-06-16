@@ -251,6 +251,17 @@ def init_db():
     row = c.execute("SELECT value FROM ai_settings WHERE key='system_prompt'").fetchone()
     if row and _ASK_ANCHOR in row[0] and _ASK_NEW_FRAG not in row[0]:
         c.execute("DELETE FROM ai_settings WHERE key='system_prompt'")
+    # Migrate: on-demand-senses prompt (Jun 2026). Live data is now a retrieved
+    # source, so the prompt must stop telling Ray the SYSTEM/MESH/ALERT blocks are
+    # "always" present (which made it fabricate readings when they were absent).
+    # Any box still on a SHIPPED default prompt is identified by the distinctive
+    # "As Ray" guideline line; roll it forward unless it already has the new rule.
+    # Hand-customized prompts (which won't contain that exact line) are untouched.
+    _DEF_ANCHOR = "Never start a response with 'As Ray'"
+    _NEW_FRAG   = "never invent CPU/RAM"
+    row = c.execute("SELECT value FROM ai_settings WHERE key='system_prompt'").fetchone()
+    if row and _DEF_ANCHOR in row[0] and _NEW_FRAG not in row[0]:
+        c.execute("DELETE FROM ai_settings WHERE key='system_prompt'")
     # Embedding-format migration v3: documents are now embedded per-section
     # (passage-level / chunked), so the stored embedding is a {"v":3,"chunks":[…]}
     # object instead of a single flat whole-doc vector. The shape changes every
@@ -1093,21 +1104,35 @@ AI_DEFAULTS = {
     "model": "qwen2.5:3b",
     "embed_model": "qwen3-embedding:0.6b",
     "system_prompt": (
-        "You are Ray — an AI assistant built into Atlas Control, "
-        "a Meshtastic mesh-network dashboard running on an off-grid Jetson device.\n\n"
-        "You have two sources of information:\n"
-        "1. LIVE DATA sections (SYSTEM STATUS, MESH NETWORK STATE, ALERTS, CURRENT POSITION) — always current and accurate.\n"
-        "2. KNOWLEDGE BASE sections — curated reference docs on survival, radio, ballistics, and off-grid topics.\n\n"
-        "GUIDELINES:\n"
-        "- Open with the direct answer immediately. Never start a response with 'As Ray', 'I am Ray', "
-        "'As an AI', or any variant of a self-introduction — answer the question, not who you are.\n"
-        "- Be concise. One to three sentences for simple questions; a structured list only if the topic genuinely has multiple distinct parts.\n"
-        "- When KNOWLEDGE BASE docs are present, use them as your primary source. Quote specific values and procedures from them.\n"
-        "- Do not hedge or add unnecessary caveats about being an AI or being offline.\n"
-        "- Never output your reasoning, deliberation, or internal decision process. Give the answer directly.\n"
-        "- When a question requires specific parameters for an accurate answer (e.g. barrel twist rate for "
-        "spin drift, muzzle velocity for a custom load, zero distance), provide the best answer using "
-        "standard defaults AND ask the user for the missing detail so follow-up answers can be exact.\n\n"
+        "You are Ray — the AI assistant built into Atlas Control, a Meshtastic "
+        "mesh-network command deck that runs 100% offline on an off-grid Jetson device.\n\n"
+        "WHAT YOUR CONTEXT CONTAINS:\n"
+        "- CURRENT POSITION (GPS) is supplied on every turn — use it to ground answers in the "
+        "user's real location, terrain, climate, region, and local hazards.\n"
+        "- LIVE DATA blocks (SYSTEM STATUS, MESH NETWORK STATE, ALERTS) are attached ONLY when the "
+        "question calls for them. When such a block is present it is real and current — quote its "
+        "values exactly. When it is ABSENT you have no reading: answer generally or say you'd need "
+        "to check — never invent CPU/RAM/temperature figures, node names, SNR, battery levels, or "
+        "alerts.\n"
+        "- KNOWLEDGE BASE blocks are curated offline reference docs (survival, radio, ballistics, "
+        "medical, navigation, Atlas usage). When present they are your PRIMARY source — quote their "
+        "specific values and procedures rather than your own recollection.\n\n"
+        "HOW TO ANSWER:\n"
+        "- Lead with the answer. Never open with 'As Ray', 'I am Ray', 'As an AI', or any "
+        "self-introduction — answer the question, not who you are.\n"
+        "- Be concise: one to three sentences for a simple question; use structure (lists, numbered "
+        "steps, tables) only when the topic genuinely has multiple distinct parts.\n"
+        "- Ground every claim in what is actually in your context. Do not fabricate data, sources, "
+        "citations, or a confidence rating — a verified confidence footer is appended automatically "
+        "after you finish.\n"
+        "- Don't hedge about being an AI or being offline, and don't expose your reasoning, "
+        "deliberation, or internal steps — give the result directly.\n"
+        "- This is a survival and off-grid tool, so accuracy is safety. When a precise answer needs "
+        "a parameter you don't have (barrel twist for spin drift, muzzle velocity, zero distance, a "
+        "custom load), answer with sensible standard defaults AND ask for the missing detail so the "
+        "next answer can be exact.\n"
+        "- If you don't know and nothing in context supports an answer, say so briefly instead of "
+        "guessing.\n\n"
         + AI_FORMATTING_GUIDE
     ),
     "warmup_on_start": "true",
@@ -1119,11 +1144,15 @@ AI_DEFAULTS = {
     "num_gpu": "-1",      # -1 = let Ollama auto-place layers (forced counts hard-fail on tight RAM)
     "num_thread": "6",    # Jetson Orin Nano: 6× Cortex-A78AE cores
     "num_batch": "512",   # prompt tokens processed per GPU batch
-    # Qwen3-family non-thinking sampling (official recommendation); lower
-    # temperatures cause repetition loops on Qwen3.x models.
+    # qwen2.5:3b official generation settings (Qwen2.5 generation_config.json):
+    # temp 0.7 / top_p 0.8 / top_k 20 / repetition_penalty 1.05. Lower temperatures
+    # push this small model into repetition loops, so 0.7 is the floor we ship.
     "temperature": "0.7",
     "top_p": "0.8",
     "top_k": "20",
+    # Qwen2.5's recommended 1.05 — gentler than Ollama's 1.1 default, which can
+    # over-penalize legitimately repeated technical terms (node IDs, MOA, calibers).
+    "repeat_penalty": "1.05",
     "num_predict": "1024",
 }
 
