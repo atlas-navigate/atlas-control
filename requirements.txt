@@ -4,7 +4,13 @@ flask-limiter>=3.5.0
 meshtastic>=2.7,<2.8
 pyserial==3.5
 pynmea2>=1.18.0,<2.0
-gevent>=23.9.1
+# cffi: required by PyNaCl (meshtastic's crypto). Was missing on the box and
+# flagged by `pip check`; pin a floor so fresh installs always pull it.
+cffi>=1.16
+# gevent capped below 26: the 26.x major is untested against this build's
+# monkey-patch / native-thread setup, which has been fragile here. Keep fresh
+# installs on the tested 25.x line; bump deliberately, not implicitly.
+gevent>=23.9.1,<26
 gevent-websocket==0.10.1
 qrcode[pil]>=7.4.2
 numpy>=1.26,<3

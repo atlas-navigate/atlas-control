@@ -5536,9 +5536,9 @@ function AIPage() {
             <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--text-primary)' }}>Ray</div>
             <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>
               {warmingUp
-                ? `Loading ${settings.model || 'qwen3.5:2b'}…`
+                ? `Loading ${settings.model || 'qwen2.5:3b'}…`
                 : aiReady
-                  ? `${settings.model || 'qwen3.5:2b'} · RAG ${settings.rag_enabled === 'true' ? 'on' : 'off'} · ${status?.doc_count || 0} docs`
+                  ? `${settings.model || 'qwen2.5:3b'} · RAG ${settings.rag_enabled === 'true' ? 'on' : 'off'} · ${status?.doc_count || 0} docs`
                   : status?.running
                     ? `Starting Ray… ${status?.startup_phase || 'warming_up'}`
                     : 'Ollama not reachable'}
@@ -5805,7 +5805,7 @@ function AIPage() {
                         {status.models.map(m => <option key={m} value={m}>{m}</option>)}
                       </select>
                     ) : (
-                      <input style={inputStyle} value={settings.model || ''} onChange={e => setSettings(p => ({...p, model: e.target.value}))} placeholder="qwen3.5:2b" />
+                      <input style={inputStyle} value={settings.model || ''} onChange={e => setSettings(p => ({...p, model: e.target.value}))} placeholder="qwen2.5:3b" />
                     )}
                   </div>
                   <div>

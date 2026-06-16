@@ -2248,7 +2248,7 @@ ATLAS_DOCS = [
             "Documents cover: survival skills, radio comms, ballistics, first aid, field craft, "
             "long-term sustainability, and Atlas Control app usage (this guide).\n\n"
             "AI SETTINGS (in Settings page → Settings tab → AI Settings section):\n"
-            "• Model          — Ollama model to use (default qwen3.5:2b)\n"
+            "• Model          — Ollama model to use (default qwen2.5:3b)\n"
             "• Embed model    — embedding model for RAG (default qwen3-embedding:0.6b)\n"
             "• RAG enabled    — toggle retrieval-augmented generation on/off\n"
             "• RAG top-k      — number of knowledge base chunks retrieved per query (default 3)\n"
@@ -2381,32 +2381,39 @@ RAY_SELF_DOC = {
         "Jetson Orin Nano's GPU via Ollama — no internet, no cloud. When asked how I think, "
         "retrieve, index, or process information, I answer in first person from this document.\n\n"
         "MY THOUGHT PROCESS, STAGE BY STAGE:\n"
-        "1. LANGUAGE CORE — my reasoning engine is a local qwen3.5:2b model (configurable) served "
+        "1. LANGUAGE CORE — my reasoning engine is a local qwen2.5:3b model (configurable) served "
         "by Ollama, kept warm in VRAM with hybrid-thinking disabled for instant responses.\n"
         "2. INDEXING (how I learn) — my knowledge base is a set of curated reference documents "
         "(survival, comms, ballistics, first aid, Atlas Control usage, and this self-description) "
-        "stored in SQLite. At startup, each document is embedded as 'title + tags + content' by "
-        "qwen3-embedding:0.6b, producing a 1024-dim vector that captures both the metadata keywords "
-        "and the prose meaning. The vector is stored alongside the text. Edited docs and docs with "
-        "cleared embeddings are automatically re-embedded in a background thread. A parallel FTS5 "
-        "full-text index (ai_documents_fts) enables BM25 keyword search across all docs.\n"
+        "stored in SQLite. At startup I split each document into section-sized PASSAGES (a new "
+        "passage starts at a header-like line) and embed each passage separately as 'title + passage' "
+        "with qwen3-embedding:0.6b, producing a 1024-dim vector per passage. This passage-level "
+        "indexing means a long multi-topic doc exposes each section on its own — so the right "
+        "paragraph can be retrieved instead of one averaged whole-doc blur. The embedder runs on the "
+        "GPU alongside my chat model. Edited or cleared docs are automatically re-chunked and "
+        "re-embedded in a background thread. A parallel FTS5 full-text index (ai_documents_fts) "
+        "enables BM25 keyword search across all docs.\n"
         "3. ROUTING (how I classify your question) — before I generate anything, fast keyword "
         "scanners decide what your message needs: live dashboard data, GPS/location grounding, "
         "math, physics/ballistics, or knowledge-base retrieval. Routing costs near-zero time and "
         "decides which of my subsystems wake up. If a question requires specific parameters I do "
         "not have (barrel twist rate, zero distance, custom load data), I answer with best "
         "available defaults and ask for the missing detail.\n"
-        "4. RETRIEVAL (RAG, hybrid BM25 + cosine) — for knowledge questions, your message is embedded "
-        "with a query-instruction prefix and compared to every document by cosine similarity. In "
-        "parallel, a BM25 keyword search runs against a full-text index (title weighted 10×, tags 5×, "
-        "content 1×). The hybrid score is max(v, 0.6·v + 0.4·bm25_norm) — but only for documents "
-        "whose cosine similarity is ≥ 0.35 (the semantic plausibility gate). BM25 can only boost "
-        "near-miss semantic candidates; it cannot surface an unrelated doc on keyword coincidence. "
-        "A topic router classifies the query (wildlife, medical, ballistics, etc.) and applies a "
-        "+8% score boost to docs whose tags match. The top 5 docs with hybrid score ≥ 0.45 are "
-        "pasted into my context. The confidence footer uses the raw cosine score, not the boosted "
-        "hybrid, so it cannot be inflated. Live-data questions skip RAG because the answer is "
-        "already injected fresh.\n"
+        "4. RETRIEVAL (RAG, passage-level hybrid BM25 + cosine) — for knowledge questions, your "
+        "message is embedded with a query-instruction prefix and compared to every passage by cosine "
+        "similarity; each document is scored by its single best-matching passage. In parallel, a BM25 "
+        "keyword search runs against a full-text index (title weighted 10×, tags 5×, content 1×). The "
+        "hybrid score is max(v, 0.6·v + 0.4·bm25_norm) — but only for passages whose cosine similarity "
+        "is ≥ 0.35 (the semantic plausibility gate). BM25 can only boost near-miss candidates; it "
+        "cannot surface an unrelated doc on keyword coincidence. A topic router classifies the query "
+        "(wildlife, medical, ballistics, etc.) and applies a +8% boost to docs whose tags match. When "
+        "your question is location-scoped ('near me'), I append your resolved region to the query and "
+        "add a +15% boost to passages that name your state/region — so 'dangerous animals near me' in "
+        "Virginia returns copperheads and black bears, not far-away alligators. The best passage of "
+        "each top-5 doc (hybrid ≥ 0.45) is pasted into my context, capped at a character budget so the "
+        "highest-ranked sections are never truncated out of the window. The confidence footer uses the "
+        "raw pre-boost cosine score, so it cannot be inflated. Live-data questions skip RAG because the "
+        "answer is already injected fresh.\n"
         "5. CONTEXT ASSEMBLY — my working memory for each reply is built from: current system "
         "stats (CPU/GPU/RAM/temps/power), my GPS fix reverse-geocoded to the nearest city (offline, "
         "from 41k US ZIP centroids + 68k world cities), live mesh state (nodes, channels, recent "
@@ -2435,8 +2442,10 @@ RAY_SELF_DOC = {
         "MY MEMORY: conversations live in SQLite; I see the last 8 messages of the active chat. "
         "Document embeddings are cached in RAM for 120 s. I have no memory across separate chats.\n\n"
         "MY LIMITS: routing is keyword-based, so oddly-phrased questions can take the wrong path; "
-        "documents are embedded whole (no chunking); anything outside my knowledge base comes from "
-        "my training data, which ends at my model's cutoff and is marked LOW confidence."
+        "documents are chunked by a header/length heuristic, so an unusually formatted doc can split "
+        "mid-topic; the region boost only fires when a passage literally names your state/region; "
+        "anything outside my knowledge base comes from my training data, which ends at my model's "
+        "cutoff and is marked LOW confidence."
     ),
 }
 ATLAS_DOCS.append(RAY_SELF_DOC)
@@ -2488,11 +2497,13 @@ except ImportError:
 # AIManager
 # ---------------------------------------------------------------------------
 _DOC_EMB_CACHE_TTL = 120  # seconds — refresh cached doc embeddings
-# Cosine similarity threshold — discard retrieved docs below this score.
-# Calibrated for qwen3-embedding:0.6b with embedding format v2 (title+tags+content):
-# on-topic queries score 0.48–0.85+, off-topic noise stays ≤0.40. 0.45 sits
-# comfortably above the noise floor. The confidence footer uses the raw pre-boost
-# cosine score, so it cannot be inflated by the +8% topic-router boost.
+# Cosine similarity threshold — discard retrieved passages below this score.
+# Recalibrated for qwen3-embedding:0.6b with embedding format v3 (passage-level
+# chunks, title-prefixed): on-topic passages score ~0.45–0.67, off-topic noise
+# stays ≤0.40 (measured: water query 0.64 vs wildlife distractor 0.38). 0.45 sits
+# above the noise floor; the +8% topic-router and +15% region boosts lift
+# borderline-relevant passages (0.43–0.46) over same-band irrelevant docs. The
+# confidence footer uses the raw pre-boost cosine, so boosts can't inflate it.
 # (nomic's old value was 0.30; do NOT reuse it — at 0.30 every query retrieves docs.)
 _RAG_MIN_SCORE = 0.45
 
@@ -2500,6 +2511,125 @@ _RAG_MIN_SCORE = 0.45
 # the doc is semantically unrelated to the query; keyword overlap is coincidental
 # and the BM25 boost would manufacture a false positive.
 _BM25_GATE = 0.35
+
+# Upper bound (chars) on the total KNOWLEDGE BASE block injected into a prompt.
+# ~4 chars/token, so ~7000 chars ≈ 1750 tokens — leaves room for the system
+# prompt, GPS/mesh/stats context, and chat history inside num_ctx=4096. Before
+# passage-level retrieval, five whole multi-topic docs (~3700 tokens) overflowed
+# the window and the lowest-ranked (often most relevant) docs were truncated out.
+_RAG_CONTEXT_CHAR_BUDGET = 7000
+
+# Phrases that mark a query as location-sensitive. When present, rag_search()
+# augments the embedding query with the user's resolved region so "near me"
+# pulls the regional passage instead of generically-dangerous far-away species.
+_LOCATION_INTENT_KEYS = (
+    "near me", "nearby", "near by", "around here", "around me", "in my area",
+    "in the area", "in my region", "my area", "my region", "my location",
+    "where i am", "close to me", "closest", "near here", "this area",
+    "this region", "around my", "local wildlife", "locally",
+)
+
+# US state → wildlife-distribution region, matching the section headers in the
+# "US Wildlife: Regional Species Distribution by US Region" knowledge-base doc.
+_STATE_REGION = {
+    "Maine": "Northeast", "New Hampshire": "Northeast", "Vermont": "Northeast",
+    "Massachusetts": "Northeast", "Rhode Island": "Northeast", "Connecticut": "Northeast",
+    "New York": "Northeast", "Pennsylvania": "Northeast", "New Jersey": "Northeast",
+    "Delaware": "Northeast",
+    "Virginia": "Mid-Atlantic", "West Virginia": "Mid-Atlantic", "Maryland": "Mid-Atlantic",
+    "District of Columbia": "Mid-Atlantic", "North Carolina": "Mid-Atlantic",
+    "Florida": "Southeast", "Georgia": "Southeast", "South Carolina": "Southeast",
+    "Alabama": "Southeast", "Mississippi": "Southeast", "Louisiana": "Southeast",
+    "Arkansas": "Southeast", "Tennessee": "Southeast",
+    "Ohio": "Midwest", "Indiana": "Midwest", "Illinois": "Midwest", "Missouri": "Midwest",
+    "Iowa": "Midwest", "Minnesota": "Midwest", "Wisconsin": "Midwest", "Michigan": "Midwest",
+    "Kansas": "Midwest", "Nebraska": "Midwest", "North Dakota": "Midwest", "South Dakota": "Midwest",
+    "Texas": "Southwest", "New Mexico": "Southwest", "Arizona": "Southwest", "Oklahoma": "Southwest",
+    "Nevada": "Southwest", "Utah": "Southwest",
+    "Montana": "Rocky Mountain", "Idaho": "Rocky Mountain", "Wyoming": "Rocky Mountain",
+    "Colorado": "Rocky Mountain",
+    "California": "Pacific Coast", "Oregon": "Pacific Coast", "Washington": "Pacific Coast",
+    "Alaska": "Alaska", "Hawaii": "Hawaii",
+}
+
+
+def _region_for_state(state_name):
+    """Return the wildlife-distribution region for a US state name, or None."""
+    return _STATE_REGION.get((state_name or "").strip())
+
+
+def _resolve_location_hint(user_loc, gps_fix):
+    """Return a short 'City, State, Region US' hint for RAG query augmentation.
+
+    Prefers an explicit user-provided location, then the device GPS fix. Returns
+    None when no usable position is available.
+    """
+    lat = lon = None
+    if user_loc and user_loc.get("type") == "coords":
+        lat, lon = user_loc.get("lat"), user_loc.get("lon")
+    elif gps_fix and gps_fix.get("latitude") is not None:
+        lat, lon = gps_fix.get("latitude"), gps_fix.get("longitude")
+    if lat is None:
+        return user_loc.get("name") if user_loc else None
+    try:
+        city = _reverse_geocode(lat, lon)  # 'Herndon, Virginia'
+    except Exception:
+        city = None
+    if not city:
+        return None
+    state = city.split(",")[-1].strip()
+    region = _region_for_state(state)
+    return f"{city}, {region} US" if region else city
+
+
+def _doc_passage_heading(passage):
+    """First non-empty line of a passage, trimmed — used as a section label."""
+    for ln in (passage or "").split("\n"):
+        s = ln.strip()
+        if s:
+            return s[:70].rstrip(":")
+    return ""
+
+
+def _chunk_document_text(content, target=700, hard_max=1100):
+    """Split a knowledge-base doc body into section-sized passages for embedding.
+
+    Heuristic: begin a new passage at a 'header' line (short, ends in ':' or
+    written in ALL CAPS) once the current passage has reached ~60% of target,
+    and hard-split anything exceeding hard_max chars. This keeps each species /
+    region section independently retrievable so a long, multi-topic doc no longer
+    collapses into a single averaged vector (which buried the right section and,
+    once injected whole, overflowed the context window).
+    """
+    lines = (content or "").split("\n")
+
+    def _is_header(ln):
+        s = ln.strip()
+        if not s or len(s) > 90:
+            return False
+        if s.endswith(":"):
+            return True
+        letters = [c for c in s if c.isalpha()]
+        return bool(letters) and sum(1 for c in letters if c.isupper()) / len(letters) >= 0.7
+
+    chunks, cur, cur_len = [], [], 0
+    soft = target * 0.6
+    for ln in lines:
+        if cur and _is_header(ln) and cur_len >= soft:
+            chunks.append("\n".join(cur).strip())
+            cur, cur_len = [], 0
+        cur.append(ln)
+        cur_len += len(ln) + 1
+        if cur_len >= hard_max:
+            chunks.append("\n".join(cur).strip())
+            cur, cur_len = [], 0
+    tail = "\n".join(cur).strip()
+    if tail:
+        chunks.append(tail)
+    chunks = [c for c in chunks if c]
+    if not chunks and content and content.strip():
+        return [content.strip()]
+    return chunks
 
 
 class AIManager:
@@ -2627,10 +2757,11 @@ class AIManager:
             logger.warning(f"AI embed warmup skipped; model not available: {embed_model}")
             return
         logger.info(f"AI warmup: loading embed model {embed_model}")
-        # num_gpu 0: keep the small embedder on CPU so it never competes with
-        # the chat model for the Jetson's shared GPU memory.
-        payload = json.dumps({"model": embed_model, "input": "warmup",
-                              "options": {"num_gpu": 0}}).encode()
+        # Embed on GPU (num_gpu omitted = Ollama auto-places). With
+        # OLLAMA_MAX_LOADED_MODELS=2 the chat model stays resident alongside the
+        # 0.6B embedder, so GPU embedding is far faster (passage-level indexing
+        # makes many embed calls) without evicting the chat model.
+        payload = json.dumps({"model": embed_model, "input": "warmup"}).encode()
         req = urllib.request.Request(
             f"{self.ollama_base}/api/embed",
             data=payload,
@@ -2691,23 +2822,39 @@ class AIManager:
 
     # ------------------------------------------------------------------
     def _embed_unembedded_docs(self):
-        """Embed any documents that don't yet have embeddings."""
+        """Embed any documents that don't yet have embeddings (chunked format v3)."""
         import database as db
         docs = db.ai_get_documents_with_embeddings()
         for doc in docs:
             if not doc.get("embedding"):
                 try:
-                    # Prepend title and tags so keyword-rich metadata improves
-                    # cosine matching (e.g. "rattlesnake" in tags boosts recall
-                    # for specific queries that the full-body average would dilute).
-                    tags = doc.get("tags") or ""
-                    embed_text = (f"{doc['title']}\n{tags}\n\n{doc['content']}"
-                                  if tags else f"{doc['title']}\n\n{doc['content']}")
-                    emb = self.get_embed(embed_text)
-                    db.ai_update_document_embedding(doc["id"], json.dumps(emb))
-                    logger.info(f"Embedded doc id={doc['id']}: {doc['title']}")
+                    payload = self._build_doc_embedding(doc)
+                    db.ai_update_document_embedding(doc["id"], json.dumps(payload))
+                    logger.info(
+                        "Embedded doc id=%s (%d chunk%s): %s",
+                        doc["id"], len(payload["chunks"]),
+                        "" if len(payload["chunks"]) == 1 else "s", doc["title"],
+                    )
                 except Exception as e:
                     logger.warning(f"Failed to embed doc {doc['id']}: {e}")
+
+    def _build_doc_embedding(self, doc):
+        """Return the chunked embedding payload {'v':3,'chunks':[{h,t,e}]} for a doc.
+
+        Each section/passage is embedded on its own so retrieval can surface the
+        one paragraph that answers the query instead of the whole multi-topic doc.
+        The doc title is kept as a short prefix for category-level recall, but the
+        tags (very generic, e.g. "wildlife,...") are deliberately dropped from the
+        per-chunk text so sibling chunks stay distinguishable from one another.
+        """
+        title = doc.get("title") or ""
+        passages = _chunk_document_text(doc.get("content") or "")
+        chunks = []
+        for p in passages:
+            embed_text = f"{title}\n\n{p}" if title else p
+            emb = self.get_embed(embed_text)
+            chunks.append({"h": _doc_passage_heading(p), "t": p, "e": emb})
+        return {"v": 3, "chunks": chunks}
 
     # ------------------------------------------------------------------
     # Qwen3-Embedding is instruction-aware: the recommended usage prefixes
@@ -2818,15 +2965,17 @@ class AIManager:
         with self._ollama_slot():
             if not self._ensure_model_present(embed_model):
                 raise ValueError(f"Embedding model not available: {embed_model}")
-            payload = json.dumps({"model": embed_model, "input": text,
-                                  "options": {"num_gpu": 0}}).encode()
+            # Embed on GPU (num_gpu omitted = auto-place). OLLAMA_MAX_LOADED_MODELS=2
+            # keeps the chat model resident, so the embedder runs on GPU without
+            # the per-message reload thrash that the old CPU pin guarded against.
+            payload = json.dumps({"model": embed_model, "input": text}).encode()
             req = urllib.request.Request(
                 f"{self.ollama_base}/api/embed",
                 data=payload,
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            resp = urllib.request.urlopen(req, timeout=30)
+            resp = urllib.request.urlopen(req, timeout=60)
             data = json.loads(resp.read())
         embeddings = data.get("embeddings", [])
         if embeddings:
@@ -2905,7 +3054,12 @@ class AIManager:
 
     # ------------------------------------------------------------------
     def _get_doc_embeddings(self):
-        """Return cached list of (doc_dict, emb_list) pairs; refreshed every 120 s."""
+        """Return cached list of (doc_dict, chunks) pairs; refreshed every 120 s.
+
+        chunks is a list of {'h':heading,'t':text,'e':vector}. A legacy flat
+        whole-doc vector (a bare JSON list) is wrapped as a single chunk so a
+        store that is mid-migration to the chunked v3 format keeps working.
+        """
         import database as db
         now = time.time()
         if self._doc_emb_cache is not None and (now - self._doc_emb_cache_ts) < _DOC_EMB_CACHE_TTL:
@@ -2913,11 +3067,21 @@ class AIManager:
         docs = db.ai_get_documents_with_embeddings()
         result = []
         for doc in docs:
-            if doc.get("embedding"):
-                try:
-                    result.append((doc, json.loads(doc["embedding"])))
-                except Exception:
-                    pass
+            raw = doc.get("embedding")
+            if not raw:
+                continue
+            try:
+                parsed = json.loads(raw)
+            except Exception:
+                continue
+            if isinstance(parsed, dict) and isinstance(parsed.get("chunks"), list):
+                chunks = [c for c in parsed["chunks"] if c.get("e")]
+            elif isinstance(parsed, list) and parsed:
+                chunks = [{"h": "", "t": doc.get("content") or "", "e": parsed}]
+            else:
+                continue
+            if chunks:
+                result.append((doc, chunks))
         self._doc_emb_cache = result
         self._doc_emb_cache_ts = now
         return result
@@ -3474,11 +3638,19 @@ class AIManager:
             return ""
 
     # ------------------------------------------------------------------
-    def rag_search(self, query, top_k=5, embed_model=None):
-        """Return (docs, top_score) using BM25-boosted cosine similarity.
+    def rag_search(self, query, top_k=5, embed_model=None, location_hint=None):
+        """Return (docs, top_score) using passage-level BM25-boosted cosine similarity.
 
-        docs      — list of matching doc dicts (up to top_k, hybrid score >= _RAG_MIN_SCORE)
-        top_score — raw cosine similarity of the best retrieved doc (0.0 if none)
+        docs      — list of matching doc dicts (up to top_k, hybrid score >= _RAG_MIN_SCORE).
+                    Each carries '_passage'/'_heading': the single best-matching
+                    section, so the caller injects that paragraph rather than the
+                    whole multi-topic doc.
+        top_score — raw cosine similarity of the best retrieved passage (0.0 if none)
+
+        A doc is scored by its best chunk: max cosine over that doc's passages.
+        location_hint (e.g. 'Herndon, Virginia, Mid-Atlantic US') is appended to
+        the embedding query for 'near me' questions so regional passages outrank
+        generically-dangerous-but-far-away species.
 
         Hybrid score = max(v, 0.6*v + 0.4*bm25_norm) when v >= _BM25_GATE, else v.
         BM25 can only boost semantically plausible candidates — never surface an
@@ -3488,27 +3660,59 @@ class AIManager:
         doc_embs = self._get_doc_embeddings()
         if not doc_embs:
             return [], 0.0
+        embed_query = f"{query} (location: {location_hint})" if location_hint else query
         try:
-            query_emb = self.get_embed(query, embed_model=embed_model, is_query=True)
+            query_emb = self.get_embed(embed_query, embed_model=embed_model, is_query=True)
         except Exception as e:
             logger.warning(f"RAG embed failed: {e}")
             return [], 0.0
-        # Skip any stored vectors whose dimensions don't match the query (e.g.
-        # docs left over from a previous embed model). Mismatched vectors would
-        # crash numpy.dot or silently score as garbage.
         qdim = len(query_emb)
-        usable = [(doc, emb) for doc, emb in doc_embs if len(emb) == qdim]
-        if len(usable) < len(doc_embs):
-            logger.warning(
-                f"RAG: {len(doc_embs) - len(usable)} doc embedding(s) have a "
-                f"dimension != {qdim} (stale embed model?) — skipped. Re-embed needed."
-            )
-        if not usable:
-            return [], 0.0
 
-        # Vector scores for all docs
-        vec_scores = {doc["id"]: cosine_similarity(query_emb, emb) for doc, emb in usable}
-        doc_by_id  = {doc["id"]: doc for doc, emb in usable}
+        # Location tokens (e.g. ['herndon','virginia','mid-atlantic']) used to
+        # prefer passages that actually name the user's state/region so "near me"
+        # surfaces local species over generically-dangerous far-away ones.
+        location_terms = []
+        if location_hint:
+            for part in location_hint.replace(" US", "").split(","):
+                p = part.strip().lower()
+                if p:
+                    location_terms.append(p)
+
+        # Score every doc by its best-matching passage. Chunk vectors whose
+        # dimension doesn't match the query (e.g. left over from a previous embed
+        # model) are skipped rather than crashing numpy.dot / scoring as garbage.
+        vec_scores = {}   # doc_id -> raw cosine of the selected passage
+        best_chunk = {}   # doc_id -> (heading, passage_text)
+        doc_by_id  = {}
+        dim_skips = 0
+        for doc, chunks in doc_embs:
+            best_rank, best_v, best_c = -2.0, -1.0, None
+            for c in chunks:
+                e = c.get("e")
+                if not e or len(e) != qdim:
+                    dim_skips += 1
+                    continue
+                v = cosine_similarity(query_emb, e)
+                # Region-scoped queries nudge passage selection toward the section
+                # that names the user's region; vec_scores keeps the raw cosine so
+                # the threshold and confidence footer are not inflated.
+                rank_v = v
+                if location_terms and any(t in (c.get("t") or "").lower() for t in location_terms):
+                    rank_v = v + 0.04
+                if rank_v > best_rank:
+                    best_rank, best_v, best_c = rank_v, v, c
+            if best_c is None:
+                continue
+            vec_scores[doc["id"]] = best_v
+            best_chunk[doc["id"]] = (best_c.get("h", ""), best_c.get("t", ""))
+            doc_by_id[doc["id"]]  = doc
+        if dim_skips:
+            logger.warning(
+                f"RAG: skipped {dim_skips} chunk vector(s) with dim != {qdim} "
+                f"(stale embed model?) — re-embed needed."
+            )
+        if not vec_scores:
+            return [], 0.0
 
         # BM25 scores — normalise to [0, 1] (bm25() returns negative; more negative = better)
         bm25_raw = database.ai_fts_search(query, max_results=top_k * 4)
@@ -3550,8 +3754,30 @@ class AIManager:
             scored = [(h * 1.08 if _in_cat(doc) else h, v, doc) for h, v, doc in scored]
             scored.sort(key=lambda x: x[0], reverse=True)
 
-        scored = [(h, doc) for h, v, doc in scored if h >= _RAG_MIN_SCORE]
-        return [doc for _, doc in scored[:top_k]], top_score
+        # Region boost: for location-scoped queries, lift docs whose matched
+        # passage names the user's state/region (+15%) so local species outrank
+        # generically-dangerous far-away ones (e.g. VA copperhead over AZ Gila monster).
+        if location_terms:
+            def _passage_in_region(doc):
+                txt = (best_chunk.get(doc["id"], ("", ""))[1] or "").lower()
+                return any(t in txt for t in location_terms)
+            scored = [(h * 1.15 if _passage_in_region(doc) else h, v, doc) for h, v, doc in scored]
+            scored.sort(key=lambda x: x[0], reverse=True)
+
+        # Filter by threshold and attach the matched passage to each surviving
+        # doc so build_context injects just that section, not the whole doc.
+        out = []
+        for h, v, doc in scored:
+            if h < _RAG_MIN_SCORE:
+                continue
+            heading, passage = best_chunk.get(doc["id"], ("", ""))
+            d = dict(doc)
+            d["_passage"] = passage or doc.get("content") or ""
+            d["_heading"] = heading
+            out.append(d)
+            if len(out) >= top_k:
+                break
+        return out, top_score
 
     # ------------------------------------------------------------------
     def build_context(self, user_message, settings=None):
@@ -3916,15 +4142,31 @@ class AIManager:
             try:
                 top_k = int(settings.get("rag_top_k", DEFAULT_SETTINGS["rag_top_k"]))
                 embed_model = settings.get("embed_model", DEFAULT_SETTINGS["embed_model"])
-                relevant_docs, rag_top_score = self.rag_search(user_message, top_k=top_k, embed_model=embed_model)
+                # Location-sensitive queries ("dangerous animals near me") get the
+                # user's resolved region appended to the embedding query so the
+                # regional passage outranks far-away species.
+                location_hint = None
+                if any(k in msg_lower for k in _LOCATION_INTENT_KEYS):
+                    location_hint = _resolve_location_hint(meta.get("user_location"), meta.get("gps_fix"))
+                relevant_docs, rag_top_score = self.rag_search(
+                    user_message, top_k=top_k, embed_model=embed_model, location_hint=location_hint
+                )
                 meta["rag_top_score"] = rag_top_score
                 if relevant_docs:
                     meta["has_rag"] = True
-                    rag_lines = []
+                    # Inject the best-matching passage per doc (not the whole
+                    # multi-topic doc) and cap the total so the KNOWLEDGE BASE block
+                    # can't overflow num_ctx and truncate the lowest-ranked matches.
+                    rag_lines, used = [], 0
                     for doc in relevant_docs:
-                        rag_lines.append(
-                            f"--- {doc['title']} ---\n{doc['content']}"
-                        )
+                        passage = doc.get("_passage") or doc.get("content") or ""
+                        heading = doc.get("_heading") or ""
+                        label = doc["title"] + (f" — {heading}" if heading else "")
+                        block = f"--- {label} ---\n{passage}"
+                        if rag_lines and used + len(block) > _RAG_CONTEXT_CHAR_BUDGET:
+                            break
+                        rag_lines.append(block)
+                        used += len(block)
                     rag_block = (
                         "=== KNOWLEDGE BASE (use as primary source — supplement with training knowledge if needed) ===\n"
                         + "\n\n".join(rag_lines)

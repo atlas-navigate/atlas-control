@@ -62,7 +62,7 @@ PROTOMAPS_FALLBACK_KEY="20260608.pmtiles"
 ROUTING_PROFILES=("car" "hiking")
 
 # Ollama models pulled on first run (also checked after updates)
-OLLAMA_CHAT_MODEL="qwen3.5:2b"
+OLLAMA_CHAT_MODEL="qwen2.5:3b"
 OLLAMA_EMBED_MODEL="qwen3-embedding:0.6b"
 
 # ── Atlas Control source repository ─────────────────────────────────────────
@@ -1212,9 +1212,9 @@ import sys; sys.path.insert(0, '$APP_DIR')
 import database
 s = database.ai_get_settings()
 updates = {}
-if s.get('model') in (None, '', 'llama3.2:3b', 'qwen3:4b', 'qwen2.5:3b', 'qwen3.5:4b'):
-    updates['model'] = 'qwen3.5:2b'
-    # Qwen3-family sampling: old low-temp values cause repetition loops
+if s.get('model') in (None, '', 'llama3.2:3b', 'qwen3:4b', 'qwen3.5:2b', 'qwen3.5:4b'):
+    updates['model'] = 'qwen2.5:3b'
+    # Qwen2.5 sampling: old low-temp values cause repetition loops
     updates['temperature'] = '0.7'
     updates['top_p'] = '0.8'
     updates['top_k'] = '20'
@@ -1246,16 +1246,17 @@ if s.get('embed_model') in (None, '', 'nomic-embed-text'):
         n = conn.execute('UPDATE ai_documents SET embedding=NULL').rowcount
         conn.commit()
         print(f'Cleared {n} stale doc embedding(s) for re-embed')
-# embed_format_v 1→2: embeddings now include title+tags prefix so metadata
-# keywords are part of the semantic fingerprint. init_db() handles the
-# migration and embedding wipe; this block just surfaces it in install logs.
-if s.get('embed_format_v') not in ('2',):
+# embed_format_v →3: documents are now embedded per-section (passage-level /
+# chunked) so retrieval surfaces the one relevant paragraph instead of a whole
+# multi-topic doc. init_db() handles the migration and embedding wipe; this
+# block just surfaces it in install logs. (v2 was the title+tags whole-doc vector.)
+if s.get('embed_format_v') not in ('3',):
     conn = database.get_db()
     n = conn.execute("UPDATE ai_documents SET embedding=NULL WHERE embedding IS NOT NULL").rowcount
     conn.commit()
-    conn.execute("INSERT INTO ai_settings (key, value) VALUES ('embed_format_v', '2') ON CONFLICT(key) DO UPDATE SET value='2'")
+    conn.execute("INSERT INTO ai_settings (key, value) VALUES ('embed_format_v', '3') ON CONFLICT(key) DO UPDATE SET value='3'")
     conn.commit()
-    print(f'embed_format_v→2: cleared {n} doc embedding(s) for title+tags re-embed')
+    print(f'embed_format_v→3: cleared {n} doc embedding(s) for passage-level re-embed')
 if updates:
     database.ai_set_settings(updates)
     print(f'Updated AI defaults: {updates}')

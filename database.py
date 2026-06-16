@@ -251,15 +251,17 @@ def init_db():
     row = c.execute("SELECT value FROM ai_settings WHERE key='system_prompt'").fetchone()
     if row and _ASK_ANCHOR in row[0] and _ASK_NEW_FRAG not in row[0]:
         c.execute("DELETE FROM ai_settings WHERE key='system_prompt'")
-    # Embedding-format migration v2: embeddings now include title+tags text
-    # prepended to the doc body, which changes every vector. Clear stored
-    # embeddings on first boot after this migration so the background re-embedder
-    # picks them all up with the new format.
-    if not c.execute("SELECT 1 FROM ai_settings WHERE key='embed_format_v' AND value='2'").fetchone():
+    # Embedding-format migration v3: documents are now embedded per-section
+    # (passage-level / chunked), so the stored embedding is a {"v":3,"chunks":[…]}
+    # object instead of a single flat whole-doc vector. The shape changes every
+    # record, so clear stored embeddings on first boot after this migration and
+    # let the background re-embedder regenerate them in the chunked format.
+    # (v2 was the earlier title+tags-prefixed whole-doc vector.)
+    if not c.execute("SELECT 1 FROM ai_settings WHERE key='embed_format_v' AND value='3'").fetchone():
         c.execute("UPDATE ai_documents SET embedding=NULL")
         c.execute(
-            "INSERT INTO ai_settings (key, value) VALUES ('embed_format_v', '2') "
-            "ON CONFLICT(key) DO UPDATE SET value='2'"
+            "INSERT INTO ai_settings (key, value) VALUES ('embed_format_v', '3') "
+            "ON CONFLICT(key) DO UPDATE SET value='3'"
         )
 
     # FTS5 index for BM25 hybrid search (title weighted 10×, tags 5×, content 1×)
@@ -1088,7 +1090,7 @@ AI_FORMATTING_GUIDE = (
 # can never drift. Per-box values saved in the ai_settings table override these at
 # runtime (see ai_get_settings).
 AI_DEFAULTS = {
-    "model": "qwen3.5:2b",
+    "model": "qwen2.5:3b",
     "embed_model": "qwen3-embedding:0.6b",
     "system_prompt": (
         "You are Ray — an AI assistant built into Atlas Control, "

@@ -6241,7 +6241,7 @@ function AIPage() {
       color: 'var(--text-muted)',
       marginTop: 1
     }
-  }, warmingUp ? `Loading ${settings.model || 'qwen3.5:2b'}…` : aiReady ? `${settings.model || 'qwen3.5:2b'} · RAG ${settings.rag_enabled === 'true' ? 'on' : 'off'} · ${(status === null || status === void 0 ? void 0 : status.doc_count) || 0} docs` : status !== null && status !== void 0 && status.running ? `Starting Ray… ${(status === null || status === void 0 ? void 0 : status.startup_phase) || 'warming_up'}` : 'Ollama not reachable')), /*#__PURE__*/React.createElement("div", {
+  }, warmingUp ? `Loading ${settings.model || 'qwen2.5:3b'}…` : aiReady ? `${settings.model || 'qwen2.5:3b'} · RAG ${settings.rag_enabled === 'true' ? 'on' : 'off'} · ${(status === null || status === void 0 ? void 0 : status.doc_count) || 0} docs` : status !== null && status !== void 0 && status.running ? `Starting Ray… ${(status === null || status === void 0 ? void 0 : status.startup_phase) || 'warming_up'}` : 'Ollama not reachable')), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       gap: 4
@@ -6717,7 +6717,7 @@ function AIPage() {
       ...p,
       model: e.target.value
     })),
-    placeholder: "qwen3.5:2b"
+    placeholder: "qwen2.5:3b"
   })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     style: labelStyle
   }, "Embed Model"), /*#__PURE__*/React.createElement("input", {

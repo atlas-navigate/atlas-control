@@ -3928,10 +3928,10 @@ def main():
     settings = db.get_app_settings()
     ai_settings = db.ai_get_settings()
     ai_updates = {}
-    if ai_settings.get("model") in (None, "", "llama3.2:3b", "qwen3:4b", "qwen2.5:3b", "qwen3.5:4b"):
-        ai_updates["model"] = "qwen3.5:2b"
-        # Qwen3-family sampling: stored low-temp values from older models
-        # cause repetition loops on Qwen3.x
+    if ai_settings.get("model") in (None, "", "llama3.2:3b", "qwen3:4b", "qwen3.5:2b", "qwen3.5:4b"):
+        ai_updates["model"] = "qwen2.5:3b"
+        # Qwen2.5 sampling: stored low-temp values from older models
+        # cause repetition loops; use Qwen2.5's recommended defaults
         ai_updates["temperature"] = "0.7"
         ai_updates["top_p"] = "0.8"
         ai_updates["top_k"] = "20"

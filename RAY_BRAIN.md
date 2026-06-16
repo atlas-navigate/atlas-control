@@ -109,7 +109,9 @@ Everything below lives in [`ai_manager.py`](ai_manager.py).
           │  │  Last 10 messages / telemetry / topology / active alerts      │   │
           │  ├──────────────────────────────────────────────────────────────┤   │
           │  │  KNOWLEDGE BASE (RAG hits, if retrieval ran)                  │   │
-          │  │  Up to 5 docs, hybrid score ≥ 0.45                           │   │
+          │  │  Best-matching PASSAGE per doc (not whole doc), up to 5,      │   │
+          │  │  hybrid score ≥ 0.45, capped at a 7000-char budget so the     │   │
+          │  │  most relevant sections never get truncated by the window     │   │
           │  ├──────────────────────────────────────────────────────────────┤   │
           │  │  SELF-KNOWLEDGE (force-injected if asking about Ray)          │   │
           │  ├──────────────────────────────────────────────────────────────┤   │
@@ -121,7 +123,7 @@ Everything below lives in [`ai_manager.py`](ai_manager.py).
           └──────────────────────────────────┬───────────────────────────────────┘
                                              │
           ╔══════════════════════════════════▼════════════════════════════╗
-          ║         STAGE 7 — LANGUAGE CORE (qwen3.5:2b via Ollama)      ║
+          ║         STAGE 7 — LANGUAGE CORE (qwen2.5:3b via Ollama)      ║
           ║                                                               ║
           ║  • Kept warm in VRAM (keep_alive = 10 h default)             ║
           ║  • 4096-token context window                                  ║
@@ -150,92 +152,110 @@ Everything below lives in [`ai_manager.py`](ai_manager.py).
 
 ---
 
-## Indexing Pipeline (background, at startup)
+## Indexing Pipeline (background, at startup) — passage-level / format v3
 
 ```
 SEED DOCUMENTS (ai_manager.py)
-  ~55 docs across 9 topic clusters:
+  ~56 docs across 9 topic clusters:
   Survival · Radio/Comms · Ballistics · Medical
   Firearms · Navigation · Wildlife · Atlas App · Ray Self-Doc
          │
          ▼
   For each doc with embedding = NULL:
-  ┌────────────────────────────────────────────────┐
-  │  Format: "title\ntags\n\ncontent"              │
-  │  (embedding format v2 — metadata baked in)     │
-  └────────────────────┬───────────────────────────┘
+  ┌──────────────────────────────────────────────────────────┐
+  │  CHUNK the body into section-sized passages               │
+  │  (_chunk_document_text): split at a "header" line — a     │
+  │  short line ending ':' or in ALL CAPS — once the current  │
+  │  passage passes ~60% of 700 chars; hard-split at 1100.    │
+  │  → one long multi-topic doc becomes N independent         │
+  │    passages (e.g. the Wildlife "Regional Distribution"    │
+  │    doc splits into Northeast / Mid-Atlantic / Southeast…) │
+  └────────────────────┬─────────────────────────────────────┘
+                       │  for each passage:  "title\n\npassage"
+                       ▼  (title kept for category recall; generic
+                          tags dropped so sibling passages stay distinct)
+          qwen3-embedding:0.6b (Ollama, on GPU)
+          → 1024-dim float vector per passage
                        │
-                       ▼
-          qwen3-embedding:0.6b (Ollama)
-          → 1024-dim float vector
+         ┌─────────────▼─────────────────────────────┐
+         │  SQLite: ai_documents.embedding (TEXT)    │
+         │  {"v":3,"chunks":[                        │
+         │     {"h": heading, "t": passage,          │
+         │      "e": [1024 floats]}, … ]}            │
+         │  (legacy flat whole-doc vectors are still │
+         │   read as a single chunk — back-compat)   │
+         │                                           │
+         │  ai_documents_fts (FTS5) — whole-doc BM25 │
+         │  title ×10, tags ×5, content ×1           │
+         └───────────────────────────────────────────┘
                        │
-         ┌─────────────▼──────────────┐
-         │  SQLite: ai_documents      │
-         │  ┌────────┬───────────┐   │
-         │  │  text  │ embedding │   │
-         │  │  BM25  │ (1024-dim)│   │
-         │  │  index │  vector   │   │
-         │  └────────┴───────────┘   │
-         │                           │
-         │  ai_documents_fts (FTS5)  │
-         │  title ×10, tags ×5,      │
-         │  content ×1               │
-         └───────────────────────────┘
-                       │
-              Embedding cache (RAM)
+              Doc/chunk cache (RAM)
               TTL: 120 s per query
-              (avoids repeated DB reads
-               for follow-up questions)
 ```
 
+**GPU embedding:** the 0.6B embedder runs on the GPU (no `num_gpu:0` CPU pin).
+With `OLLAMA_MAX_LOADED_MODELS=2` it stays co-resident with the chat model, so
+embedding is fast (56 docs → ~168 passages in ~65 s) without evicting qwen2.5:3b.
+
 **When a doc is edited:** its `embedding` column is set to NULL. The background
-thread detects this and re-embeds it on the next startup cycle. The FTS index
-updates in the same transaction as the text write.
+thread re-chunks and re-embeds it on the next cycle. The FTS index updates in the
+same transaction as the text write. A `embed_format_v` bump (now `3`) wipes all
+embeddings on boot so the whole corpus is rebuilt in the new format.
 
 ---
 
-## Retrieval Pipeline (per query)
+## Retrieval Pipeline (per query) — passage-level + location-aware
 
 ```
 USER QUERY
     │
-    ▼ embed with instruction prefix:
-    "Represent this search query for retrieving relevant documents: {query}"
-    → 1024-dim query vector (qwen3-embedding:0.6b)
+    ▼ LOCATION HOOK (if query says "near me", "nearby", "in my area"…)
+    ┌──────────────────────────────────────────────────────────────┐
+    │  _resolve_location_hint(): GPS/user coords → reverse-geocode  │
+    │  → "Herndon, Virginia" → _STATE_REGION → "…, Mid-Atlantic US" │
+    │  appended to the embed query so a region passage outranks a   │
+    │  generically-dangerous-but-far-away one.                      │
+    └──────────────────────────────────────────────────────────────┘
     │
-    ├──────────────────────────────────────────────────────┐
-    │  COSINE SEARCH                        BM25 SEARCH   │
-    │  dot(q, doc_i) / (|q|·|doc_i|)       FTS5 rank()   │
-    │  for every doc in ai_documents        for top-N     │
-    │  → v_i (raw cosine similarity)        → bm25_norm_i │
-    └──────────────────────────────────────────────────────┘
+    ▼ embed with Qwen3 instruction prefix:
+    "Instruct: Given a question, retrieve survival, radio, navigation,
+     and Atlas Control reference passages that answer it\nQuery: {query+loc}"
+    → 1024-dim query vector (qwen3-embedding:0.6b, GPU)
+    │
+    ├──────────────────────────────────────────────────────────────┐
+    │  PASSAGE COSINE SEARCH                      BM25 SEARCH       │
+    │  for every doc: score EACH chunk,           FTS5 rank() over  │
+    │  keep the doc's BEST passage                whole-doc text    │
+    │  (+0.04 nudge to a passage that names        → bm25_norm_i    │
+    │   the user's region)  → v_i, best_passage_i                  │
+    └──────────────────────────────────────────────────────────────┘
                        │
                        ▼ HYBRID SCORING
     ┌──────────────────────────────────────────────────────────────┐
     │  semantic gate: if v_i < 0.35 → skip (BM25 cannot rescue it) │
-    │  if v_i ≥ 0.35:                                              │
-    │    hybrid_i = max(v_i, 0.6·v_i + 0.4·bm25_norm_i)           │
+    │  if v_i ≥ 0.35:  hybrid_i = max(v_i, 0.6·v_i + 0.4·bm25_i)   │
     └──────────────────────────────────────────────────────────────┘
                        │
-                       ▼ TOPIC BOOST
+                       ▼ TOPIC BOOST  +  REGION BOOST
     ┌──────────────────────────────────────────────────────────────┐
-    │  _classify_query_category(query) →                           │
-    │    keyword match → category (wildlife/medical/ballistics/…)  │
-    │  docs whose tags contain category keywords → hybrid_i × 1.08 │
+    │  _classify_query_category(query) → category keyword match:    │
+    │      docs whose tags match the category → hybrid_i × 1.08     │
+    │  location query + best passage names the user's state/region: │
+    │      → hybrid_i × 1.15   (e.g. VA copperhead over AZ Gila)    │
     └──────────────────────────────────────────────────────────────┘
                        │
                        ▼ GATE + RANK
     ┌──────────────────────────────────────────────────────────────┐
-    │  keep docs where hybrid_i ≥ 0.45                            │
-    │  sort descending → take top-5                                │
-    │  confidence score = raw v_i of best doc (pre-boost, honest)  │
+    │  keep where hybrid_i ≥ 0.45 ; sort desc → take top-5         │
+    │  confidence = raw v_i of best passage (pre-boost, honest)    │
     └──────────────────────────────────────────────────────────────┘
                        │
-              ┌────────▼────────┐
-              │  Context block   │
-              │  injected into  │
-              │  Stage 6        │
-              └─────────────────┘
+              ┌────────▼─────────────────────┐
+              │  Inject each doc's BEST       │
+              │  PASSAGE (not the whole doc), │
+              │  capped at 7000 chars, into   │
+              │  Stage 6 context              │
+              └──────────────────────────────┘
 ```
 
 ---
@@ -300,7 +320,8 @@ flowchart TD
 
     R -->|always| S[Stage 2\nLive Senses\nCPU·GPU·RAM·mesh·alerts]
     R -->|always| G[Stage 3\nGPS + reverse geocode\n41k US ZIPs · 68k world cities]
-    R -->|knowledge question| RAG[Stage 4\nRAG Retrieval\nhybrid BM25+cosine\ngate v≥0.35 · boost +8%\ntop-5 docs · score≥0.45]
+    G -.->|near me? feed region| RAG
+    R -->|knowledge question| RAG[Stage 4\nRAG Retrieval — passage-level\nbest chunk per doc\nhybrid BM25+cosine · gate v≥0.35\n+8% category · +15% region\ntop-5 passages · score≥0.45\n7000-char budget]
     R -->|physics or ballistics| C[Stage 5\nCalculator Agent]
     R -->|asks about Ray| SK[Self-knowledge\nforce-injected]
     R -->|missing params| ASK[Answer with defaults\n+ ask user for detail]
@@ -321,15 +342,16 @@ flowchart TD
     GM --> CTX
     ASK --> CTX
 
-    CTX --> LLM[Stage 7\nLanguage Core\nqwen3.5:2b via Ollama\n4096-token window · temp 0.7\nthink=false · streams tokens]
+    CTX --> LLM[Stage 7\nLanguage Core\nqwen2.5:3b via Ollama\n4096-token window · temp 0.7\nthink=false · streams tokens]
     LLM --> PP[Stage 8\nPost-processing\nreplace CALC tags\nappend confidence footer]
     PP --> ANS([Answer])
 
-    subgraph IDX [Indexing — startup background thread]
-        D[Seed docs ~55] --> E[qwen3-embedding:0.6b\ntitle+tags+content\n→ 1024-dim vector]
-        E --> DB[(SQLite\nai_documents\ntext · embedding\nFTS5 BM25 index)]
+    subgraph IDX [Indexing — startup background thread · format v3]
+        D[Seed docs ~56] --> CH[_chunk_document_text\nsplit body into\nsection passages]
+        CH --> E[qwen3-embedding:0.6b on GPU\ntitle + passage\n→ 1024-dim vector per chunk]
+        E --> DB[(SQLite ai_documents.embedding\nv3: chunks of h·t·e\nFTS5 BM25 whole-doc index)]
     end
-    DB -.->|cosine search| RAG
+    DB -.->|passage cosine search| RAG
     DB -.->|BM25 search| RAG
 ```
 
@@ -363,28 +385,48 @@ offline using a gravity-weighted lookup over 68,000 world cities (US: 41,000 ZIP
 centroids, skipping military-base names when a civilian ZIP is close). If the user types
 coordinates or a place name in their message, that overrides the device fix.
 
-### Stage 4 — Indexing & Retrieval (RAG, hybrid BM25 + cosine)
+This location also **feeds retrieval**: when a question is location-scoped ("near me",
+"in my area", …), the resolved `City, State, Region` is appended to the RAG query and
+used to boost passages that name the user's region — so "dangerous animals near me" in
+Virginia surfaces copperheads and black bears, not Florida alligators (see Stage 4).
 
-**Indexing:** at startup, every seeded knowledge doc is run through `qwen3-embedding:0.6b`,
-producing a 1024-dim vector stored next to the text in SQLite. Each document is embedded
-as `"title\ntags\n\ncontent"` (embedding format v2) so metadata keywords like species names
-and category tags are baked into the semantic fingerprint. A parallel **FTS5 full-text index**
-(`ai_documents_fts`) is maintained for BM25 keyword search (title ×10, tags ×5, content ×1).
-Changed docs are auto re-embedded. Embeddings are cached in RAM for 120 s.
+### Stage 4 — Indexing & Retrieval (RAG, passage-level hybrid BM25 + cosine)
 
-**Retrieval uses a two-pass hybrid:**
-1. Cosine similarity of query embedding vs every doc vector.
+**Indexing (passage-level, embedding format v3):** at startup, each seeded doc is split by
+`_chunk_document_text` into **section-sized passages** — it starts a new passage at a
+"header" line (a short line ending `:` or in ALL CAPS) once the current one passes ~60% of
+700 chars, hard-splitting at 1100. Every passage is embedded **separately** through
+`qwen3-embedding:0.6b` as `"title\n\npassage"` (the title gives category context; the very
+generic tags are dropped so sibling passages stay distinguishable). The result is stored as
+`{"v":3,"chunks":[{h,t,e}]}` in the `ai_documents.embedding` column. This is the key fix for
+long multi-topic docs: the Wildlife "Regional Distribution" doc now exposes its
+*Mid-Atlantic / Virginia* section as its own retrievable vector instead of one averaged
+whole-doc blur. A legacy flat vector is still read as a single chunk (back-compat). A
+parallel **FTS5 index** (`ai_documents_fts`) drives BM25 over the whole-doc text
+(title ×10, tags ×5, content ×1). The embedder runs **on the GPU**, co-resident with the
+chat model via `OLLAMA_MAX_LOADED_MODELS=2`; doc/chunk vectors are cached in RAM for 120 s.
+
+**Location hook:** if the query is location-scoped, the resolved `City, State, Region` is
+appended to the embed query, and the passage-selection step gets a small nudge (+0.04)
+toward the chunk that names the user's region.
+
+**Retrieval scores each doc by its single best passage:**
+1. Passage cosine — max cosine over that doc's chunks (→ `v_i`, plus the matched passage).
 2. BM25 keyword search across the FTS index.
 
 Hybrid score = `max(v, 0.6·v + 0.4·bm25_norm)` — **only** when cosine `v ≥ 0.35`
-(the semantic plausibility gate). BM25 can rescue a near-miss semantic candidate
-(e.g. exact term in title) but cannot surface an unrelated doc on keyword alone.
+(the semantic plausibility gate). BM25 can rescue a near-miss but cannot surface an
+unrelated doc on keyword alone.
 
-A topic router (`_classify_query_category`) applies a **+8% score boost** to docs whose
-tags match the detected category (wildlife / medical / ballistics / etc.).
+Two boosts then sharpen the ranking: a topic router (`_classify_query_category`) gives a
+**+8%** edge to docs whose tags match the detected category, and for location queries a
+**+15% region boost** lifts docs whose matched passage names the user's state/region
+(so a Virginia query ranks the copperhead/black-bear passage above an Arizona Gila monster).
 
-The **top 5 docs** with hybrid score ≥ 0.45 are pasted into context. The confidence
-footer uses the raw pre-BM25 cosine score so it cannot be inflated by keyword luck.
+Each surviving doc's **best passage** (not the whole doc) — top 5, hybrid ≥ 0.45 — is pasted
+into context, capped at a 7000-char budget so the highest-ranked sections can never be
+truncated out of the window. The confidence footer uses the raw pre-boost cosine, so it
+cannot be inflated by keyword luck or the boosts.
 
 ### Stage 5 — Calculator Agent (`_calc_agent_pass`, `_ballistic_direct_compute`, `_miller_sg`)
 
@@ -414,7 +456,7 @@ Ray does not trust a 3B-parameter model with arithmetic. Two sub-paths:
 ### Stages 6–7 — Context Assembly & Generation (`chat()` / `chat_stream()`)
 
 The system prompt + all injected sections + the last 8 chat messages go to Ollama
-(default `qwen3.5:2b`, 4096-token window, temperature 0.7, top_k 20, top_p 0.8,
+(default `qwen2.5:3b`, 4096-token window, temperature 0.7, top_k 20, top_p 0.8,
 hybrid-thinking disabled, kept warm in VRAM for 10 h).
 The answer streams token by token over the local socket.
 
@@ -463,8 +505,8 @@ No SG constants are hardcoded — Sg is derived from first principles per query.
 | Memory | Where | Lifetime |
 |--------|-------|---------|
 | Conversation history | SQLite (`ai_chats` / `ai_messages`) | Permanent; last 8 msgs per reply |
-| Knowledge base | SQLite (`ai_documents`, text + embedding) | Permanent; re-embedded on edit |
-| Doc-embedding cache | RAM | 120 s TTL |
+| Knowledge base | SQLite (`ai_documents`, text + per-passage embeddings, v3) | Permanent; re-chunked + re-embedded on edit |
+| Doc/chunk-embedding cache | RAM | 120 s TTL |
 | Model weights | VRAM | `keep_alive` (default 10 h) |
 | Across separate chats | — | None — each chat is isolated |
 
@@ -489,7 +531,10 @@ seeded documents and how they relate to each other.
 ## Honest Limits
 
 - Routing is keyword-based; an oddly-phrased question can take the wrong path.
-- Documents are embedded whole — no chunking — so retrieval is per-topic, not per-paragraph.
+- Documents are chunked by a header/length heuristic, not a semantic parser — an unusually
+  formatted doc may split mid-topic (retrieval still returns the closest passage).
+- The region boost only fires when a passage literally names the user's state/region; a doc
+  that lists a species without a place tag won't get the location lift.
 - Anything outside the knowledge base comes from the model's training data (marked LOW confidence).
 - No internet: Ray cannot look anything up that isn't on the device.
 - Ballistic spin drift assumes RH twist and sea-level standard atmosphere. Altitude, humidity,
