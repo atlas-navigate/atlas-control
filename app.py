@@ -1210,12 +1210,36 @@ def _km_category_for(tags_str: str, title: str = ""):
             return slug, meta["color"], meta["label"]
     return "other", "#94a3b8", "Other"
 
+def _km_doc_passage_vectors(raw_embedding):
+    """Extract the list of passage vectors from a stored document embedding.
+
+    Mirrors ai_manager._get_doc_embeddings: documents are now embedded
+    per-passage and stored as {"v":3,"chunks":[{"e":vector},…]}, but a legacy
+    flat whole-doc vector (a bare JSON list) is still accepted so the knowledge
+    map keeps drawing links across the embed-format migration. Returns a list of
+    float vectors (one per passage), or [] if the embedding is missing/unusable.
+    """
+    if not raw_embedding:
+        return []
+    try:
+        parsed = json.loads(raw_embedding)
+    except Exception:
+        return []
+    if isinstance(parsed, dict) and isinstance(parsed.get("chunks"), list):
+        return [c["e"] for c in parsed["chunks"]
+                if isinstance(c, dict) and c.get("e")]
+    if isinstance(parsed, list) and parsed and isinstance(parsed[0], (int, float)):
+        return [parsed]
+    return []
+
+
 @app.route("/api/ai/knowledge-map")
 def api_ai_knowledge_map():
     """Return nodes and high-cosine edges for the knowledge-map visualisation."""
     docs = db.ai_get_documents_with_embeddings()
     nodes = []
-    emb_by_id = {}
+    # id -> list of unit-normalised passage vectors (so cosine == plain dot product)
+    units_by_id = {}
     for doc in docs:
         slug, color, label = _km_category_for(doc.get("tags") or "", doc.get("title") or "")
         nodes.append({
@@ -1225,28 +1249,41 @@ def api_ai_knowledge_map():
             "cat_label": label,
             "color":    color,
         })
-        if doc.get("embedding"):
-            try:
-                emb_by_id[doc["id"]] = json.loads(doc["embedding"])
-            except Exception:
-                pass
+        units = []
+        for v in _km_doc_passage_vectors(doc.get("embedding")):
+            n = math.sqrt(sum(x * x for x in v))
+            if n:
+                units.append([x / n for x in v])
+        if units:
+            units_by_id[doc["id"]] = units
 
-    # Precompute L2 norms once; avoids recomputing each vector ~55× in the inner loop.
-    norms = {id_: math.sqrt(sum(x * x for x in v)) for id_, v in emb_by_id.items()}
+    # Edge weight between two docs = their best-matching passage pair (max cosine),
+    # mirroring RAG's "a doc is scored by its single best chunk" rule. Vectors are
+    # pre-normalised above, so each passage comparison is just a dot product. Each
+    # unordered pair is scored once, then mirrored into both nodes' peer lists.
+    ids = list(units_by_id.keys())
+    peers = {id_: [] for id_ in ids}
+    for i in range(len(ids)):
+        id1 = ids[i]
+        passages1 = units_by_id[id1]
+        for j in range(i + 1, len(ids)):
+            id2 = ids[j]
+            best = 0.0
+            for a in passages1:
+                for b in units_by_id[id2]:
+                    if len(a) != len(b):
+                        continue
+                    s = sum(x * y for x, y in zip(a, b))
+                    if s > best:
+                        best = s
+            if best >= 0.55:
+                peers[id1].append((best, id2))
+                peers[id2].append((best, id1))
+
     edges = []
-    ids = list(emb_by_id.keys())
     for id1 in ids:
-        a, ma = emb_by_id[id1], norms[id1]
-        top_peers = []
-        for id2 in ids:
-            if id2 == id1:
-                continue
-            b, mb = emb_by_id[id2], norms[id2]
-            s = sum(x * y for x, y in zip(a, b)) / (ma * mb) if ma and mb else 0.0
-            if s >= 0.55:
-                top_peers.append((s, id2))
-        top_peers.sort(reverse=True)
-        for s, id2 in top_peers[:6]:   # at most 6 edges per node
+        peers[id1].sort(reverse=True)
+        for s, id2 in peers[id1][:6]:  # at most 6 edges per node
             if id1 < id2:              # deduplicate (only emit each pair once)
                 edges.append({"from": id1, "to": id2, "weight": round(s, 3)})
 

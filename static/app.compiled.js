@@ -6350,7 +6350,7 @@ function AIPage() {
         color: 'var(--text-muted)',
         fontFamily: 'monospace'
       }
-    }, confLabel)), (m.tokens || m.duration_ms) && /*#__PURE__*/React.createElement("div", {
+    }, confLabel)), !!(m.tokens || m.duration_ms) && /*#__PURE__*/React.createElement("div", {
       className: "mono",
       style: {
         fontSize: 10,

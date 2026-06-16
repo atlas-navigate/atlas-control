@@ -5600,7 +5600,7 @@ function AIPage() {
                               <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{confLabel}</span>
                             </div>
                           )}
-                          {(m.tokens || m.duration_ms) && (
+                          {!!(m.tokens || m.duration_ms) && (
                             <div className="mono" style={{ fontSize: 10, color: 'var(--text-muted)', paddingLeft: 4 }}>
                               {m.tokens && m.duration_ms ? `${(m.tokens / (m.duration_ms / 1000)).toFixed(1)} tok/s · ` : ''}
                               {m.duration_ms ? `${(m.duration_ms/1000).toFixed(1)}s` : ''}

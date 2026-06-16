@@ -496,7 +496,11 @@ _COMMON_ROUNDS = {
     "338lm_300": (850,  0.730, ".338 Lapua Magnum 300gr BTHP",         300,  0.338, 1.750, 10.0),
     "50bmg_750": (895,  1.050, ".50 BMG 750gr APIT",                   750,  0.510, 4.180, 15.0),
     "9mm_115":   (370,  0.145, "9mm Luger 115gr FMJ",                  115,  0.355, 0.680, 10.0),
+    "380_95":    (290,  0.115, ".380 ACP 95gr FMJ",                     95,  0.355, 0.550, 16.0),
     "45acp_230": (259,  0.195, ".45 ACP 230gr FMJ",                    230,  0.452, 0.800, 16.0),
+    "22lr_40":   (340,  0.138, ".22 LR 40gr LRN",                       40,  0.223, 0.400, 16.0),
+    "300blk_125":(675,  0.345, ".300 Blackout 125gr OTM (supersonic)", 125,  0.308, 1.130,  8.0),
+    "300blk_220":(308,  0.608, ".300 Blackout 220gr OTM (subsonic)",   220,  0.308, 1.460,  8.0),
 }
 
 # Keyword fragments for identifying specific rounds in a query
@@ -523,6 +527,22 @@ _ROUND_HINTS = [
     ([".50", "bmg"],          "50bmg_750"),
     (["9mm", "115"],          "9mm_115"),
     (["45", "acp"],           "45acp_230"),
+    # .380 ACP (9mm Kurz) — distinct from 9mm/.45
+    (["380", "acp"],          "380_95"),
+    (["380", "auto"],         "380_95"),
+    # .300 Blackout — supersonic (light) vs subsonic (heavy) fly very differently
+    (["300", "blackout", "125"],        "300blk_125"),
+    (["300", "blackout", "220"],        "300blk_220"),
+    (["300", "blk", "125"],             "300blk_125"),
+    (["300", "blk", "220"],             "300blk_220"),
+    (["300", "blackout", "subsonic"],   "300blk_220"),
+    (["300", "blk", "subsonic"],        "300blk_220"),
+    (["300", "blackout", "supersonic"], "300blk_125"),
+    (["300", "blk", "supersonic"],      "300blk_125"),
+    # .22 LR — explicit ".22 lr"/"22lr" forms (the ".223" fallback below still
+    # wins for .223 queries because ".223" never contains "lr" or "22lr")
+    ([".22", "lr"],           "22lr_40"),
+    (["22lr"],                "22lr_40"),
     # Fallback by caliber only
     (["5.56"],                "5.56_55"),
     ([".223"],                "5.56_55"),
@@ -532,6 +552,14 @@ _ROUND_HINTS = [
     (["338", "lapua"],        "338lm_250"),
     (["9mm"],                 "9mm_115"),
     ([".45"],                 "45acp_230"),
+    ([".380"],                "380_95"),
+    (["300", "blackout"],     "300blk_125"),
+    (["300", "blk"],          "300blk_125"),
+    (["300blk"],              "300blk_125"),
+    (["7.62x35"],             "300blk_125"),
+    # ".22" alone is LAST so ".223"/"5.56"/"7.62x39" etc. resolve first
+    # (".223" contains ".22" as a substring — order is what disambiguates).
+    ([".22"],                 "22lr_40"),
 ]
 
 # Keywords that specifically indicate a ballistics trajectory question
@@ -542,6 +570,7 @@ _BALLISTIC_SPECIFIC_KEYWORDS = {
     "trajectory", "ballistic", "flight path",
     "5.56", ".223", ".308", "7.62", "6.5 creedmoor", ".338", ".50 bmg",
     "9mm", ".45 acp", ".45", "45 acp",
+    ".22 lr", "22lr", ".380", "380 acp", "300 blackout", "300 blk", "300blk",
     "grain", "gr bullet", "gr round",
     "fps", "feet per second",
     "spin drift", "gyroscopic drift", "spin", "drift",
@@ -603,6 +632,26 @@ _LIVE_DATA_KEYWORDS = {
     "humidity", "pressure", "channel", "message", "alert", "topology", "link",
     "hop", "hops", "relay", "router", "hardware", "model", "device", "stat",
     "stats", "status",
+}
+
+# Live "senses" (host telemetry + mesh state) are heavy, and when they are
+# ALWAYS present the small model tries to weave them into unrelated answers and
+# hallucinates around them.  So they are treated as a RETRIEVED source: the
+# CPU/GPU/RAM/thermal block and the mesh/alert block are injected only when the
+# message actually asks for them.  GPS/location grounding is intentionally NOT
+# gated here — it is cheap, factual, and useful for grounding every answer.
+_SYSTEM_STATS_KEYWORDS = {
+    "cpu", "gpu", "ram", "memory", "disk", "storage", "temperature", "temps",
+    "thermal", "overheat", "how hot", "uptime", "watt", "voltage",
+    "power draw", "power usage", "power consumption", "system stat",
+    "system status", "system load", "resource usage", "utilization",
+    "throttl", "fan speed", "how's atlas", "hows atlas", "deck doing",
+}
+_MESH_CONTEXT_KEYWORDS = {
+    "mesh", "node", "nodes", "snr", "rssi", "signal strength", "topology",
+    "alert", "alerts", "telemetry", "channel", "channels", "neighbor",
+    "hop", "hops", "relay", "router", "online", "offline", "network",
+    "radio", "last heard", "link quality", "who's on", "whos on",
 }
 
 # ---------------------------------------------------------------------------
@@ -2394,11 +2443,12 @@ RAY_SELF_DOC = {
         "re-embedded in a background thread. A parallel FTS5 full-text index (ai_documents_fts) "
         "enables BM25 keyword search across all docs.\n"
         "3. ROUTING (how I classify your question) — before I generate anything, fast keyword "
-        "scanners decide what your message needs: live dashboard data, GPS/location grounding, "
-        "math, physics/ballistics, or knowledge-base retrieval. Routing costs near-zero time and "
-        "decides which of my subsystems wake up. If a question requires specific parameters I do "
-        "not have (barrel twist rate, zero distance, custom load data), I answer with best "
-        "available defaults and ask for the missing detail.\n"
+        "scanners decide what your message needs: host telemetry, live mesh state, GPS/location "
+        "grounding, math, physics/ballistics, or knowledge-base retrieval. Routing costs near-zero "
+        "time and decides which of my subsystems wake up — including whether to pull in my live "
+        "senses at all. If a question requires specific parameters I do not have (barrel twist "
+        "rate, zero distance, custom load data), I answer with best available defaults and ask for "
+        "the missing detail.\n"
         "4. RETRIEVAL (RAG, passage-level hybrid BM25 + cosine) — for knowledge questions, your "
         "message is embedded with a query-instruction prefix and compared to every passage by cosine "
         "similarity; each document is scored by its single best-matching passage. In parallel, a BM25 "
@@ -2414,11 +2464,14 @@ RAY_SELF_DOC = {
         "highest-ranked sections are never truncated out of the window. The confidence footer uses the "
         "raw pre-boost cosine score, so it cannot be inflated. Live-data questions skip RAG because the "
         "answer is already injected fresh.\n"
-        "5. CONTEXT ASSEMBLY — my working memory for each reply is built from: current system "
-        "stats (CPU/GPU/RAM/temps/power), my GPS fix reverse-geocoded to the nearest city (offline, "
-        "from 41k US ZIP centroids + 68k world cities), live mesh state (nodes, channels, recent "
-        "messages, telemetry, topology, alerts), any retrieved knowledge docs, and the last 8 "
-        "messages of our conversation.\n"
+        "5. CONTEXT ASSEMBLY — my working memory for each reply always includes my GPS fix "
+        "reverse-geocoded to the nearest city (offline, from 41k US ZIP centroids + 68k world "
+        "cities) for grounding, any retrieved knowledge docs, and the last 8 messages of our "
+        "conversation. My live SENSES — host telemetry (CPU/GPU/RAM/temps/power) and live mesh "
+        "state (nodes, channels, recent messages, telemetry, topology, alerts) — are NOT loaded "
+        "into every prompt. They are a retrieved source, pulled in only when your message actually "
+        "asks about them (routing in stage 3). Holding them out by default keeps me from narrating "
+        "idle hardware or mesh numbers into answers that have nothing to do with them.\n"
         "6. CALCULATOR AGENT (physics/math cortex) — I do not trust myself with arithmetic. "
         "For ballistics: I parse range, zero distance, and round from your message; then a real "
         "point-mass G1 drag-model simulation integrates the trajectory and returns drop (cm) and "
@@ -3816,9 +3869,17 @@ class AIManager:
             _units = "metric"
         meta["units"] = _units
 
-        # System stats context
+        # Live "senses" are retrieved on demand, not always-on.  An unrelated
+        # survival/ballistics/general question is no longer flooded with host
+        # telemetry + the full mesh state (which the small model otherwise tries
+        # to narrate and hallucinates around).  GPS grounding stays always-on.
+        msg_lower   = user_message.lower()
+        wants_stats = any(k in msg_lower for k in _SYSTEM_STATS_KEYWORDS)
+        wants_mesh  = any(k in msg_lower for k in _MESH_CONTEXT_KEYWORDS)
+
+        # System stats context — only when the message asks about host telemetry
         try:
-            s = system_stats.get_stats()
+            s = system_stats.get_stats() if wants_stats else None
             if s:
                 lines = ["=== SYSTEM STATUS ==="]
                 if "cpu_pct" in s:
@@ -3925,7 +3986,9 @@ class AIManager:
                 logger.warning(f"Location agent failed: {e}")
 
         # Dashboard context (nodes, map, telemetry, messages, topology, alerts, channels)
-        if settings.get("inject_mesh_context", "true").lower() == "true":
+        # Injected only when the message actually asks about the mesh/alerts — the
+        # inject_mesh_context setting is the master switch, wants_mesh is the per-query gate.
+        if settings.get("inject_mesh_context", "true").lower() == "true" and wants_mesh:
             try:
                 now = int(time.time())
 
@@ -4135,7 +4198,6 @@ class AIManager:
             logger.info("Self-query detected: injected Ray self-architecture doc")
 
         # RAG context — skip if the query is about live dashboard data (already injected above)
-        msg_lower = user_message.lower()
         is_live_query = any(kw in msg_lower for kw in _LIVE_DATA_KEYWORDS)
         meta["is_live_query"] = is_live_query
         if settings.get("rag_enabled", "true").lower() == "true" and not is_live_query:

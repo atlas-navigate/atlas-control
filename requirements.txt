@@ -13,6 +13,10 @@ cffi>=1.16
 gevent>=23.9.1,<26
 gevent-websocket==0.10.1
 qrcode[pil]>=7.4.2
+# Pillow is imported directly (download_topo.py: `from PIL import Image`) — it
+# was only arriving transitively via qrcode[pil], so pin it explicitly so a
+# fresh clone that never touches qrcode still resolves it. (Installed: 12.x.)
+Pillow>=10.0
 numpy>=1.26,<3
 psutil>=5.9,<8
 PyPubSub>=4.0.3,<5

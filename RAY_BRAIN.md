@@ -50,7 +50,7 @@ Everything below lives in [`ai_manager.py`](ai_manager.py).
      │ • topology    │  │cities)  │  │+8% cat  │  │
      │ • alerts      │  │         │  │top-5    │  │
      │               │  │user-    │  │≥ 0.45   │  │
-     │(SQLite,fresh) │  │override │  │score    │  │
+     │(on demand)    │  │override │  │score    │  │
      └───────┬───────┘  └────┬────┘  └────┬────┘  │
              │               │            │        │
              │    ┌──────────┘            │        │
@@ -98,13 +98,13 @@ Everything below lives in [`ai_manager.py`](ai_manager.py).
           │  │  SYSTEM PROMPT                                                │   │
           │  │  + UNIT PREFERENCE (metric/imperial — mandatory directive)    │   │
           │  ├──────────────────────────────────────────────────────────────┤   │
-          │  │  SYSTEM STATUS (always injected)                              │   │
+          │  │  SYSTEM STATUS (on demand - only when the question asks)      │   │
           │  │  CPU cores / GPU / RAM / disk / temps / power / uptime        │   │
           │  ├──────────────────────────────────────────────────────────────┤   │
           │  │  CURRENT POSITION (always injected)                           │   │
           │  │  GPS lat/lon + altitude + speed + nearest city (offline)      │   │
           │  ├──────────────────────────────────────────────────────────────┤   │
-          │  │  MESH NETWORK STATE (conditional on question type)            │   │
+          │  │  MESH NETWORK STATE (on demand - only when the question asks) │   │
           │  │  Node list / online+offline / battery / SNR / channel         │   │
           │  │  Last 10 messages / telemetry / topology / active alerts      │   │
           │  ├──────────────────────────────────────────────────────────────┤   │
@@ -278,7 +278,7 @@ USER MESSAGE: "spin drift of a 5.56 at 600 m with 1:7 twist"
        │     → 5.56mm/.223 55gr FMJ (M193)           │
        │       v0=975 m/s, bc=0.269                  │
        │       weight=55gr, diam=0.224"              │
-       │       length=0.910", ref_twist=9.0"         │
+       │       length=0.910", ref_twist=7.0"         │
        │     (user specified 1:7 → override)         │
        │                                             │
        │  5. _ballistic_sim(600, 100, 975, 0.269)    │
@@ -318,7 +318,7 @@ USER MESSAGE: "spin drift of a 5.56 at 600 m with 1:7 twist"
 flowchart TD
     U([User message]) --> R{Stage 1\nROUTING\nkeyword scanners}
 
-    R -->|always| S[Stage 2\nLive Senses\nCPU·GPU·RAM·mesh·alerts]
+    R -->|only when the question asks| S[Stage 2\nLive Senses — RETRIEVED SOURCE\nCPU·GPU·RAM·mesh·alerts\nNOT loaded by default]
     R -->|always| G[Stage 3\nGPS + reverse geocode\n41k US ZIPs · 68k world cities]
     G -.->|near me? feed region| RAG
     R -->|knowledge question| RAG[Stage 4\nRAG Retrieval — passage-level\nbest chunk per doc\nhybrid BM25+cosine · gate v≥0.35\n+8% category · +15% region\ntop-5 passages · score≥0.45\n7000-char budget]
@@ -367,16 +367,26 @@ This stage also detects when key parameters are missing — if a ballistic query
 include a zero distance or twist rate, the calculator uses sensible defaults and the
 output block explicitly prompts the user to provide the missing value.
 
-### Stage 2 — Live Senses (`build_context`)
+### Stage 2 — Live Senses (`build_context`, **retrieved on demand**)
 
 The **first** injection is a `=== UNIT PREFERENCE ===` block (metric or imperial) read from
 app settings. This governs every measurement in the answer — it is a mandatory directive,
 not a suggestion. Hardware temperatures stay in °C regardless.
 
-Every reply then gets fresh system stats (per-core CPU, GPU %, RAM, disk, temperatures,
-power draw, uptime) and the live mesh picture from SQLite: node online/offline status,
-battery, SNR, channels, the last 10 messages, and active alerts. Telemetry, positions,
-and topology are only injected when the question asks for them — keeping the context lean.
+Ray's live "senses" are **not loaded into every prompt**. The host-telemetry block
+(per-core CPU, GPU %, RAM, disk, temperatures, power draw, uptime) and the live mesh
+picture (node online/offline status, battery, SNR, channels, the last 10 messages,
+telemetry, topology, and active alerts) are a **retrieved source**: routing in Stage 1
+decides whether the message is actually asking about them, and only then are they pulled
+from SQLite and injected. `_SYSTEM_STATS_KEYWORDS` gates the telemetry block;
+`_MESH_CONTEXT_KEYWORDS` gates the mesh block; the `inject_mesh_context` setting is the
+master switch on top of that.
+
+This is deliberate: when the whole sensor dump rode along on *every* reply, the 3B model
+kept trying to weave idle CPU temperatures and stale node counts into answers that had
+nothing to do with them — a reliable hallucination trigger. Holding the senses back until
+they are asked for keeps the context lean and the answers grounded. (GPS/location grounding
+in Stage 3 is the one exception that stays always-on — it is cheap and grounds every reply.)
 
 ### Stage 3 — Location Grounding (`_build_location_prefix`, `_reverse_geocode`)
 
@@ -482,9 +492,12 @@ No SG constants are hardcoded — Sg is derived from first principles per query.
 
 | Round | v₀ (m/s) | BC (G1) | Weight | Diam | Length | Ref. Twist |
 |-------|----------|---------|--------|------|--------|-----------|
-| 5.56mm 55gr M193 | 975 | 0.269 | 55 gr | 0.224" | 0.910" | 1:9" |
+| 5.56mm 55gr M193 | 975 | 0.269 | 55 gr | 0.224" | 0.910" | 1:7" |
 | 5.56mm 62gr M855 | 930 | 0.307 | 62 gr | 0.224" | 0.990" | 1:7" |
 | 5.56mm 77gr Mk262 | 884 | 0.372 | 77 gr | 0.224" | 1.060" | 1:8" |
+| .22 LR 40gr LRN | 340 | 0.138 | 40 gr | 0.223" | 0.400" | 1:16" |
+| .300 Blackout 125gr (supersonic) | 675 | 0.345 | 125 gr | 0.308" | 1.130" | 1:8" |
+| .300 Blackout 220gr (subsonic) | 308 | 0.608 | 220 gr | 0.308" | 1.460" | 1:8" |
 | .308 Win 147gr M80 | 838 | 0.412 | 147 gr | 0.308" | 1.140" | 1:12" |
 | .308 Win 168gr M118LR | 820 | 0.447 | 168 gr | 0.308" | 1.226" | 1:10" |
 | .308 Win 175gr BTHP | 808 | 0.505 | 175 gr | 0.308" | 1.240" | 1:10" |
@@ -495,7 +508,8 @@ No SG constants are hardcoded — Sg is derived from first principles per query.
 | .338 Lapua 250gr | 905 | 0.587 | 250 gr | 0.338" | 1.590" | 1:10" |
 | .338 Lapua 300gr | 850 | 0.730 | 300 gr | 0.338" | 1.750" | 1:10" |
 | .50 BMG 750gr | 895 | 1.050 | 750 gr | 0.510" | 4.180" | 1:15" |
-| 9mm 115gr | 370 | 0.145 | 115 gr | 0.355" | 0.680" | 1:16" |
+| 9mm 115gr | 370 | 0.145 | 115 gr | 0.355" | 0.680" | 1:10" |
+| .380 ACP 95gr | 290 | 0.115 | 95 gr | 0.355" | 0.550" | 1:16" |
 | .45 ACP 230gr | 259 | 0.195 | 230 gr | 0.452" | 0.800" | 1:16" |
 
 ---
