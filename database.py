@@ -208,9 +208,16 @@ def init_db():
             content TEXT,
             created_at INTEGER,
             tokens INTEGER,
-            duration_ms INTEGER
+            duration_ms INTEGER,
+            explain TEXT
         )
     """)
+    # Migrate existing databases — add explain column (JSON provenance trace
+    # backing the /explain cross-check) if absent.
+    try:
+        c.execute("ALTER TABLE ai_messages ADD COLUMN explain TEXT")
+    except Exception:
+        pass
 
     c.execute("""
         CREATE TABLE IF NOT EXISTS ai_documents (
@@ -906,12 +913,16 @@ def ai_delete_chat(chat_id):
 
 # ── AI Message CRUD ───────────────────────────────────────────────────────────
 
-def ai_add_message(chat_id, role, content, tokens=None, duration_ms=None):
+def ai_add_message(chat_id, role, content, tokens=None, duration_ms=None, explain=None):
+    """Insert a chat message. `explain` is an optional JSON string holding the
+    deterministic provenance trace that backs the /explain cross-check; only
+    real assistant answers carry one (explain outputs and user turns leave it
+    NULL so the /explain lookup skips them)."""
     db = get_db()
     now = int(time.time())
     cur = db.execute(
-        "INSERT INTO ai_messages (chat_id, role, content, created_at, tokens, duration_ms) VALUES (?, ?, ?, ?, ?, ?)",
-        (chat_id, role, content, now, tokens, duration_ms)
+        "INSERT INTO ai_messages (chat_id, role, content, created_at, tokens, duration_ms, explain) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (chat_id, role, content, now, tokens, duration_ms, explain)
     )
     db.execute("UPDATE ai_chats SET updated_at=? WHERE id=?", (now, chat_id))
     db.commit()
@@ -926,6 +937,36 @@ def ai_get_messages(chat_id):
         (chat_id,)
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def ai_get_message(message_id):
+    """Return a single message row by id, or None."""
+    db = get_db()
+    row = db.execute("SELECT * FROM ai_messages WHERE id=?", (message_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def ai_get_explainable_message(chat_id, message_id=None):
+    """Return the assistant message whose /explain trace should be shown.
+
+    With message_id: that exact message (if it carries a trace).
+    Without: the most recent assistant message in the chat that has a stored
+    explain trace — i.e. the last real answer, skipping /explain outputs and
+    user turns, which leave explain NULL.
+    """
+    db = get_db()
+    if message_id is not None:
+        row = db.execute(
+            "SELECT * FROM ai_messages WHERE id=? AND chat_id=? AND explain IS NOT NULL",
+            (message_id, chat_id)
+        ).fetchone()
+        return dict(row) if row else None
+    row = db.execute(
+        "SELECT * FROM ai_messages WHERE chat_id=? AND role='assistant' "
+        "AND explain IS NOT NULL ORDER BY created_at DESC, id DESC LIMIT 1",
+        (chat_id,)
+    ).fetchone()
+    return dict(row) if row else None
 
 
 # ── AI Document CRUD ──────────────────────────────────────────────────────────

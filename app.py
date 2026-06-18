@@ -1041,6 +1041,11 @@ def api_ai_chat_get(chat_id):
     if not chat:
         return jsonify({"error": "not found"}), 404
     messages = db.ai_get_messages(chat_id)
+    # Drop the per-message /explain trace from the list payload — it can be
+    # several KB each and the client fetches explanations on demand via the
+    # /explain command, never from this list.
+    for m in messages:
+        m.pop("explain", None)
     chat["messages"] = messages
     return jsonify(chat)
 
@@ -1163,6 +1168,30 @@ def api_ai_warmup():
 
 # Category metadata for the knowledge-map endpoint and UI visualisation.
 _KM_CATEGORIES = {
+    # Specialized clusters are checked first so a substring like "radio" inside
+    # "radioactive" or "food" inside a hunting doc cannot mis-bucket them.
+    "emp":         {"label": "EMP / Solar Storm",   "color": "#fbbf24",
+                    "tags": ["faraday", "electromagnetic pulse", "coronal mass",
+                             "solar storm", "geomagnetic", "carrington"]},
+    "nuclear":     {"label": "Nuclear / CBRN",      "color": "#fde047",
+                    "tags": ["nuclear", "radiation", "fallout", "cbrn", "geiger",
+                             "roentgen", "decontamination", "radiological"]},
+    "weather":     {"label": "Weather & Disasters", "color": "#0ea5e9",
+                    "tags": ["weather", "tornado", "hurricane", "earthquake",
+                             "wildfire", "blizzard", "barometric", "natural disaster"]},
+    "cold_heat":   {"label": "Cold & Heat Injury",  "color": "#38bdf8",
+                    "tags": ["hypothermia", "frostbite", "heat stroke", "heat exhaustion",
+                             "trench foot", "rewarming"]},
+    "signaling":   {"label": "Signaling & Rescue",  "color": "#fb7185",
+                    "tags": ["signal mirror", "ground-to-air", "heliograph", "morse",
+                             "distress", "rescue"]},
+    "knots":       {"label": "Knots & Cordage",     "color": "#d97706",
+                    "tags": ["knot", "cordage", "lashing", "bowline", "prusik"]},
+    "hunting":     {"label": "Hunting & Trapping",  "color": "#84cc16",
+                    "tags": ["trapping", "snare", "deadfall", "trotline", "gill net"]},
+    "psychology":  {"label": "Survival Psychology", "color": "#c084fc",
+                    "tags": ["psychology", "survival mindset", "morale", "resilience",
+                             "will to survive"]},
     "water_fire":  {"label": "Water & Fire",       "color": "#06b6d4",
                     "tags": ["water", "purif", "fire", "tinder"]},
     "shelter":     {"label": "Shelter",             "color": "#a16207",

@@ -665,10 +665,12 @@ SURVIVAL_DOCS = [
         "content": (
             "Priority: dehydration kills in 3 days. Treat ALL unknown water.\n\n"
             "METHODS:\n"
-            "Boiling: rolling boil 1 min (3 min >6,500 ft). Kills bacteria, viruses, protozoa.\n"
-            "Bleach (6–8.25% sodium hypochlorite, unscented):\n"
-            "  Clear water: 8 drops/gal. Cloudy: 16 drops/gal. Wait 30 min.\n"
-            "Iodine tablets: 1 tab/liter. Wait 30 min (60 min if cold or turbid).\n"
+            "Boiling (most reliable): bring to a ROLLING boil 1 min; 3 min above 6,500 ft (2,000 m). "
+            "Kills bacteria, viruses, and protozoa. Let cool; do not boil longer (wastes fuel/water).\n"
+            "Bleach (plain, unscented sodium hypochlorite — no splash-less/scented): dose by strength,\n"
+            "  6% bleach: 8 drops/gal (2 drops/liter). 8.25% bleach: 6 drops/gal. Cloudy/cold: DOUBLE it.\n"
+            "  Stir, let stand 30 min; water should smell faintly of chlorine. If not, repeat once.\n"
+            "Iodine tablets: 1 tab/liter. Wait 30 min (60 min if cold or turbid). Not for pregnancy/thyroid.\n"
             "Filtration (Sawyer/LifeStraw): removes bacteria/protozoa — NOT viruses. Combine with chemical treatment.\n"
             "SODIS: clear PET bottle in direct sun 6 hrs (2 days overcast). Kills bacteria/viruses.\n\n"
             "COLLECTION:\n"
@@ -1975,6 +1977,678 @@ SURVIVAL_DOCS = [
             "No venomous snakes in Alaska."
         ),
     },
+
+    # ── NUCLEAR / RADIOLOGICAL (CBRN) ─────────────────────────────────────────
+    {
+        "title": "Nuclear & Radiological Survival: Fallout, Dose, and Sheltering",
+        "tags": "nuclear,radiation,fallout,rad,rem,roentgen,sievert,gray,dose,dosimeter,"
+                "geiger,7-10 rule,7 10 rule,blast,cbrn,nuke,dirty bomb,radioactive iodine,"
+                "acute radiation syndrome,shelter in place,survival,grid-down",
+        "content": (
+            "THREE THREATS FROM A NUCLEAR DETONATION:\n"
+            "1. BLAST/PRESSURE — overpressure, flying debris, collapse. Drop flat, feet toward blast, "
+            "behind hard cover; mouth open to protect eardrums.\n"
+            "2. THERMAL FLASH — intense light/heat causes flash burns and starts fires. Do NOT look at "
+            "the fireball. Cover exposed skin; get behind anything opaque.\n"
+            "3. RADIATION — initial (prompt) radiation in the first minute, then FALLOUT: dirt and debris "
+            "made radioactive, lofted by the cloud, falling back to earth. Heaviest, most dangerous "
+            "particles land within the first hour; the visible fallout looks like grit, sand, or ash.\n\n"
+            "THE 7-10 RULE (dose-rate decay — memorize this):\n"
+            "For every 7-fold increase in time after the blast, the radiation dose RATE drops by a factor "
+            "of 10. So if it is 1000 R/hr at H+1 hour, it is ~100 R/hr at H+7 hours, ~10 R/hr at H+49 hours "
+            "(~2 days), and ~1 R/hr at about 2 weeks. This is why the FIRST 48 HOURS of sheltering save the "
+            "most lives — radiation falls off fastest early.\n\n"
+            "THREE WAYS TO CUT YOUR DOSE — TIME, DISTANCE, SHIELDING:\n"
+            "• TIME: minimize hours in the radiation field. Shelter hardest in the first 1-2 days.\n"
+            "• DISTANCE: fallout on the roof, ground, and outer walls is the source — get to the center, "
+            "lowest level (basement core) so mass sits between you and those surfaces.\n"
+            "• SHIELDING (HALVING THICKNESS — each layer cuts gamma dose in half):\n"
+            "  Lead ~0.4 in · Steel ~0.7 in · Concrete ~2.4 in · Packed earth ~3.3 in · "
+            "Water ~4.8 in · Wood/snow ~11 in. Stacking ~10 halving-thicknesses cuts dose ~1000x. "
+            "Sandbags, books, full water containers, and dirt-filled drawers all work.\n\n"
+            "PROTECTION FACTOR (PF) of common refuges:\n"
+            "Open frame house ~2-3 · House basement, center ~10-20 · Multi-story building core ~20-100 · "
+            "Dedicated, earth-covered fallout shelter 40-1000+. Higher PF = lower dose. Aim for PF 40+.\n\n"
+            "RADIATION DOSE — WHAT THE NUMBERS MEAN (gamma: 1 rad ~ 1 rem; 1 Gy = 100 rad; 1 Sv = 100 rem):\n"
+            "• Under 50 rem — no immediate symptoms.\n"
+            "• 50-200 rem — nausea/vomiting hours later, fatigue; recovery expected with rest.\n"
+            "• 200-450 rem — Acute Radiation Syndrome; hair loss, immune drop; LD50/60 ~450 rem "
+            "(about half die within 60 days WITHOUT medical care).\n"
+            "• 450-800 rem — severe ARS, survival unlikely without hospital care.\n"
+            "• Over 800 rem — usually fatal.\n"
+            "Dose is cumulative: 5 R/hr for 10 hours = 50 R. A simple dosimeter (e.g. RADIACMETER / "
+            "CDV-742 pen, or a digital survey meter) tells you when it is safe to move.\n\n"
+            "SHELTER PLAN:\n"
+            "1. Get inside, get to the center/lowest level, stay in. Brush/wipe fallout off before "
+            "entering; leave outer clothes at the door.\n"
+            "2. Seal the room loosely against dust (tape plastic over vents/windows) but DO NOT fully "
+            "airtight — you still need to breathe; fallout is a dust hazard, not a gas.\n"
+            "3. Plan to stay sheltered at least 24-48 hours; ideally up to 2 weeks, leaving only briefly "
+            "for urgent needs once a meter (or the 7-10 rule estimate) shows the rate has fallen.\n"
+            "4. Food in cans/sealed packaging is safe — fallout is external dust; wipe the container, "
+            "wash hands. Covered/stored water is safe; running tap water is generally usable.\n"
+            "RELATED: see the Radiological Protection (KI/decontamination/CBRN) doc for potassium iodide, "
+            "decontamination, and protective gear; and the EMP & Solar Storm doc for electronics survival "
+            "after a nuclear or solar event."
+        ),
+    },
+    {
+        "title": "Radiological Protection: Potassium Iodide (KI), Decontamination & CBRN PPE",
+        "tags": "potassium iodide,KI,thyroid,iodine-131,decontamination,decon,gas mask,respirator,"
+                "n95,cbrn,chemical agent,nerve agent,biological,radiation protection,ppe,"
+                "contamination,fallout,mustard,chlorine,atropine,survival",
+        "content": (
+            "POTASSIUM IODIDE (KI) — WHAT IT DOES AND DOES NOT DO:\n"
+            "KI floods the thyroid with stable iodine so it cannot absorb RADIOACTIVE iodine-131 from "
+            "fallout. It protects ONLY the thyroid, ONLY against radioiodine. It is NOT an anti-radiation "
+            "pill, does not shield the rest of the body, and does nothing against gamma, cesium, or other "
+            "isotopes. Sheltering and shielding remain the primary defense.\n"
+            "DOSING (take only when authorities advise, or when fallout from a fission event is imminent — "
+            "ideally just before or within a few hours of exposure; one dose lasts ~24 hours):\n"
+            "• Adults & children over 12 (or over ~150 lb): 130 mg/day\n"
+            "• Children 3-12 yr: 65 mg/day\n"
+            "• Infants 1 mo-3 yr: 32 mg/day · under 1 mo: 16 mg/day\n"
+            "Repeat daily only while exposure continues. AVOID if iodine-allergic or with certain thyroid "
+            "conditions. Greatest benefit is for children and pregnant/nursing women; least for over-40 adults.\n\n"
+            "DECONTAMINATION (removing fallout/agent from skin and gear):\n"
+            "1. Removing OUTER clothing eliminates up to ~90% of contamination — peel it off (don't pull "
+            "over your head; cut it off), bag it, set it far outside the living space.\n"
+            "2. Wash with lukewarm water and soap, gently — do NOT scrub hard or use abrasives; broken "
+            "skin lets contamination in. Blot, don't rub.\n"
+            "3. Shampoo hair but DO NOT use conditioner — conditioner binds radioactive particles to hair.\n"
+            "4. Gently blow nose, wipe eyelids and ears/lashes with a clean damp cloth.\n"
+            "5. Re-dress in clean, stored clothing.\n\n"
+            "RESPIRATORY & BODY PROTECTION (PPE):\n"
+            "• Fallout DUST: an N95/P100 respirator or even a tight cloth/HEPA mask greatly cuts inhalation "
+            "of particles — the main internal-dose risk from fallout. Goggles + hat + covered skin help.\n"
+            "• CHEMICAL/BIOLOGICAL agents (gases/aerosols): a particulate mask is NOT enough. You need a "
+            "full-face respirator with a CBRN/NBC combination canister (e.g. 40mm NATO). A tight face seal "
+            "requires being clean-shaven. Pair with a coverall (Tyvek), gloves, and boots, taped at the gaps.\n\n"
+            "CHEMICAL AGENT CLASSES (recognize to respond):\n"
+            "• NERVE (sarin, VX — organophosphates): pinpoint pupils, drooling, convulsions (SLUDGE: "
+            "Salivation, Lacrimation, Urination, Defecation, GI distress, Emesis). Antidote: atropine + "
+            "pralidoxime (2-PAM) auto-injector; get upwind/uphill immediately.\n"
+            "• BLISTER (mustard, lewisite): delayed skin blistering, eye/lung burns. Decon fast.\n"
+            "• BLOOD (hydrogen cyanide): rapid collapse, gasping. \n"
+            "• CHOKING (chlorine, phosgene): coughing, chest tightness; move to fresh air, rest, sit upright.\n"
+            "BIOLOGICAL THREATS: isolate the sick, strict hand hygiene, PPE, boil/treat water — see "
+            "the Sanitation & Disease Prevention doc. RELATED: see the Nuclear & Radiological Survival doc."
+        ),
+    },
+    {
+        "title": "EMP & Solar Storm (CME): Protecting Electronics & Faraday Cages",
+        "tags": "emp,electromagnetic pulse,e1,e3,cme,solar storm,solar flare,coronal mass ejection,"
+                "carrington,geomagnetic,faraday cage,grid down,electronics protection,radio,"
+                "surge,transformer,nuclear,survival",
+        "content": (
+            "TWO SOURCES OF A LARGE ELECTROMAGNETIC EVENT:\n"
+            "• NUCLEAR EMP (HEMP) — a high-altitude nuclear burst. Produces three pulses:\n"
+            "  E1: a near-instant, very fast spike that couples into circuit traces and destroys "
+            "unshielded semiconductors/microelectronics (radios, vehicle ECUs, computers, solar charge "
+            "controllers) over a continental footprint.\n"
+            "  E2: lightning-like; ordinary surge protection handles it, but it can arrive while E1 has "
+            "already defeated that protection.\n"
+            "  E3: a slow, seconds-to-minutes geomagnetic-style surge that induces large currents in long "
+            "conductors (power lines, pipelines) and burns out grid transformers.\n"
+            "• SOLAR / CME (Coronal Mass Ejection) — a geomagnetic storm (Carrington 1859; Quebec blackout "
+            "1989). Behaves like E3: little direct threat to small handheld electronics, but it can collapse "
+            "the power grid for weeks-to-months by destroying hard-to-replace high-voltage transformers. "
+            "Space-weather warning (aurora far south, NOAA G5) may give hours of notice.\n\n"
+            "WHAT ACTUALLY FAILS:\n"
+            "Grid power, the internet/cell networks, anything connected to long wiring, and unshielded "
+            "solid-state electronics. Simple/old devices (manual tools, non-electronic engines) survive. "
+            "The grid, not your gadgets, is the long-term problem in a CME.\n\n"
+            "FARADAY CAGE — how to actually build one:\n"
+            "A Faraday cage is a CONTINUOUS conductive enclosure that shunts the pulse around its contents. "
+            "It does NOT need to be grounded to protect what is inside.\n"
+            "1. Use a metal box with conductive, overlapping seams: a steel ammo can, a galvanized trash "
+            "can with a tight metal lid, or a metal toolbox.\n"
+            "2. INSULATE the contents from the metal — the device must not touch the conductive shell. Wrap "
+            "each item in cardboard, bubble wrap, or cloth, then nest inside.\n"
+            "3. Ensure the lid makes metal-to-metal contact all the way around; tighten gaps with conductive "
+            "(aluminum) tape if needed.\n"
+            "4. Nesting two layers (wrapped device → small metal box → larger metal can) adds margin.\n"
+            "NOTE: a microwave oven is NOT a reliable Faraday cage. Test a cage by sealing a powered-on "
+            "phone or FM radio inside — if it loses all signal, the shielding is good.\n\n"
+            "WHAT TO STORE IN A CAGE (spares, kept disconnected):\n"
+            "A backup handheld/ham radio, a spare solar charge controller and small inverter, LED "
+            "flashlights, a multimeter, spare vehicle ECU/ignition module, USB drives with offline maps and "
+            "references, and a small power bank. Keep critical Atlas/comms spares shielded.\n"
+            "DEFENSE FOR IN-USE GEAR: whole-home and inline surge isolation, and physically disconnecting "
+            "antennas/chargers from the grid when a space-weather or attack warning is issued. "
+            "RELATED: see the Nuclear & Radiological Survival, off-grid power, and ham-radio comms docs."
+        ),
+    },
+
+    # ── WEATHER & NATURAL DISASTERS ──────────────────────────────────────────
+    {
+        "title": "Severe Weather & Natural Disasters: Tornado, Hurricane, Flood, Earthquake, Wildfire",
+        "tags": "weather,tornado,hurricane,flood,flash flood,earthquake,wildfire,lightning,blizzard,"
+                "disaster,evacuation,storm surge,shelter,preparedness,survival",
+        "content": (
+            "GENERAL: a WATCH means conditions are possible — prepare. A WARNING means it is happening or "
+            "imminent — act now. Know your safe room and two evacuation routes in advance.\n\n"
+            "TORNADO:\n"
+            "Signs: dark greenish sky, large hail, a low rotating wall cloud, a loud freight-train roar. "
+            "Go to the lowest floor, an interior room with no windows (closet, bathroom), put as many walls "
+            "between you and outside as possible. Cover with a mattress/blankets; protect head and neck. "
+            "In a vehicle or mobile home, GET OUT — flee to a sturdy building or, as a last resort, lie flat "
+            "in a low ditch away from the vehicle, watching for flooding. Avoid highway overpasses.\n\n"
+            "HURRICANE / TROPICAL STORM:\n"
+            "Days of warning — evacuate if told to, especially from storm-surge zones (surge, not wind, is "
+            "the top killer). If sheltering: board windows, fill bathtubs/containers with water, charge and "
+            "stage gear, move to an interior room away from windows. Beware the calm EYE — the back wall "
+            "brings winds from the opposite direction. Never drive through flooded roads.\n\n"
+            "FLOOD / FLASH FLOOD:\n"
+            "TURN AROUND, DON'T DROWN. 6 inches of moving water can knock you down; 12 inches can float and "
+            "sweep most cars; 2 feet sweeps trucks/SUVs. Move to high ground immediately; flash floods rise "
+            "in minutes, often miles from the rain. Never camp in dry washes/canyons. If trapped, get to the "
+            "highest point and signal. After: assume floodwater is contaminated (sewage, chemicals).\n\n"
+            "EARTHQUAKE:\n"
+            "DROP, COVER, HOLD ON — get under a sturdy table, protect head/neck, stay away from windows and "
+            "anything that can fall. Indoors stay in; do not run outside during shaking (falling facade/glass). "
+            "Outdoors move to open ground away from buildings, trees, power lines. After: expect aftershocks, "
+            "check for gas leaks (smell/hiss — shut off main, no flames/switches), structural damage, and "
+            "move to open space. On the coast, strong/long shaking is a tsunami warning — get to high ground.\n\n"
+            "WILDFIRE:\n"
+            "Embers travel a mile ahead of a fire. Create defensible space (clear brush 30+ ft). Evacuate "
+            "early — don't wait. If trapped: a building is usually safer than open ground or a car; if "
+            "outdoors, find a low bare area, pond, or wide road; lie face-down in a depression under a "
+            "wool/cotton blanket (not synthetic), cover nose/mouth, let the front pass. Smoke kills more "
+            "than flame — stay low.\n\n"
+            "LIGHTNING:\n"
+            "When thunder roars, go indoors; if you can hear thunder you are in range. 30-30 rule: take "
+            "cover if flash-to-bang is under 30 s; wait 30 min after the last thunder. No safe place outside "
+            "— avoid high ground, lone trees, water, metal. Last resort: crouch low on the balls of your "
+            "feet, minimal ground contact, NOT lying flat. RELATED: see the Weather Prediction and "
+            "Cold & Heat Injuries docs."
+        ),
+    },
+    {
+        "title": "Weather Prediction Without Instruments",
+        "tags": "weather,forecast,clouds,barometric pressure,barometer,wind,red sky,storm prediction,"
+                "nature signs,front,humidity,navigation,survival",
+        "content": (
+            "Reading weather buys hours of warning with no electronics. Watch the trend over a few hours, "
+            "not a single sign.\n\n"
+            "CLOUDS (the sky writes the forecast):\n"
+            "• High wispy CIRRUS ('mare's tails') thickening to a milky CIRROSTRATUS halo around sun/moon "
+            "often means a warm front and rain within 24-36 hours.\n"
+            "• Lowering, thickening STRATUS/altostratus greying the sky = steady rain approaching.\n"
+            "• Puffy fair-weather CUMULUS that towers up into CUMULONIMBUS (anvil top) by afternoon = "
+            "thunderstorms, hail, gusts, possible tornado. Towering clouds + sudden cold downdraft = take cover.\n"
+            "• Lens-shaped LENTICULAR clouds over mountains = strong high-altitude wind.\n\n"
+            "PRESSURE & WIND (a falling barometer is the strongest storm signal):\n"
+            "• Rapidly FALLING pressure = approaching storm/front, often within hours; faster fall = stronger "
+            "storm. RISING/steady high pressure = clearing, fair weather.\n"
+            "• No barometer? Improvise: a balloon over a jar stretches/bulges as pressure drops; smoke that "
+            "rises straight = high pressure (fair), smoke that swirls/hangs low = low pressure (storm).\n"
+            "• Wind backing/shifting and increasing = a front arriving. Buys-Ballot rule (N. Hemisphere): "
+            "stand with your back to the wind and low pressure (bad weather) is to your LEFT.\n\n"
+            "FOLK SIGNS WITH REAL BASIS:\n"
+            "• 'Red sky at night, sailor's delight; red sky at morning, sailors take warning' — at mid-"
+            "latitudes weather moves west-to-east; a red sunset = clear air to the west (good coming), a red "
+            "sunrise = the clear air has passed and a system follows.\n"
+            "• 'Ring around the moon, rain soon' — cirrostratus halo = moisture/warm front.\n"
+            "• Distant sounds carry farther, smells get stronger, hair frizzes, pinecones close, salt clumps, "
+            "joints ache = rising humidity/falling pressure ahead of rain.\n"
+            "• Dew or frost on the grass at dawn usually means a dry day; a dry dawn can mean rain coming.\n"
+            "• Birds/insects fly low before rain (denser air); calm, low-flying swallows = storm building.\n\n"
+            "DEW POINT / FROST & FOG: clear calm nights radiate heat — expect cold, dew, or valley fog and "
+            "possible frost even when the day was mild. RELATED: see the Severe Weather & Natural Disasters doc."
+        ),
+    },
+
+    # ── COLD & HEAT INJURIES ─────────────────────────────────────────────────
+    {
+        "title": "Cold & Heat Injuries: Hypothermia, Frostbite, Heat Stroke",
+        "tags": "hypothermia,frostbite,heat stroke,heat exhaustion,heat cramps,cold injury,trench foot,"
+                "dehydration,rewarming,medical,first aid,exposure,temperature,survival",
+        "content": (
+            "COLD AND HEAT EMERGENCIES KILL FAST — recognize the stage and act.\n\n"
+            "HYPOTHERMIA (core temperature dropping):\n"
+            "MILD (~95-97F / 35-36C): shivering, clumsiness, slurred speech, 'the umbles' (stumbles, "
+            "mumbles, fumbles, grumbles). Act here — it is reversible.\n"
+            "MODERATE (~90-95F): violent then FADING shivering, confusion, poor judgment, drowsiness.\n"
+            "SEVERE (<90F / 32C): shivering STOPS, rigid muscles, very slow weak pulse/breathing, "
+            "unconscious; may appear dead ('paradoxical undressing' can occur). 'Not dead until WARM and "
+            "dead' — attempt rewarming/CPR.\n"
+            "TREAT: get out of wind/wet; remove wet clothing; insulate from the GROUND first; dry layers; "
+            "wrap head/neck. Add a vapor barrier and external heat to the CORE (chest, armpits, neck, groin) "
+            "— warm water bottles, body-to-body in a bag. Give warm sweet drinks ONLY if fully alert. "
+            "Handle a severe casualty GENTLY (rough movement can trigger cardiac arrest); do not rub limbs; "
+            "do not give alcohol/caffeine. Rewarm slowly.\n\n"
+            "FROSTBITE (tissue freezing — fingers, toes, nose, ears, cheeks):\n"
+            "FROSTNIP: white/numb skin, no ice crystals — rewarm with skin contact, fully reversible.\n"
+            "FROSTBITE: hard, waxy, white/grey, numb skin; deep frostbite freezes solid and blisters/blackens.\n"
+            "TREAT: rewarm ONLY when there is NO chance of refreezing — a partial thaw then refreeze is far "
+            "worse. Immerse in warm (not hot) water 99-104F / 37-40C for 15-30 min until flushed/pliable; "
+            "expect severe pain. Do NOT rub, do NOT use direct fire/stove heat (numb tissue burns easily), "
+            "do NOT walk on thawed feet. Separate fingers/toes with gauze; protect blisters; evacuate.\n\n"
+            "TRENCH/IMMERSION FOOT: prolonged cold + wet (above freezing). Prevent by keeping feet dry and "
+            "changing socks; warm and dry gradually; do not rub.\n\n"
+            "HEAT ILLNESS (escalating — catch it early):\n"
+            "HEAT CRAMPS: painful muscle cramps from salt/water loss. Rest in shade, sip water with a pinch "
+            "of salt or electrolytes; stretch gently.\n"
+            "HEAT EXHAUSTION: heavy sweating, cool/clammy PALE skin, weakness, nausea, headache, fast weak "
+            "pulse, dizziness. Move to shade, lie down, elevate legs, loosen clothing, cool with wet cloths/"
+            "fanning, sip electrolyte fluids. Recover before any exertion.\n"
+            "HEAT STROKE — LIFE THREAT: HOT skin (often dry, sweating may stop), red, temp 104F+ / 40C+, "
+            "confusion, slurred speech, seizures, collapse. COOL AGGRESSIVELY NOW: shade, strip clothing, "
+            "douse with water and fan, ice/cold packs to neck-armpits-groin, immerse in cool water if "
+            "possible. Do not force fluids on the unconscious. This is a true emergency — cool first, evacuate.\n"
+            "PREVENTION: hydrate ahead of thirst, electrolytes, shade, pace work to the cooler hours, "
+            "acclimatize over days. RELATED: see the Severe Weather & Natural Disasters and wilderness first-aid docs."
+        ),
+    },
+
+    # ── FIELD MEDICATIONS & SANITATION ───────────────────────────────────────
+    {
+        "title": "Field Antibiotics & Common Medications (Grid-Down Pharmacy)",
+        "tags": "antibiotic,antibiotics,medication,amoxicillin,doxycycline,cephalexin,keflex,"
+                "metronidazole,flagyl,ciprofloxacin,cipro,azithromycin,smz-tmp,fish antibiotic,"
+                "dosage,painkiller,allergy,antihistamine,medical,pharmacy,infection,survival",
+        "content": (
+            ">> NOT MEDICAL ADVICE. Antibiotic misuse breeds resistance, causes dangerous reactions, and "
+            "masks conditions needing surgery. Use a real clinician whenever possible. This is reference "
+            "for austere, no-other-option grid-down scenarios only.\n\n"
+            "STOCK & SHELF LIFE: most sealed, dry tablets/capsules remain largely potent years past the "
+            "printed date (a conservative date, not a hard cliff). EXCEPTIONS — do NOT use expired: "
+            "liquid antibiotics, tetracycline/doxycycline past date (degradation can harm kidneys), "
+            "EpiPens, insulin, nitroglycerin, most reconstituted suspensions. Store cool, dark, dry.\n\n"
+            "COMMON ORAL ANTIBIOTICS (typical adult ranges — confirm a real source before use):\n"
+            "• AMOXICILLIN — broad first-line: ear/sinus/dental/respiratory/UTI. ~500 mg every 8 hr, 7-10 d.\n"
+            "• AMOXICILLIN-CLAVULANATE (Augmentin) — animal bites, tougher infections.\n"
+            "• CEPHALEXIN (Keflex) — skin/soft-tissue (cellulitis): ~500 mg every 6-8 hr.\n"
+            "• DOXYCYCLINE — tick-borne (Lyme, RMSF), respiratory, MRSA skin, malaria; ~100 mg twice daily. "
+            "Avoid in pregnancy and young children; causes sun sensitivity.\n"
+            "• CIPROFLOXACIN — UTI, severe GI/dysentery, some respiratory; ~500 mg twice daily. Tendon/"
+            "nerve risks; reserve for serious cases.\n"
+            "• METRONIDAZOLE (Flagyl) — anaerobic/abdominal/dental abscess, giardia, C. diff; NO alcohol.\n"
+            "• AZITHROMYCIN (Z-pack) — respiratory, some STIs, traveler's diarrhea.\n"
+            "• SULFAMETHOXAZOLE-TRIMETHOPRIM (Bactrim/SMZ-TMP) — UTI, MRSA skin.\n"
+            "FISH/AQUARIUM ANTIBIOTICS ('Fish Mox' = amoxicillin, 'Fish Flex' = cephalexin) are the same "
+            "USP molecules; risk is unverified purity/dose and self-misdiagnosis.\n"
+            "PRINCIPLES: pick the narrowest drug that covers the likely bug; complete the FULL course (do "
+            "not stop when you feel better); watch for allergy (rash, swelling, trouble breathing = STOP, "
+            "treat anaphylaxis). Penicillin-allergic? avoid amoxicillin/cephalexin family.\n\n"
+            "OTC / SUPPORTIVE MEDS TO STOCK (know adult dosing):\n"
+            "• IBUPROFEN (anti-inflammatory, fever, pain) and ACETAMINOPHEN (pain/fever, liver-limited) — "
+            "can alternate. • ASPIRIN — chew 324 mg for suspected heart attack. • ANTIHISTAMINE "
+            "(diphenhydramine/loratadine) for allergy; diphenhydramine also for sleep. • EPINEPHRINE "
+            "auto-injector for anaphylaxis (life-saving). • LOPERAMIDE for diarrhea (but NOT with bloody/"
+            "fever dysentery). • ORAL REHYDRATION SALTS. • ANTACID/PPI. • HYDROCORTISONE & ANTIFUNGAL "
+            "creams. • TRIPLE-ANTIBIOTIC ointment. • ELECTROLYTES. RELATED: see the Sanitation & Disease "
+            "Prevention, field-trauma, and wilderness first-aid docs."
+        ),
+    },
+    {
+        "title": "Sanitation & Disease Prevention in Grid-Down",
+        "tags": "sanitation,latrine,outhouse,sewage,human waste,cholera,dysentery,typhoid,giardia,"
+                "hygiene,hand washing,disease prevention,feces,vectors,fecal-oral,grid-down,medical,survival",
+        "content": (
+            "When plumbing and trash service stop, DISEASE — not violence — becomes the top killer. More "
+            "people died of dysentery and typhoid in past collapses and sieges than of any weapon. "
+            "Sanitation discipline is survival.\n\n"
+            "THE FECAL-ORAL THREAT: cholera, typhoid, dysentery, hepatitis A, giardia, and norovirus spread "
+            "when microscopic traces of feces reach the mouth — via hands, flies, and contaminated water. "
+            "Break that chain at every step.\n\n"
+            "HUMAN WASTE DISPOSAL:\n"
+            "• CAT HOLE (short stay): 6-8 in deep, at least 200 ft (70 big steps) from any water, camp, or "
+            "trail. Cover and disguise.\n"
+            "• SLIT TRENCH / DEEP LATRINE (group, days-weeks): a trench downhill and well away (200 ft+) "
+            "from water and the kitchen; add a thin layer of soil/lime/ash after each use to cut flies and "
+            "odor; keep a lid/cover. Place it DOWNWIND and DOWNHILL of shelter and water sources.\n"
+            "• BUCKET TOILET (indoors/urban): 5-gal bucket with a liner; cover each use with sawdust, peat, "
+            "ash, or soil (a 'sawdust/humanure' system) to control odor and pathogens; seal and store/compost "
+            "well away from food and water.\n"
+            "• Keep latrines, graves, and animal pens far from and below wells/water intake.\n\n"
+            "HAND HYGIENE (the single highest-impact habit):\n"
+            "Wash with soap and water after any toileting, before handling food/water, and after handling "
+            "the sick or the dead. No running water? Use a 'tippy-tap' (a hung jug tipped by a foot lever) "
+            "so hands never re-touch a shared tap. Alcohol hand sanitizer (60%+) is a backup but does NOT "
+            "remove visible dirt or kill norovirus/C.diff well.\n\n"
+            "WATER & FOOD SAFETY: assume all surface and flood water is contaminated — boil/filter/treat "
+            "(see water-purification doc). Keep stored/treated water covered and dip with a clean ladle, "
+            "never bare hands. Cook food thoroughly; keep raw and cooked separate; protect all food from "
+            "FLIES, which carry feces directly to your plate. Wash/peel produce with treated water.\n\n"
+            "GREYWATER & TRASH: drain dishwater into a soakaway pit away from camp, not into standing pools "
+            "(mosquito breeding). Burn or bury organic trash; standing water and garbage draw rats, flies, "
+            "and mosquitoes — the vectors for plague, typhus, and malaria/dengue.\n\n"
+            "SICKROOM DISCIPLINE: isolate the sick, dedicate utensils, disinfect surfaces with diluted bleach "
+            "(~1 part household bleach to ~9 parts water), and aggressively replace fluids — most dysentery/"
+            "cholera deaths are from DEHYDRATION, treatable with oral rehydration salts (1 L clean water + "
+            "6 level tsp sugar + 1/2 tsp salt). RELATED: see the Field Antibiotics & Medications and water docs."
+        ),
+    },
+
+    # ── FIELD SKILLS: KNOTS, SIGNALING, FOOD PROCUREMENT ─────────────────────
+    {
+        "title": "Knots & Rope Work for Survival",
+        "tags": "knot,knots,rope,cordage,lashing,hitch,bowline,clove hitch,square knot,paracord,"
+                "prusik,trucker's hitch,taut-line,bend,shelter,survival",
+        "content": (
+            "A handful of knots covers nearly every field need: a fixed loop, two hitches, a bend, a "
+            "friction hitch, and a tensioning system. Practice them until you can tie them cold and in the "
+            "dark.\n\n"
+            "THE LOOP — BOWLINE:\n"
+            "A fixed, non-slipping loop that never jams and is easy to untie after load. 'The rabbit comes "
+            "out of the hole, around the tree, and back down the hole.' Use for rescue (around a person), "
+            "securing a line to a fixed loop, hanging a ridgeline. The MOST important single knot.\n\n"
+            "HITCHES (rope to a post/tree/ring):\n"
+            "• CLOVE HITCH — fast, adjustable start/finish for lashings and ridgelines; can slip under "
+            "varying load, so back it up.\n"
+            "• TWO HALF-HITCHES — reliable general-purpose tie-off to a post or grommet; secure under steady "
+            "load.\n"
+            "• TAUT-LINE HITCH — an ADJUSTABLE friction loop that holds tension but slides by hand: perfect "
+            "for tent guy-lines and tarp tie-outs you need to tighten.\n"
+            "• TIMBER HITCH — for dragging/hauling a log or starting a diagonal lashing.\n\n"
+            "BENDS (joining two ropes):\n"
+            "• SHEET BEND — joins two ropes, ESPECIALLY of different thickness or wet; more secure than a "
+            "square knot for this.\n"
+            "• SQUARE (REEF) KNOT — flat binding knot for bundles, bandages, and lashings of EQUAL rope; do "
+            "NOT trust it to join two lines under load (it can capsize) — use a sheet bend instead.\n\n"
+            "FRICTION HITCH — PRUSIK:\n"
+            "A loop of thin cord wrapped around a thicker rope; grips when loaded, slides when unweighted. "
+            "Used to ascend a rope, rig a backup, or create a moveable anchor. Needs cord ~60-80% the "
+            "diameter of the main rope.\n\n"
+            "TENSION SYSTEM — TRUCKER'S HITCH:\n"
+            "Creates a ~3:1 mechanical advantage to cinch a load TIGHT: form a loop midline (a slippery "
+            "marlinspike/figure-8 on a bight), pass the working end around the anchor and back through the "
+            "loop, haul, and lock off with two half-hitches. Use to lash loads to a pack/vehicle, tension a "
+            "ridgeline drum-tight, or build a stretcher.\n\n"
+            "LASHINGS (joining poles into structures): SQUARE LASHING binds two crossing poles at right "
+            "angles (shelters, racks, frames); DIAGONAL LASHING braces poles that tend to spring apart; "
+            "SHEAR LASHING joins two parallel poles (A-frame, tripod for water filtration or a pot hanger).\n\n"
+            "CORDAGE TIPS: 550 paracord = 7 inner strands you can pull out for fishing line, snares, sewing, "
+            "or floss. Make natural cordage by reverse-wrapping plant fibers (dogbane, nettle, yucca, inner "
+            "bark, cattail). Singe or tape synthetic rope ends to stop fraying. RELATED: shelter, signaling, "
+            "and trapping docs."
+        ),
+    },
+    {
+        "title": "Signaling & Rescue: Ground-to-Air, Mirror, Whistle & Morse",
+        "tags": "signal,signaling,rescue,ground-to-air,signal mirror,heliograph,whistle,morse,sos,"
+                "distress,flare,smoke,pace,search and rescue,survival",
+        "content": (
+            "RULE OF THREE = DISTRESS: three of anything — three fires, three whistle blasts, three "
+            "flashes, three shouts — is the universal signal for help. Signals work best in contrast "
+            "(dark on light, light on dark, movement against stillness) and in groups/patterns nature does "
+            "not make (straight lines, geometric shapes).\n\n"
+            "SIGNAL MIRROR / HELIOGRAPH (the longest-range daytime signal — flashes seen 10+ miles, even "
+            "by aircraft over the horizon):\n"
+            "Hold the mirror near your eye; extend your other hand toward the target making a 'V' or "
+            "peace-sign with two fingers; flash the bright spot of sunlight back and forth across that "
+            "notch so it sweeps the aircraft/target. Sweep the whole horizon even with no target in sight — "
+            "pilots often see the flash before you see them. Any shiny surface (phone screen, CD, polished "
+            "can lid, glasses) works.\n\n"
+            "WHISTLE (carries far, saves your voice, works in fog/dark): three sharp blasts = HELP. A "
+            "whistle beats shouting — far louder for far less energy. Keep one on your person.\n\n"
+            "FIRE & SMOKE: three fires in a triangle or line = distress. DAY: make WHITE smoke with green "
+            "vegetation, moss, or water on the fire — shows against dark ground/forest. Make BLACK smoke "
+            "with rubber, oil, or plastic — shows against snow or light sky. NIGHT: bright flame; a fire "
+            "built on a height or in a clearing is seen farthest. Keep signal fires ready to light fast.\n\n"
+            "GROUND-TO-AIR SIGNALS (stamp in snow/sand, lay out gear, rocks, logs, or contrasting fabric — "
+            "make them BIG, 10+ ft, with sharp straight edges):\n"
+            "• V = Require assistance\n"
+            "• X = Require medical assistance / unable to proceed\n"
+            "• I (vertical bar) = Need a doctor, serious injuries\n"
+            "• Arrow / → = Proceeding this direction (point of travel)\n"
+            "• Y = Yes / affirmative · N = No / negative\n"
+            "• SOS or a large triangle = general distress.\n"
+            "Add SHADOW and motion: prop signals at an angle so they cast shadows visible from the air.\n\n"
+            "MORSE / SOS: ... --- ... = three short, three long, three short (dot=short, dash=long). Send "
+            "by flashlight, mirror, whistle, or banging metal: 'dit' short, 'dah' ~3x as long; gap between "
+            "letters; longer gap between words. SOS is sent as one continuous group with no letter gaps.\n\n"
+            "BODY/AIR REPLY FROM AIRCRAFT: a pilot rocking the wings (or a green light) = 'message "
+            "received, understood'; circling/flying a straight line away then back can indicate a direction "
+            "to travel. STAY VISIBLE and stay put once spotted — most lost persons are found near their last "
+            "known point. RELATED: see the Knots & Rope Work, fire-starting, and navigation docs."
+        ),
+    },
+    {
+        "title": "Trapping, Snaring & Fishing: Off-Grid Food Procurement",
+        "tags": "trap,trapping,snare,deadfall,fishing,trotline,gill net,fish trap,hunting,game,protein,"
+                "field dress,gut,skin,procurement,calories,food,survival",
+        "content": (
+            "TRAPS WORK WHILE YOU SLEEP — the calorie math of survival favors passive traps and lines over "
+            "active hunting, which burns more energy than it usually returns. Set MANY (a dozen+) along sign "
+            "and let numbers do the work. NOTE: snaring/trapping wild game is restricted by law except in a "
+            "genuine survival emergency — this is survival reference.\n\n"
+            "READ THE SIGN FIRST: set traps on active runs/trails between feeding and water/cover — look for "
+            "tracks, droppings (scat), nibbled vegetation, burrows, and 'pinch points' (gaps in fences, "
+            "logs, under brush) where animals are funneled. Funnel them with sticks ('fences') into the trap.\n\n"
+            "SNARES (small game — rabbit, squirrel, groundhog):\n"
+            "A wire or cord noose set in a run at the animal's head height (rabbit loop ~fist-sized, ~1 "
+            "hand-width off the ground). Anchor solidly or to an engine-bend/spring pole. Use a locking "
+            "noose that tightens and won't reopen. Brass/steel snare wire holds a shape; paracord inner "
+            "strands work in a pinch. Set in numbers; check at dawn.\n\n"
+            "DEADFALLS (crushing trap): a heavy flat rock/log propped to drop on triggered prey. The "
+            "PAIUTE and FIGURE-4 triggers are the classics — a bait stick releases the weight when nibbled. "
+            "Use heavy weight (5-10x the animal's size). Effective for rodents and small game without wire.\n\n"
+            "FISHING (often the best calorie return in the wild):\n"
+            "• TROTLINE / SET LINE — a main line across a stream with many baited drop hooks; passive, runs "
+            "overnight, checks at dawn. The highest-yield method per effort.\n"
+            "• GILL NET — mesh stretched across a channel snags fish by the gills; very effective where legal/"
+            "in emergency.\n"
+            "• FISH TRAP / WEIR — a funnel of rocks or stakes (a 'V' pointing downstream into a pen) that "
+            "guides fish in but not out; bottle/basket traps for minnows and crawfish.\n"
+            "• HAND LINE & IMPROVISED HOOKS — from wire, thorns, bone, or a soda-tab gorge hook; bait with "
+            "worms, grubs, insects, or cut bait. Fish dawn/dusk, near structure, undercut banks, and inlets.\n\n"
+            "AFTER THE KILL — FIELD DRESS PROMPTLY (meat spoils fast):\n"
+            "1. Bleed and GUT quickly — open the belly carefully (don't puncture intestines/bladder), remove "
+            "the entrails, keep the heart, liver, and kidneys (nutrient-dense; discard if spotted/diseased).\n"
+            "2. SKIN and cool the carcass; keep meat clean, shaded, and airy. \n"
+            "3. PRESERVE what you can't eat now: cut into thin strips and dry/smoke into jerky (see "
+            "food-preservation doc), or cool/cache.\n"
+            "4. COOK THOROUGHLY — wild game carries trichinella, tularemia, and parasites; never eat "
+            "predator/scavenger liver in excess (vitamin A toxicity). Wear gloves dressing rabbits/rodents "
+            "(tularemia). RELATED: see the Knots & Rope Work, foraging, and food-preservation docs."
+        ),
+    },
+
+    # ── NAVIGATION: COORDINATE SYSTEMS ───────────────────────────────────────
+    {
+        "title": "Map Coordinate Systems: MGRS, UTM, Lat/Long & Pace Count",
+        "tags": "map,coordinates,mgrs,utm,latitude,longitude,grid reference,grid square,pace count,"
+                "land navigation,topographic,declination,easting,northing,plot,resection,navigation,survival",
+        "content": (
+            "A coordinate system turns a position into numbers you can speak over the radio and plot on a "
+            "map. Know how to read and report at least one precisely.\n\n"
+            "LATITUDE / LONGITUDE (global, what GPS reports natively):\n"
+            "• LATITUDE = degrees N/S of the equator (0 to 90); LONGITUDE = degrees E/W of the prime "
+            "meridian (0 to 180). Always state lat first, then lon, with hemisphere.\n"
+            "• Formats: degrees-minutes-seconds (DMS) 38 57 30 N; degrees-decimal-minutes (DDM) 38 57.5 N — "
+            "the maritime/aviation standard; or decimal degrees (DD) 38.9583 — easiest for devices. 1 minute "
+            "of latitude = 1 nautical mile (~1.15 statute mi) anywhere on earth.\n\n"
+            "UTM / MGRS (military & topo — a flat metric grid that is easy to measure on a paper map):\n"
+            "• UTM divides the world into 60 zones 6 degrees wide; position is an EASTING (meters east "
+            "within the zone) and a NORTHING (meters north). MGRS adds a letter band and a 100,000 m square "
+            "ID, e.g. 18S UJ 2348 0647.\n"
+            "• READ RIGHT, THEN UP: read the easting (left-to-right) FIRST, then the northing (bottom-to-"
+            "top). 'Right and Up.' More digits = more precision: a 4-digit grid (e.g. 2306) locates a 1000 m "
+            "square, 6-digit (234064) a 100 m square, 8-digit a 10 m point.\n"
+            "• Use a map's grid lines and a protractor/romer scale to interpolate the extra digits between "
+            "printed gridlines. MGRS squares are perfect for a quick, terse radio report.\n\n"
+            "DECLINATION (the must-know correction): a map is drawn to TRUE/grid north, but a compass points "
+            "to MAGNETIC north. The angle between them (declination/grid-magnetic angle) varies by location "
+            "and year — printed in the map margin. To convert a MAP bearing to a COMPASS bearing in an area "
+            "of WEST declination, ADD it; for EAST declination, SUBTRACT (mnemonics: 'East is least, West is "
+            "best' for magnetic-to-true; reverse for true-to-magnetic). Set the adjustment on the compass if "
+            "it has one, and your bearings will match the ground.\n\n"
+            "PACE COUNT (dead-reckoning distance without GPS): count every time the SAME foot strikes the "
+            "ground = 1 pace. On flat ground most adults walk ~60-65 paces per 100 m — calibrate yours over "
+            "a measured 100 m. Add paces on slopes, rough ground, and when tired. Use beads/knots ('ranger "
+            "beads') to track each 100 m so you can estimate how far you've traveled on a bearing.\n\n"
+            "PLOTTING & RESECTION: to plot a coordinate, find the gridlines and measure in. To find YOUR "
+            "location without GPS (resection): take compass bearings to two or three known terrain features, "
+            "convert to map bearings, draw the BACK-bearings on the map; where they cross is your position. "
+            "RELATED: land-navigation, signaling, and Atlas GPS docs."
+        ),
+    },
+
+    # ── SURVIVAL PSYCHOLOGY ──────────────────────────────────────────────────
+    {
+        "title": "Survival Psychology & Mental Resilience",
+        "tags": "psychology,mental,stress,fear,morale,STOP,survival mindset,panic,will to survive,"
+                "group dynamics,leadership,resilience,decision making,positive mental attitude,survival",
+        "content": (
+            "The mind is the most important survival tool. Studies of survivors show that WILL and a clear "
+            "head matter more than gear or fitness — people with little equipment but a strong mindset "
+            "routinely outlast better-equipped people who panic. Skills give confidence; confidence holds "
+            "off panic; calm enables good decisions.\n\n"
+            "S.T.O.P. — the first thing to do when lost or in crisis (fight the urge to bolt):\n"
+            "• STOP — halt, sit down, do not run. Most fatal mistakes happen in the first panicked minutes.\n"
+            "• THINK — what is the real, immediate threat? What do I have? What are my priorities?\n"
+            "• OBSERVE — assess surroundings, weather, injuries, resources, your map/position.\n"
+            "• PLAN — choose deliberate actions in priority order, then act calmly.\n\n"
+            "PANIC is the enemy: it wastes energy, causes injury, and drives bad choices (running, ditching "
+            "gear, drinking bad water). Counter it with controlled BREATHING (slow 4-count in, 4-count hold, "
+            "4-count out — 'box breathing'), with ACTION (doing a known task restores a sense of control), "
+            "and by breaking the situation into small solvable steps.\n\n"
+            "SURVIVAL PRIORITIES keep the mind anchored — work the 'Rule of 3s': you can survive roughly "
+            "3 minutes without air/severe bleeding controlled, 3 hours without shelter in harsh weather, "
+            "3 days without water, 3 weeks without food. This orders your decisions when everything feels "
+            "urgent: air/bleeding → shelter/warmth → water → food → signaling/rescue.\n\n"
+            "STAGES OF A CRISIS RESPONSE: initial denial/shock, then deliberation, then the decisive moment "
+            "to act. Survivors move THROUGH denial quickly, accept the new reality ('this is really "
+            "happening'), and take ownership instead of waiting to be saved. They keep a POSITIVE MENTAL "
+            "ATTITUDE, find small wins, use humor, and hold a reason to live (family, a task, faith).\n\n"
+            "FEAR vs. DANGER: fear is useful only when it sharpens caution; uncontrolled fear is itself a "
+            "danger. Name it, accept it, and act anyway. Boredom, loneliness, and despair on long survivals "
+            "are real threats — keep a routine, set daily goals, maintain hygiene and gear (it preserves "
+            "morale), and mark the passage of time.\n\n"
+            "GROUP DYNAMICS & LEADERSHIP: in a group, assign clear roles and a decision-maker; shared tasks "
+            "and a plan prevent paralysis and conflict. Care for the weakest member — morale is contagious "
+            "both ways. Communicate honestly, ration fairly, and keep everyone busy with purpose. A calm "
+            "leader who projects competence steadies the whole group. RELATED: situational-awareness, "
+            "grid-down, and first-aid docs."
+        ),
+    },
+
+    # ── EMERGENCY WATER PROCUREMENT ──────────────────────────────────────────
+    {
+        "title": "Emergency Water Procurement: Solar Still, Transpiration Bag & Condensation",
+        "tags": "water,procurement,solar still,transpiration bag,vegetation bag,condensation,dew,"
+                "rain catchment,snow,distillation,desert,hydration,survival",
+        "content": (
+            "When you cannot FIND water, you may be able to PRODUCE it. These methods are last resorts — "
+            "most yield little, and some cost more sweat than they return. Treat anything from open ground "
+            "(except distilled/condensed output) before drinking; see the water-purification doc.\n\n"
+            "TRANSPIRATION BAG (best effort-to-yield — start here):\n"
+            "Tie a clear plastic bag over a leafy, living branch of a NON-toxic tree/shrub in full sun; "
+            "weight a low corner so condensation pools there. The plant pulls up groundwater and 'sweats' it "
+            "out; it condenses inside the bag. Yields ~0.5-1 cup per bag per day for almost no labor — run "
+            "MANY bags and rotate to fresh branches as leaves dry out. AVOID poisonous plants (oleander, "
+            "yew, etc.) — some toxins carry into the water. The water is clean and drinkable as-is.\n\n"
+            "VEGETATION/EVAPORATION BAG: a bag stuffed with cut, non-toxic green vegetation laid in the sun "
+            "works the same way; faster to fill but the cut plants stop transpiring sooner.\n\n"
+            "SOLAR STILL (below-ground — low yield, useful for FOUL water/urine/seawater):\n"
+            "Dig a bowl-shaped hole ~3 ft wide and ~1.5-2 ft deep where soil is damp and sun is strong. "
+            "Set a clean container in the center. Pile green vegetation (or pour foul/salt/urine water) into "
+            "the hole AROUND — not in — the container. Cover the hole with a plastic sheet, seal the edges "
+            "with soil/rocks, and set one small stone in the center so the sheet dips into a cone right over "
+            "the container. Sun evaporates moisture; it condenses on the underside, runs to the low point, "
+            "and DRIPS in — leaving salt, urine, and contaminants behind (it is distilled, so safe). Run a "
+            "drinking tube out so you can sip without breaking the seal. Yield is only ~0.5-1 qt/day in good "
+            "conditions and can be NET-NEGATIVE in dry soil — you may sweat out more digging it than you gain.\n\n"
+            "DEW & RAIN:\n"
+            "• DEW: at dawn, tie clean absorbent cloth/socks around your ankles and walk through dew-laden "
+            "grass, or wipe non-toxic foliage with a cloth, then wring into a container. Surprisingly "
+            "productive on cool clear mornings.\n"
+            "• RAIN: the best source — funnel a tarp/poncho/sheet into containers; generally safe to drink "
+            "untreated unless it ran over a dirty surface first. Stage catchment BEFORE the rain.\n\n"
+            "SNOW & ICE: MELT before consuming — eating snow drops your core temperature and burns energy "
+            "you can't spare. Melt with fire, a dark container in sun, or body heat in a water bag inside "
+            "your jacket. Clear ice holds more water than fluffy snow; old compacted snow beats fresh.\n\n"
+            "PLANT & GROUND SOURCES: green bamboo segments often hold drinkable water (shake to hear it); "
+            "in a dry riverbed dig at the OUTSIDE of the lowest bend to reach subsurface water. MYTH/WARNING: "
+            "do NOT rely on cactus — most cacti (including the barrel cactus) hold bitter, toxic fluid that "
+            "causes vomiting and worsens dehydration. NEVER drink seawater, urine, blood, or alcohol "
+            "straight (all accelerate dehydration) — though a solar still CAN reclaim clean water from them. "
+            "RELATED: see the water-purification and emergency-shelter docs."
+        ),
+    },
+
+    # ── DENTAL EMERGENCIES ───────────────────────────────────────────────────
+    {
+        "title": "Dental Emergencies in the Field",
+        "tags": "dental,tooth,toothache,abscess,knocked-out tooth,avulsion,broken tooth,filling,crown,"
+                "clove oil,dry socket,medical,first aid,grid-down,survival",
+        "content": (
+            "With no dentist, a tooth problem can sideline or even kill you (a spreading dental infection "
+            "is dangerous). Stock a small dental kit: clove oil (eugenol), temporary dental cement (e.g. "
+            "Dentemp), dental wax, gauze, floss, and OTC pain relievers. NOT a substitute for a dentist.\n\n"
+            "TOOTHACHE / PULPITIS:\n"
+            "Floss and rinse with warm SALT WATER to clear trapped debris; this alone often helps. Control "
+            "pain with ibuprofen + acetaminophen together (multimodal). Dab CLOVE OIL on a cotton pellet "
+            "against the tooth — eugenol numbs and is mildly antibacterial. Avoid hot/cold/sugary triggers. "
+            "Throbbing that wakes you, with swelling or fever, signals an abscess.\n\n"
+            "DENTAL ABSCESS (infection — take seriously):\n"
+            "Swelling, severe pain, foul taste, fever. Warm salt-water rinses; pain control. A dental "
+            "abscess is a classic grid-down indication for ANTIBIOTICS (amoxicillin first-line; "
+            "metronidazole or clindamycin alternatives — see the Field Antibiotics doc). EMERGENCY signs: "
+            "swelling spreading to the eye, jaw, or neck, or trouble swallowing/breathing (Ludwig's angina) "
+            "— this can be fatal and needs definitive care. Drainage relieves pressure but is not a cure.\n\n"
+            "KNOCKED-OUT TOOTH (avulsion — time-critical, best reimplanted within 30-60 min):\n"
+            "Pick the tooth up by the CROWN only — NEVER touch the root. Gently rinse off dirt (do NOT scrub "
+            "or remove attached tissue). If you can, REIMPLANT it into the socket the right way round and "
+            "bite gently on gauze to hold it. If you cannot reimplant, STORE it in milk, in saline, or in "
+            "the cheek pouch (saliva) — NEVER in plain water and never let it dry out. Seek a dentist ASAP. "
+            "Do NOT reimplant a baby tooth.\n\n"
+            "BROKEN / CHIPPED TOOTH: rinse; save any fragments in milk; cover a sharp edge with dental wax "
+            "or sugarless gum; control pain; avoid chewing on that side.\n\n"
+            "LOST FILLING / CROWN: clean and dry the cavity; pack with temporary dental cement, or sugarless "
+            "gum/wax as a stopgap, to protect it from air/food. Re-seat a crown with temporary dental cement "
+            "— NEVER use superglue or household adhesives inside the mouth.\n\n"
+            "BLEEDING AFTER EXTRACTION/INJURY: bite firmly on rolled gauze (or a moist black TEA BAG — "
+            "tannins aid clotting) for 30-45 min. For the next 24 hr do NOT spit forcefully, rinse hard, or "
+            "use straws — that dislodges the clot and causes a painful 'dry socket.' RELATED: see the Field "
+            "Antibiotics & Medications and wilderness first-aid docs."
+        ),
+    },
+
+    # ── EMERGENCY CHILDBIRTH ─────────────────────────────────────────────────
+    {
+        "title": "Emergency Childbirth and Newborn Care",
+        "tags": "childbirth,labor,delivery,newborn,baby,umbilical cord,placenta,postpartum hemorrhage,"
+                "breech,obstetric,midwife,medical,first aid,survival",
+        "content": (
+            "Most births proceed normally and the mother's body does the work — your job is to stay calm, "
+            "keep things clean and warm, and not interfere unless needed. Get trained help whenever "
+            "possible. PREP CLEAN SUPPLIES: clean towels/sheets, two clean shoelaces or strings (cord ties), "
+            "a blade/scissors sterilized by boiling, gloves, a bulb syringe, and blankets to keep the baby "
+            "warm.\n\n"
+            "STAGES OF LABOR:\n"
+            "1. LABOR: contractions become regular and stronger; the water (amniotic sac) may break. Time "
+            "them — when contractions last ~1 minute, come ~5 minutes apart, and have done so for ~1 hour "
+            "('5-1-1'), birth is near.\n"
+            "2. DELIVERY: a strong urge to push, then 'crowning' (the head appears). SUPPORT the head, do "
+            "NOT pull; let it turn on its own, then gently guide the top shoulder out, then the bottom one; "
+            "the slippery body follows fast — be ready to catch it.\n"
+            "3. AFTERBIRTH: the placenta delivers on its own ~5-30 min later. Do NOT pull on the cord.\n\n"
+            "DURING DELIVERY: position the mother however she is comfortable (semi-sitting or squatting uses "
+            "gravity). If the membrane covers the baby's face, tear it. Check whether the cord is looped "
+            "around the neck — if so, gently slip it over the head.\n\n"
+            "NEWBORN CARE (the critical first minute):\n"
+            "DRY the baby vigorously with a towel and keep it WARM — skin-to-skin on the mother's bare "
+            "chest, both covered (newborns chill dangerously fast). Clear the MOUTH then the NOSE with the "
+            "bulb syringe only if needed. The baby should cry and breathe within seconds; if not, rub the "
+            "back and flick the soles of the feet, and begin newborn rescue breathing if it does not start "
+            "breathing.\n\n"
+            "UMBILICAL CORD: do NOT rush. Wait until the cord stops pulsing (~1-3 min). Tie it off tightly "
+            "with clean string about 2 in (4 finger-widths) from the baby, tie again ~2 in further out, and "
+            "cut between the two ties with a sterilized blade.\n\n"
+            "PLACENTA & BLEEDING: let the placenta deliver naturally; never yank the cord. Then firmly "
+            "MASSAGE the uterus (a firm grapefruit-sized mass below the navel) and put the baby to the "
+            "breast — both make the uterus clamp down and control bleeding. POSTPARTUM HEMORRHAGE is the "
+            "number-one killer: uterine massage + breastfeeding + (if available) misoprostol.\n\n"
+            "DANGER SIGNS — get skilled help NOW: heavy bleeding before or after birth; a baby that will not "
+            "breathe; BREECH presentation (feet/buttocks first) or a hand or the CORD coming first (cord "
+            "prolapse — a true emergency); labor that stalls/obstructs for hours; or maternal seizures "
+            "(eclampsia). RELATED: see the wilderness first-aid, hemorrhage-control, and Field Antibiotics docs."
+        ),
+    },
 ]
 
 
@@ -2291,6 +2965,14 @@ ATLAS_DOCS = [
             "when 'Inject mesh context' is enabled in AI Settings\n"
             "• Perform math, unit conversions, and ballistic drop calculations\n"
             "• Hold multi-turn conversations; each chat in the left panel is a separate conversation\n\n"
+            "CROSS-CHECKING RAY (/explain):\n"
+            "After any answer, type '/explain' or click the 🔍 explain button beneath it. Ray then shows "
+            "exactly how and why it produced that answer: the path taken (knowledge base, live data, "
+            "deterministic ballistic calculator, or training only), the source passages it retrieved with "
+            "their similarity scores, the live context injected, the confidence tier, and the generation "
+            "settings. This explanation is built deterministically from Ray's recorded pipeline — no AI "
+            "call is made — so it cannot itself hallucinate, letting you verify the answer against its real "
+            "sources. Use '/explain <message-id>' to explain a specific earlier answer.\n\n"
             "KNOWLEDGE BASE (RAG):\n"
             "Ray has access to curated reference documents embedded with the qwen3-embedding:0.6b model. "
             "When you ask a question, the top-matching documents are retrieved and injected into the prompt. "
@@ -2486,7 +3168,15 @@ RAY_SELF_DOC = {
         "token by token within a 4096-token context window.\n"
         "8. CONFIDENCE — every answer ends with a footer I cannot fake: HIGH/MEDIUM/LOW plus the "
         "actual sources used (Live Mesh Data, Knowledge Base + match score, GPS Fix, System Stats, "
-        "or Training Knowledge). It is computed from what was really injected, not from my opinion.\n\n"
+        "or Training Knowledge). It is computed from what was really injected, not from my opinion.\n"
+        "9. EXPLAIN / CROSS-CHECK — as I answer, I record a provenance trace of every decision: which "
+        "path ran, which knowledge-base passages were retrieved at what similarity score (with the "
+        "passage text), what live context was injected, the confidence tier, and my generation "
+        "settings. Send '/explain' (or click the 🔍 explain button under any answer) and I replay that "
+        "trace deterministically — NO language-model call is made, so the explanation itself cannot "
+        "hallucinate. You can read the exact sources I drew on and confirm my answer matches them; if "
+        "a claim isn't backed by a quoted passage and confidence is LOW, treat it as unverified. "
+        "'/explain <id>' explains a specific earlier answer.\n\n"
         "KNOWLEDGE MAP — the Ray AI → Settings tab shows an interactive SVG visualization of my "
         "knowledge documents. Nodes are colored by topic cluster; edges connect docs whose "
         "cosine similarity is ≥ 0.55 (up to 6 per node, edge color shifts slate→amber with "
@@ -2523,6 +3213,27 @@ def _is_self_query(msg: str) -> bool:
     """Return True if the user is asking Ray about its own internals."""
     ml = msg.lower()
     return any(kw in ml for kw in _SELF_QUERY_FRAGMENTS)
+
+
+def _parse_explain_command(msg: str):
+    """Detect the /explain cross-check command.
+
+    Returns None when the message is not an /explain command, otherwise a dict
+    {"message_id": int | None}.  Bare '/explain' targets the most recent answer;
+    '/explain <id>' targets a specific assistant message.  Accepts a leading
+    slash or bang so it works however the UI/user types it.
+    """
+    s = (msg or "").strip()
+    if not s:
+        return None
+    low = s.lower()
+    for prefix in ("/explain", "!explain", "explain this", "/why", "explain your answer"):
+        if low == prefix:
+            return {"message_id": None}
+        if low.startswith(prefix + " "):
+            arg = s[len(prefix):].strip()
+            return {"message_id": int(arg)} if arg.isdigit() else {"message_id": None}
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -2916,8 +3627,9 @@ class AIManager:
     # This query/document asymmetry measurably improves retrieval. Tailored to
     # the Atlas knowledge base (survival / radio / nav / app usage).
     _EMBED_QUERY_INSTRUCT = (
-        "Given a question, retrieve survival, radio, navigation, and Atlas "
-        "Control reference passages that answer it"
+        "Given a question, retrieve survival, medical, radiological/CBRN, "
+        "weather, radio, navigation, and Atlas Control reference passages "
+        "that answer it"
     )
 
     # ── Topic router ───────────────────────────────────────────────────────────
@@ -2925,15 +3637,23 @@ class AIManager:
     # Used by _classify_query_category() to give matching docs a small score
     # bonus in rag_search() so the right cluster surfaces first.
     _QUERY_CATEGORY_KEYS: dict = {
-        "water":      ["water", "purif", "drink", "hydrat", "stream", "filter", "boil"],
+        "water":      ["water", "purif", "drink", "hydrat", "stream", "filter", "boil",
+                       "solar still", "transpiration", "condensation", "collect water",
+                       "find water", "procure water"],
         "fire":       ["fire", "tinder", "ignit", "spark", "flame", "campfire"],
         "shelter":    ["shelter", "bivouac", "tarp", "insul", "sleep", "tent"],
         "food":       ["food", "forag", "edible", "plant", "mushroom", "calor",
                        "garden", "crop", "livestock", "harvest", "berr"],
         "medical":    ["medic", "first aid", "wound", "bleed", "hemorrh", "tourni",
                        "cpr", "shock", "airway", "infect", "fractur", "burn",
-                       "hypotherm", "trauma", "bite", "sting", "inject"],
-        "navigation": ["navigat", "compass", "bearing", "azimuth", "landmark", "orienteer"],
+                       "hypotherm", "trauma", "bite", "sting", "inject",
+                       "dental", "tooth", "toothache", "abscess", "childbirth",
+                       "giving birth", "in labor", "newborn", "umbilical",
+                       "placenta", "breech", "delivering a baby"],
+        "navigation": ["navigat", "compass", "bearing", "azimuth", "landmark", "orienteer",
+                       "mgrs", "utm", "coordinate", "grid reference", "grid square",
+                       "declination", "pace count", "latitude", "longitude", "easting",
+                       "northing", "resection", "topographic", "map reading"],
         "comms":      ["mesh", "meshtastic", "radio", "frequen", "communic",
                        "gmrs", "amateur", "transmi", "antenna"],
         "power":      ["power", "batter", "solar", "generat", "watt", "volt", "charge"],
@@ -2950,6 +3670,39 @@ class AIManager:
                        "spider", "scorpion", "tick", "rabies", "alligator", "shark",
                        "venomous", "predator", "encounter", "rattlesnake", "bitten"],
         "trees":      ["tree", "native", "oak", "pine", "maple", "bark", "forest"],
+        "nuclear":    ["nuclear", "radiation", "radioact", "fallout", "dosimet",
+                       "geiger", "roentgen", "sievert", "cbrn", "nuke", "dirty bomb",
+                       "rad ", "rem ", "potassium iodide", "iodide", "contaminat",
+                       "acute radiation", "7-10 rule", "7 10 rule", "decontaminat"],
+        # "emp" is intentionally matched only as a phrase, never as a bare
+        # substring — "emp" lives inside "temperature", "attempt", etc.
+        "emp":        ["emp attack", "emp event", "emp strike", "emp blast",
+                       "an emp", "emp protect", "emp proof", "emp-proof",
+                       "nuclear emp", "electromagnetic pulse", "cme", "solar storm",
+                       "solar flare", "coronal mass", "faraday", "carrington",
+                       "geomagnetic"],
+        "weather":    ["weather", "tornado", "hurricane", "flood", "earthquake",
+                       "wildfire", "lightning", "blizzard", "barometr", "forecast",
+                       "storm", "cloud", "disaster", "evacuat"],
+        "cold_heat":  ["hypotherm", "frostbite", "frostnip", "heat stroke",
+                       "heat exhaustion", "heat cramp", "trench foot", "rewarm",
+                       "cold injury", "heat illness", "overheat"],
+        "signaling":  ["signal", "rescue", "ground-to-air", "ground to air", "morse",
+                       "sos", "whistle", "signal mirror", "heliograph", "distress",
+                       "flare"],
+        "knots":      ["knot", "rope", "lashing", "cordage", "hitch", "bowline",
+                       "paracord", "prusik", "bend "],
+        "hunting":    ["trap", "snare", "deadfall", "fishing", "trotline", "gill net",
+                       "field dress", "field-dress", "gut ", "snaring", "game meat"],
+        "sanitation": ["sanitation", "latrine", "outhouse", "sewage", "cholera",
+                       "dysentery", "feces", "human waste", "hygiene", "typhoid"],
+        "medications":["antibiotic", "amoxicillin", "doxycycline", "cephalexin",
+                       "metronidazole", "ciprofloxacin", "cipro", "azithromycin",
+                       "bactrim", "fish antibiotic", "dosage", "painkiller",
+                       "ibuprofen", "acetaminophen", "medication", "expired med"],
+        "psychology": ["psychology", "mental", "morale", "mindset", "panic",
+                       "will to survive", "s.t.o.p", "stop method", "fear",
+                       "stress", "resilience"],
         "atlas_app":  ["atlas", "dashboard", "map page", "mesh page", "ai tab",
                        "gps page", "connection", "how do i use", "what is atlas",
                        "top_k", "top_p", "top-k", "top-p", "k-value", "p-value",
@@ -2976,6 +3729,26 @@ class AIManager:
         "wildlife":   ["wildlife", "snake", "bear", "spider", "venomous",
                        "rabies", "alligator"],
         "trees":      ["tree", "native", "species"],
+        "nuclear":    ["nuclear", "radiation", "fallout", "cbrn", "geiger",
+                       "roentgen", "potassium iodide", "decontamination", "radiological"],
+        "emp":        ["faraday", "electromagnetic", "solar storm", "geomagnetic",
+                       "coronal mass", "carrington"],
+        "weather":    ["weather", "tornado", "hurricane", "flood", "earthquake",
+                       "wildfire", "blizzard", "storm", "barometr"],
+        "cold_heat":  ["hypotherm", "frostbite", "heat stroke", "heat exhaustion",
+                       "cold injury", "trench foot", "rewarm"],
+        "signaling":  ["signal", "rescue", "ground-to-air", "morse", "distress",
+                       "heliograph", "whistle"],
+        "knots":      ["knot", "rope", "cordage", "lashing", "hitch", "bowline",
+                       "paracord", "prusik"],
+        "hunting":    ["trap", "snare", "deadfall", "fishing", "trotline", "gill net",
+                       "field dress", "procurement"],
+        "sanitation": ["sanitation", "latrine", "sewage", "cholera", "dysentery",
+                       "human waste", "hygiene", "typhoid"],
+        "medications":["antibiotic", "amoxicillin", "doxycycline", "cephalexin",
+                       "metronidazole", "ciprofloxacin", "medication", "pharmacy"],
+        "psychology": ["psychology", "mental", "morale", "mindset", "resilience",
+                       "survival mindset", "will to survive"],
         "atlas_app":  ["atlas", "app", "ray", "dashboard"],
     }
 
@@ -3828,6 +4601,8 @@ class AIManager:
             d = dict(doc)
             d["_passage"] = passage or doc.get("content") or ""
             d["_heading"] = heading
+            d["_score"]  = round(h, 3)   # final hybrid+boost score used for ranking
+            d["_cosine"] = round(v, 3)   # raw semantic similarity (un-inflated)
             out.append(d)
             if len(out) >= top_k:
                 break
@@ -3852,6 +4627,7 @@ class AIManager:
         meta = {
             "has_rag": False,
             "rag_top_score": 0.0,
+            "rag_docs": [],
             "has_live_data": False,
             "has_system_stats": False,
             "is_live_query": False,
@@ -4215,6 +4991,19 @@ class AIManager:
                     user_message, top_k=top_k, embed_model=embed_model, location_hint=location_hint
                 )
                 meta["rag_top_score"] = rag_top_score
+                # Record retrieved passages for the /explain provenance trace so
+                # the user can read the exact sources Ray drew on and check the
+                # answer against them.
+                meta["rag_docs"] = [
+                    {
+                        "title": d.get("title", ""),
+                        "heading": d.get("_heading", ""),
+                        "score": d.get("_score", 0.0),
+                        "cosine": d.get("_cosine", 0.0),
+                        "passage": d.get("_passage", ""),
+                    }
+                    for d in relevant_docs
+                ]
                 if relevant_docs:
                     meta["has_rag"] = True
                     # Inject the best-matching passage per doc (not the whole
@@ -4305,6 +5094,233 @@ class AIManager:
         return f"\n\n---\nConfidence: {label}"
 
     # ------------------------------------------------------------------
+    # /explain — deterministic provenance cross-check
+    # ------------------------------------------------------------------
+    def _gps_summary(self, meta):
+        """One-line human description of the position context that was injected."""
+        user_loc = meta.get("user_location")
+        gps_fix  = meta.get("gps_fix")
+        if user_loc:
+            if user_loc.get("type") == "named":
+                return f"user-stated location: {user_loc['name']}"
+            if user_loc.get("type") == "coords":
+                return f"user-stated coords: {user_loc['lat']:.4f}, {user_loc['lon']:.4f}"
+        if gps_fix and gps_fix.get("latitude") is not None:
+            lat, lon = gps_fix["latitude"], gps_fix["longitude"]
+            place = _reverse_geocode(lat, lon)
+            tail = f" ({place})" if place else ""
+            return f"device GPS fix: {lat:.4f}, {lon:.4f}{tail}"
+        return None
+
+    def _build_explain_trace(self, *, user_message, path, ctx_meta, settings,
+                             model, confidence_label, calc_block=None,
+                             ballistic_answer=None):
+        """Assemble the structured provenance trace for one answer.
+
+        Everything here is recorded straight from the pipeline's own decisions —
+        which path ran, what RAG retrieved at what score, what live context was
+        injected, the generation settings — so /explain reflects what actually
+        produced the answer rather than the model's after-the-fact narration.
+        """
+        meta = ctx_meta or {}
+        path_labels = {
+            "ballistic":    "Deterministic ballistic calculator (language model bypassed)",
+            "physics_calc": "Physics calculator agent + language model",
+            "live":         "Live device data (GPS / mesh / system stats)",
+            "rag":          "Knowledge-base retrieval (RAG) + language model",
+            "training":     "Language-model training knowledge only (no source retrieved)",
+        }
+        trace = {
+            "version": 1,
+            "question": user_message,
+            "path": path,
+            "path_label": path_labels.get(path, path),
+            "category": self._classify_query_category(user_message),
+            "model": model,
+            "params": {
+                "temperature":    settings.get("temperature", DEFAULT_SETTINGS["temperature"]),
+                "top_p":          settings.get("top_p", DEFAULT_SETTINGS["top_p"]),
+                "top_k":          settings.get("top_k", DEFAULT_SETTINGS["top_k"]),
+                "repeat_penalty": settings.get("repeat_penalty", DEFAULT_SETTINGS["repeat_penalty"]),
+                "num_ctx":        settings.get("num_ctx", DEFAULT_SETTINGS["num_ctx"]),
+            },
+            "confidence": confidence_label,
+            "rag": {
+                "enabled": str(settings.get("rag_enabled", "true")).lower() == "true",
+                "skipped_live": bool(meta.get("is_live_query")),
+                "min_score": _RAG_MIN_SCORE,
+                "top_score": round(meta.get("rag_top_score", 0.0), 3),
+                "docs": meta.get("rag_docs", []),
+            },
+            "live": {
+                "gps": self._gps_summary(meta),
+                "system_stats": bool(meta.get("has_system_stats")),
+                "mesh": bool(meta.get("has_live_data")),
+                "self_doc": bool(meta.get("has_self_doc")),
+            },
+            "calc": calc_block or None,
+        }
+        if ballistic_answer is not None:
+            # The deterministic answer IS its own evidence — keep it verbatim.
+            trace["ballistic_answer"] = ballistic_answer
+        return trace
+
+    def _format_explain_trace(self, trace):
+        """Render a stored trace dict into the markdown shown for /explain."""
+        if not trace:
+            return (
+                "🔍 **/explain** — I don't have a recorded answer to explain yet.\n\n"
+                "Ask me something first, then send `/explain` to see exactly how and "
+                "why I produced that answer."
+            )
+        path = trace.get("path")
+        L = []
+        L.append("🔍 **How I produced that answer — provenance cross-check**")
+        L.append(
+            "_This breakdown is generated directly from my pipeline's records, "
+            "not written by the language model — so you can verify the answer "
+            "against its actual sources rather than trusting a self-report._")
+        q = (trace.get("question") or "").strip()
+        if q:
+            L.append(f"**Your question:** {q}")
+        L.append(f"**Answer path:** {trace.get('path_label', path)}")
+        if trace.get("category"):
+            L.append(f"**Topic router matched:** `{trace['category']}`")
+        if trace.get("confidence"):
+            L.append(f"**Confidence I reported:** {trace['confidence']}")
+
+        # ── Ballistic / deterministic ──────────────────────────────────────
+        if path == "ballistic":
+            L.append(
+                "**Why you can trust the numbers:** this query named a specific "
+                "round, so the figures were computed by the verified G1 ballistic "
+                "calculator (real trajectory sim + Miller spin-drift formula). "
+                "The language model was bypassed entirely and never touched the "
+                "numbers, so it could not hallucinate them.")
+            L.append(
+                "**Cross-check:** re-run the inputs (round, range, zero, twist) in "
+                "any external ballistic solver — the drop, time-of-flight and spin "
+                "drift should match within rounding.")
+            return "\n\n".join(L)
+
+        # ── RAG sources ────────────────────────────────────────────────────
+        rag = trace.get("rag", {})
+        docs = rag.get("docs", [])
+        if rag.get("skipped_live"):
+            L.append(
+                "**Knowledge base:** skipped — this was classified as a live-data "
+                "question, so I answered from current device readings instead of "
+                "retrieved documents.")
+        elif not rag.get("enabled"):
+            L.append("**Knowledge base:** retrieval is turned OFF in AI settings.")
+        elif docs:
+            lines = [f"**Sources retrieved from knowledge base** "
+                     f"(passages scoring ≥ {rag.get('min_score')} were used):"]
+            for i, d in enumerate(docs, 1):
+                title = d.get("title", "Untitled")
+                heading = d.get("heading", "")
+                label = f"{title}" + (f" — {heading}" if heading else "")
+                lines.append(
+                    f"{i}. **{label}** · score {d.get('score')} "
+                    f"(raw similarity {d.get('cosine')})")
+                passage = (d.get("passage") or "").strip().replace("\n", " ")
+                if len(passage) > 320:
+                    passage = passage[:320].rstrip() + "…"
+                if passage:
+                    lines.append(f"   > {passage}")
+            L.append("\n".join(lines))
+        else:
+            L.append(
+                f"**Knowledge base:** no passage cleared the relevance threshold "
+                f"of {rag.get('min_score')} (best match scored "
+                f"{rag.get('top_score')}). I answered from the model's training "
+                f"knowledge — treat specifics as **unverified** and double-check "
+                f"anything safety-critical.")
+
+        # ── Live context ───────────────────────────────────────────────────
+        live = trace.get("live", {})
+        live_bits = []
+        if live.get("gps"):
+            live_bits.append(f"position — {live['gps']}")
+        if live.get("system_stats"):
+            live_bits.append("live system stats (CPU/RAM/temps/power)")
+        if live.get("mesh"):
+            live_bits.append("live mesh node / alert data")
+        if live.get("self_doc"):
+            live_bits.append("my self-architecture document")
+        if live_bits:
+            L.append("**Live context injected:**\n" +
+                     "\n".join(f"- {b}" for b in live_bits))
+
+        # ── Calculator agent ───────────────────────────────────────────────
+        if trace.get("calc"):
+            calc = trace["calc"].strip()
+            if len(calc) > 600:
+                calc = calc[:600].rstrip() + "\n…"
+            L.append("**Pre-verified calculator results fed to the model:**\n```\n"
+                     + calc + "\n```")
+
+        # ── Generation settings ────────────────────────────────────────────
+        p = trace.get("params", {})
+        L.append(
+            f"**Generation settings:** {trace.get('model')} · "
+            f"temperature {p.get('temperature')} · top_p {p.get('top_p')} · "
+            f"top_k {p.get('top_k')} · repeat_penalty {p.get('repeat_penalty')} · "
+            f"context {p.get('num_ctx')} tokens. A non-zero temperature means "
+            "wording varies between runs even with identical sources.")
+
+        # ── Cross-check guidance ───────────────────────────────────────────
+        tips = [
+            "Compare each claim in my answer against the quoted source passages "
+            "above — anything not backed by a passage came from model training.",
+        ]
+        if path == "training" or not docs:
+            tips.append(
+                "Confidence is **LOW / training-only** here: there is no offline "
+                "source behind this answer, so verify it independently before "
+                "relying on it.")
+        L.append("**How to catch a hallucination:**\n" +
+                 "\n".join(f"- {t}" for t in tips))
+        return "\n\n".join(L)
+
+    def _explain_trace_json(self, user_message, ctx_meta, settings, model,
+                            content, calc_block):
+        """Derive path + confidence label from a finished answer and return the
+        provenance trace as a JSON string (for the normal LLM pipeline)."""
+        meta = ctx_meta or {}
+        if calc_block:
+            path = "physics_calc"
+        elif meta.get("is_live_query") or meta.get("has_live_data") or meta.get("has_system_stats"):
+            path = "live"
+        elif meta.get("has_rag"):
+            path = "rag"
+        else:
+            path = "training"
+        m = re.search(r"\n\n---\nConfidence:\s*(.+)$", content or "", re.S)
+        conf_label = m.group(1).strip() if m else None
+        try:
+            return json.dumps(self._build_explain_trace(
+                user_message=user_message, path=path, ctx_meta=meta,
+                settings=settings, model=model, confidence_label=conf_label,
+                calc_block=calc_block))
+        except Exception as e:
+            logger.warning(f"explain trace build failed: {e}")
+            return None
+
+    def _explain_response(self, chat_id, parsed):
+        """Build the /explain reply for a chat. Returns the markdown string."""
+        import database as db
+        target = db.ai_get_explainable_message(
+            chat_id, message_id=parsed.get("message_id"))
+        if not target:
+            return self._format_explain_trace(None)
+        try:
+            trace = json.loads(target.get("explain") or "null")
+        except Exception:
+            trace = None
+        return self._format_explain_trace(trace)
+
+    # ------------------------------------------------------------------
     def chat(self, chat_id, user_message):
         """Full pipeline: build context, call Ollama, store messages, return dict."""
         import database as db
@@ -4313,6 +5329,22 @@ class AIManager:
         model = settings.get("model", DEFAULT_SETTINGS["model"])
         keep_alive = f"{settings.get('keep_alive_hours', DEFAULT_SETTINGS['keep_alive_hours'])}h"
         base_system = settings.get("system_prompt", DEFAULT_SETTINGS["system_prompt"])
+
+        # ── /explain cross-check ─────────────────────────────────────────────
+        # Deterministically describe how the *previous* answer was produced, from
+        # the recorded provenance trace. No LLM call — the explanation can't
+        # itself hallucinate. Stored with explain=NULL so it's skipped next time.
+        explain_cmd = _parse_explain_command(user_message)
+        if explain_cmd is not None:
+            answer = self._explain_response(chat_id, explain_cmd)
+            db.ai_add_message(chat_id, "user", user_message)
+            db.ai_add_message(chat_id, "assistant", answer,
+                              tokens=None, duration_ms=0)
+            return {
+                "content": answer, "model": model,
+                "eval_count": None, "eval_duration": None,
+                "duration_ms": 0, "tok_per_sec": None,
+            }
 
         # ── Deterministic ballistic short-circuit ───────────────────────────
         # A ballistic query naming a specific round is answered straight from
@@ -4326,9 +5358,14 @@ class AIManager:
                     "\n\n---\nConfidence: HIGH | "
                     "Source: Ballistic Calculator (verified G1 physics)"
                 )
+                _bx = json.dumps(self._build_explain_trace(
+                    user_message=user_message, path="ballistic", ctx_meta={},
+                    settings=settings, model=model,
+                    confidence_label="HIGH | Source: Ballistic Calculator (verified G1 physics)",
+                    ballistic_answer=ballistic_answer))
                 db.ai_add_message(chat_id, "user", user_message)
                 db.ai_add_message(chat_id, "assistant", ballistic_answer,
-                                  tokens=None, duration_ms=0)
+                                  tokens=None, duration_ms=0, explain=_bx)
                 chat = db.ai_get_chat(chat_id)
                 if chat and chat.get("title") == "New Chat":
                     short_title = user_message[:40].strip()
@@ -4346,9 +5383,11 @@ class AIManager:
 
         # Agent loop: for physics/ballistics queries, run the two-pass calculator agent
         # before the final answer so the model is given pre-verified numbers.
+        explain_calc_block = None
         if self._is_physics_query(user_message):
             calc_block, had_results = self._calc_agent_pass(user_message, settings)
             if had_results:
+                explain_calc_block = calc_block
                 context = (context + "\n\n" + calc_block).strip()
                 # Override instruction: tell model the numbers are already computed
                 context += (
@@ -4433,8 +5472,11 @@ class AIManager:
         if eval_count and eval_duration and eval_duration > 0:
             tok_per_sec = round(eval_count / (eval_duration / 1e9), 1)
 
-        # Save assistant message
-        db.ai_add_message(chat_id, "assistant", content, tokens=tokens, duration_ms=duration_ms)
+        # Save assistant message + its /explain provenance trace
+        explain_json = self._explain_trace_json(
+            user_message, ctx_meta, settings, model, content, explain_calc_block)
+        db.ai_add_message(chat_id, "assistant", content, tokens=tokens,
+                          duration_ms=duration_ms, explain=explain_json)
 
         # Update chat title from first user message if still default
         chat = db.ai_get_chat(chat_id)
@@ -4463,6 +5505,18 @@ class AIManager:
         keep_alive = f"{settings.get('keep_alive_hours', DEFAULT_SETTINGS['keep_alive_hours'])}h"
         base_system = settings.get("system_prompt", DEFAULT_SETTINGS["system_prompt"])
 
+        # ── /explain cross-check (see chat() for rationale) ──────────────────
+        explain_cmd = _parse_explain_command(user_message)
+        if explain_cmd is not None:
+            answer = self._explain_response(chat_id, explain_cmd)
+            db.ai_add_message(chat_id, "user", user_message)
+            yield answer
+            db.ai_add_message(chat_id, "assistant", answer,
+                              tokens=None, duration_ms=0)
+            yield {"done": True, "model": model, "eval_count": None,
+                   "eval_duration": None, "duration_ms": 0, "tok_per_sec": None}
+            return
+
         # ── Deterministic ballistic short-circuit (see chat() for rationale) ──
         # Verified physics is yielded as a single chunk; the chat model is never
         # called, so it cannot mis-state drop/spin-drift/TOF.
@@ -4473,10 +5527,15 @@ class AIManager:
                     "\n\n---\nConfidence: HIGH | "
                     "Source: Ballistic Calculator (verified G1 physics)"
                 )
+                _bx = json.dumps(self._build_explain_trace(
+                    user_message=user_message, path="ballistic", ctx_meta={},
+                    settings=settings, model=model,
+                    confidence_label="HIGH | Source: Ballistic Calculator (verified G1 physics)",
+                    ballistic_answer=ballistic_answer))
                 db.ai_add_message(chat_id, "user", user_message)
                 yield ballistic_answer
                 db.ai_add_message(chat_id, "assistant", ballistic_answer,
-                                  tokens=None, duration_ms=0)
+                                  tokens=None, duration_ms=0, explain=_bx)
                 chat = db.ai_get_chat(chat_id)
                 if chat and chat.get("title") == "New Chat":
                     short_title = user_message[:40].strip()
@@ -4490,9 +5549,11 @@ class AIManager:
         context, ctx_meta = self.build_context(user_message, settings=settings)
 
         # Agent loop: run calculator agent pass before streaming so numbers are pre-verified
+        explain_calc_block = None
         if self._is_physics_query(user_message):
             calc_block, had_results = self._calc_agent_pass(user_message, settings)
             if had_results:
+                explain_calc_block = calc_block
                 context = (context + "\n\n" + calc_block).strip()
                 context += (
                     "\n\n=== INSTRUCTION FOR THIS RESPONSE ===\n"
@@ -4597,7 +5658,10 @@ class AIManager:
         if eval_count and eval_duration and eval_duration > 0:
             tok_per_sec = round(eval_count / (eval_duration / 1e9), 1)
 
-        db.ai_add_message(chat_id, "assistant", full_content, tokens=eval_count, duration_ms=duration_ms)
+        explain_json = self._explain_trace_json(
+            user_message, ctx_meta, settings, model, full_content, explain_calc_block)
+        db.ai_add_message(chat_id, "assistant", full_content, tokens=eval_count,
+                          duration_ms=duration_ms, explain=explain_json)
 
         chat = db.ai_get_chat(chat_id)
         if chat and chat.get("title") == "New Chat":

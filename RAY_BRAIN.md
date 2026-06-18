@@ -156,9 +156,13 @@ Everything below lives in [`ai_manager.py`](ai_manager.py).
 
 ```
 SEED DOCUMENTS (ai_manager.py)
-  ~56 docs across 9 topic clusters:
-  Survival · Radio/Comms · Ballistics · Medical
-  Firearms · Navigation · Wildlife · Atlas App · Ray Self-Doc
+  ~71 docs across 20+ topic clusters:
+  Survival · Radio/Comms · Ballistics · Medical · Firearms
+  Navigation (+ MGRS/UTM) · Wildlife · Grid-Down · Power
+  Nuclear/CBRN · EMP/Solar-Storm · Weather & Disasters
+  Cold/Heat Injury · Field Medications · Sanitation
+  Knots/Cordage · Signaling & Rescue · Hunting/Trapping
+  Survival Psychology · Atlas App · Ray Self-Doc
          │
          ▼
   For each doc with embedding = NULL:
@@ -195,7 +199,7 @@ SEED DOCUMENTS (ai_manager.py)
 
 **GPU embedding:** the 0.6B embedder runs on the GPU (no `num_gpu:0` CPU pin).
 With `OLLAMA_MAX_LOADED_MODELS=2` it stays co-resident with the chat model, so
-embedding is fast (56 docs → ~168 passages in ~65 s) without evicting qwen2.5:3b.
+embedding is fast (71 docs → ~225 passages in ~85 s) without evicting qwen2.5:3b.
 
 **When a doc is edited:** its `embedding` column is set to NULL. The background
 thread re-chunks and re-embeds it on the next cycle. The FTS index updates in the
@@ -347,7 +351,7 @@ flowchart TD
     PP --> ANS([Answer])
 
     subgraph IDX [Indexing — startup background thread · format v3]
-        D[Seed docs ~56] --> CH[_chunk_document_text\nsplit body into\nsection passages]
+        D[Seed docs ~71] --> CH[_chunk_document_text\nsplit body into\nsection passages]
         CH --> E[qwen3-embedding:0.6b on GPU\ntitle + passage\n→ 1024-dim vector per chunk]
         E --> DB[(SQLite ai_documents.embedding\nv3: chunks of h·t·e\nFTS5 BM25 whole-doc index)]
     end
@@ -482,6 +486,34 @@ Every answer ends with `Confidence: HIGH|MEDIUM|LOW | Source: …` computed from
 | LOW | Training knowledge only (no RAG hit, no live data) |
 
 Ray cannot inflate it — the footer is appended by Python after generation.
+
+---
+
+### Stage 9 — Explain / Cross-check (`_build_explain_trace`, `_format_explain_trace`, `_parse_explain_command`)
+
+As each answer is produced, the pipeline records a **provenance trace** (JSON) on the
+assistant message row (`ai_messages.explain`): the path that ran, every retrieved
+knowledge-base passage with its hybrid + raw-cosine scores, the live context injected
+(GPS / mesh / system stats / self-doc), the confidence tier, and the generation settings.
+
+The user types **`/explain`** (or clicks the 🔍 *explain* button under any answer, which
+sends `/explain <message-id>`). `chat()` / `chat_stream()` intercept the command *before*
+any model call, look up the most recent (or specified) answer's stored trace via
+`db.ai_get_explainable_message`, and render it deterministically with
+`_format_explain_trace`. **No language-model call is made**, so the explanation itself
+cannot hallucinate — it is a faithful replay of recorded pipeline facts, letting the user
+verify the answer against the exact source passages it drew on.
+
+| Command | Effect |
+|---------|--------|
+| `/explain` | Explain the most recent answer in this chat |
+| `/explain <id>` | Explain a specific earlier assistant message |
+| 🔍 explain button | Per-answer button; sends `/explain <id>` for that message |
+
+Triggers also accepted: `/why`, `!explain`, `explain this`. The `/explain` output is stored
+with `explain=NULL` so it is skipped when locating the next "last real answer". For a
+deterministic ballistic answer the trace notes the language model was bypassed entirely;
+for a training-only answer it flags the absence of any retrieved source as **unverified**.
 
 ---
 

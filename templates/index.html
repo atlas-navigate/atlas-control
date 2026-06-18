@@ -5294,10 +5294,11 @@ function AIPage() {
     }
   }
 
-  async function sendMessage() {
-    const text = input.trim();
+  async function sendMessage(overrideText) {
+    const isOverride = typeof overrideText === 'string';
+    const text = (isOverride ? overrideText : input).trim();
     if (!text || loading || !activeChatId || String(activeChatId).startsWith('pending-') || !aiReady) return;
-    setInput('');
+    if (!isOverride) setInput('');
     setLoading(true);
     const tempUserId = Date.now();
     const tempAssistantId = Date.now() + 1;
@@ -5595,9 +5596,24 @@ function AIPage() {
                             <MarkdownMessage text={msgBody} />{m.streaming && <span style={{ display: 'inline-block', width: 2, height: '1em', background: 'var(--accent-green)', marginLeft: 2, verticalAlign: 'text-bottom', animation: 'blink 1s step-end infinite' }} />}
                           </div>
                           {confLabel && (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 5, paddingLeft: 4 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 4 }}>
                               <span style={{ width: 6, height: 6, borderRadius: '50%', background: confColor, flexShrink: 0 }} />
                               <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{confLabel}</span>
+                              {!m.streaming && (
+                                <button
+                                  onClick={() => sendMessage((typeof m.id === 'number' && m.id < 1e12) ? `/explain ${m.id}` : '/explain')}
+                                  disabled={!aiReady || loading}
+                                  title="Show exactly how and why Ray produced this answer — a deterministic cross-check against hallucination"
+                                  style={{
+                                    background: 'none', border: '1px solid var(--border)', borderRadius: 4,
+                                    color: 'var(--text-muted)', fontSize: 10, fontFamily: 'monospace',
+                                    padding: '1px 7px', cursor: (!aiReady || loading) ? 'default' : 'pointer',
+                                    opacity: (!aiReady || loading) ? 0.5 : 1,
+                                  }}
+                                  onMouseEnter={e => { if (aiReady && !loading) { e.target.style.borderColor = 'var(--accent-green)'; e.target.style.color = 'var(--accent-green)'; } }}
+                                  onMouseLeave={e => { e.target.style.borderColor = 'var(--border)'; e.target.style.color = 'var(--text-muted)'; }}
+                                >🔍 explain</button>
+                              )}
                             </div>
                           )}
                           {!!(m.tokens || m.duration_ms) && (
@@ -5642,7 +5658,7 @@ function AIPage() {
                         ? 'Ollama not connected'
                         : !aiReady
                           ? 'Ray is starting up…'
-                          : 'Send a message…'
+                          : 'Send a message…  (type /explain to cross-check my last answer)'
                     }
                     disabled={!aiReady || loading}
                     style={{

@@ -5835,10 +5835,11 @@ function AIPage() {
       setDeletingChatId(null);
     }
   }
-  async function sendMessage() {
-    const text = input.trim();
+  async function sendMessage(overrideText) {
+    const isOverride = typeof overrideText === 'string';
+    const text = (isOverride ? overrideText : input).trim();
     if (!text || loading || !activeChatId || String(activeChatId).startsWith('pending-') || !aiReady) return;
-    setInput('');
+    if (!isOverride) setInput('');
     setLoading(true);
     const tempUserId = Date.now();
     const tempAssistantId = Date.now() + 1;
@@ -6333,7 +6334,7 @@ function AIPage() {
       style: {
         display: 'flex',
         alignItems: 'center',
-        gap: 5,
+        gap: 8,
         paddingLeft: 4
       }
     }, /*#__PURE__*/React.createElement("span", {
@@ -6350,7 +6351,32 @@ function AIPage() {
         color: 'var(--text-muted)',
         fontFamily: 'monospace'
       }
-    }, confLabel)), !!(m.tokens || m.duration_ms) && /*#__PURE__*/React.createElement("div", {
+    }, confLabel), !m.streaming && /*#__PURE__*/React.createElement("button", {
+      onClick: () => sendMessage(typeof m.id === 'number' && m.id < 1e12 ? `/explain ${m.id}` : '/explain'),
+      disabled: !aiReady || loading,
+      title: "Show exactly how and why Ray produced this answer \u2014 a deterministic cross-check against hallucination",
+      style: {
+        background: 'none',
+        border: '1px solid var(--border)',
+        borderRadius: 4,
+        color: 'var(--text-muted)',
+        fontSize: 10,
+        fontFamily: 'monospace',
+        padding: '1px 7px',
+        cursor: !aiReady || loading ? 'default' : 'pointer',
+        opacity: !aiReady || loading ? 0.5 : 1
+      },
+      onMouseEnter: e => {
+        if (aiReady && !loading) {
+          e.target.style.borderColor = 'var(--accent-green)';
+          e.target.style.color = 'var(--accent-green)';
+        }
+      },
+      onMouseLeave: e => {
+        e.target.style.borderColor = 'var(--border)';
+        e.target.style.color = 'var(--text-muted)';
+      }
+    }, "\uD83D\uDD0D explain")), !!(m.tokens || m.duration_ms) && /*#__PURE__*/React.createElement("div", {
       className: "mono",
       style: {
         fontSize: 10,
@@ -6398,7 +6424,7 @@ function AIPage() {
     value: input,
     onChange: e => setInput(e.target.value),
     onKeyDown: e => e.key === 'Enter' && !e.shiftKey && sendMessage(),
-    placeholder: !(status !== null && status !== void 0 && status.running) ? 'Ollama not connected' : !aiReady ? 'Ray is starting up…' : 'Send a message…',
+    placeholder: !(status !== null && status !== void 0 && status.running) ? 'Ollama not connected' : !aiReady ? 'Ray is starting up…' : 'Send a message…  (type /explain to cross-check my last answer)',
     disabled: !aiReady || loading,
     style: {
       flex: 1,
