@@ -2649,6 +2649,154 @@ SURVIVAL_DOCS = [
             "(eclampsia). RELATED: see the wilderness first-aid, hemorrhage-control, and Field Antibiotics docs."
         ),
     },
+
+    # ── SURVIVAL FUNDAMENTALS (focused gap-fill docs) ────────────────────────
+    {
+        "title": "Human Water & Hydration Requirements and the Dehydration Timeline",
+        "tags": "water,hydration,dehydration,drinking water,daily water,how much water,thirst,fluid,"
+                "electrolytes,hyponatremia,urine color,water ration,rule of three,heat,survival",
+        "content": (
+            "TWO DIFFERENT NUMBERS — do not confuse them (this is the #1 mix-up):\n"
+            "• DRINKING need (to stay healthy): an adult at rest in a temperate climate needs about "
+            "2-3 LITERS of water per day from fluids (food supplies some of the rest). Bare short-term "
+            "survival is possible on ~1 L/day, but with steadily declining strength and judgment.\n"
+            "• PLANNING / STORAGE figure: about 1 GALLON (3.8 L) per person per day — this is the "
+            "FEMA/Red Cross number and it includes drinking PLUS cooking and basic hygiene, not pure "
+            "drinking. Store a minimum of 3 days, ideally 2+ weeks. So '1 gallon to stay alive' overstates "
+            "the drinking minimum — the gallon is a household planning ration.\n\n"
+            "HEAT & EXERTION SCALING (you cannot train your body to need less):\n"
+            "Hard work in heat can demand 4-6+ liters/day; a person sweating heavily can lose up to ~1-1.5 "
+            "L PER HOUR. That water must be replaced — there is no adaptation that removes the need.\n\n"
+            "DEHYDRATION TIMELINE (the '3 days without water' rule of thumb):\n"
+            "A person survives roughly 3 days without water — far less in heat or with exertion, somewhat "
+            "more at rest in cool shade. Mental and physical performance degrade long before collapse.\n\n"
+            "SIGNS OF DEHYDRATION — catch it early (best field gauge is URINE color & output):\n"
+            "• Mild (~1-2% body weight lost): thirst, dark-yellow urine, dry mouth, headache, less urine.\n"
+            "• Moderate (~3-5%): little/no urine, dizziness, fast pulse, irritability, lethargy, sunken eyes.\n"
+            "• Severe (>6%): confusion, no urine, no tears, weak racing pulse, fainting — life-threatening.\n"
+            "Pale-straw urine = hydrated; dark amber = drink now.\n\n"
+            "ELECTROLYTES & OVER-DRINKING: with heavy sweating, water ALONE is not enough — replace salt "
+            "or you risk HYPONATREMIA (drinking large volumes of plain water dilutes blood sodium → nausea, "
+            "confusion, seizures). Add ~1/4-1/2 tsp salt per liter, or use oral rehydration salts, when "
+            "sweating hard or treating diarrhea.\n\n"
+            "THE RATIONING MISTAKE: do NOT 'save' water by sipping tiny amounts while you have it. Drink to "
+            "thirst and stay functional; RATION YOUR SWEAT instead — work in the cool hours, rest in shade, "
+            "cover skin, slow down. Water does more good inside you than in the bottle.\n\n"
+            "NEVER drink seawater (2x dehydration rate), urine, or alcohol — all accelerate dehydration. "
+            "RELATED: see the water-purification, Emergency Water Procurement, Cold & Heat Injuries, and "
+            "Survival Priorities (Rule of 3s) docs."
+        ),
+    },
+    {
+        "title": "Caloric Needs, Food Rationing & the Starvation Timeline",
+        "tags": "food,calorie,calories,nutrition,ration,rationing,starvation,fasting,macronutrient,"
+                "protein,fat,carbohydrate,refeeding,rabbit starvation,survival,how long without food",
+        "content": (
+            "DAILY CALORIE NEEDS:\n"
+            "• Sedentary adult: ~1,800-2,400 kcal/day (lower for small/older, higher for large/male).\n"
+            "• Survival labor (chopping wood, rucking, building): 3,000-4,500+ kcal/day. COLD weather alone "
+            "can raise needs 25-50% as the body burns fuel to stay warm.\n"
+            "• Survival ration floor: ~1,200 kcal/day keeps you functional short-term; below that you lose "
+            "weight, strength, and warmth steadily.\n\n"
+            "MACRONUTRIENTS (you need all three — not just meat):\n"
+            "• Carbohydrate (4 kcal/g): quick, easy energy. • Protein (4 kcal/g): tissue repair, ~0.8-1 g "
+            "per kg body weight, more under stress. • Fat (9 kcal/g): most calorie-dense, critical for cold "
+            "and long-term energy.\n"
+            "WARNING — 'RABBIT STARVATION' (protein poisoning): living on very lean meat (rabbit, squirrel) "
+            "with no fat or carbs causes nausea, diarrhea, weakness, and can kill even while you 'eat.' You "
+            "MUST get fat and/or carbohydrate, not protein alone.\n\n"
+            "STARVATION TIMELINE (the '3 weeks without food' rule — highly variable, weeks to ~2 months "
+            "depending on body fat, hydration, cold, and exertion):\n"
+            "• Hours 0-72: body burns stored glucose/glycogen then shifts to fat (ketosis); hunger pangs "
+            "peak around days 1-3, then fade noticeably.\n"
+            "• Week 1-3: running on body fat; energy, strength, warmth, and healing all decline, but you "
+            "stay functional IF hydrated.\n"
+            "• 3+ weeks: fat runs low, the body consumes muscle and organ tissue, the immune system fails; "
+            "death follows once reserves are exhausted.\n"
+            "KEY POINT: WATER outranks food. Dehydration kills in days; you have weeks on food. Never burn "
+            "more calories hunting/foraging than the catch returns.\n\n"
+            "RATIONING STRATEGY: inventory everything on day one; cut to ~75% of normal intake IMMEDIATELY "
+            "(don't wait until stores run low); eat perishables first; favor calorie-dense, shelf-stable "
+            "foods; keep a little 'morale food' (sugar, coffee) for the psychological lift.\n\n"
+            "REFEEDING WARNING: after prolonged starvation, reintroduce food SLOWLY over days — a sudden "
+            "large meal can trigger fatal 'refeeding syndrome' (an electrolyte/fluid collapse). Start with "
+            "small, frequent portions. RELATED: see the Survival Gardening, Food Preservation, foraging, "
+            "Trapping/Fishing, and Water & Hydration docs."
+        ),
+    },
+    {
+        "title": "Survival Priorities and the Rule of 3s",
+        "tags": "survival priorities,rule of three,rule of 3s,rule of threes,how long can you survive,"
+                "triage,exposure,survival fundamentals,first 24 hours,priorities,grid-down,STOP,survival",
+        "content": (
+            "THE RULE OF 3s — the master triage for ANY survival situation. The exact times are "
+            "approximate, but the ORDER is the point: fix what kills you soonest, first.\n"
+            "• ~3 MINUTES without AIR — or with an uncontrolled airway / severe bleeding.\n"
+            "• ~3 HOURS without SHELTER in harsh weather — exposure (hypothermia or heat) kills faster than "
+            "thirst and is the #1 wilderness killer.\n"
+            "• ~3 DAYS without WATER.\n"
+            "• ~3 WEEKS without FOOD.\n\n"
+            "FIRST MINUTES — S.T.O.P. (do not panic-run): STOP, THINK, OBSERVE, PLAN. Most fatal mistakes "
+            "happen in the first panicked minutes. Treat immediate life threats, then assess calmly.\n\n"
+            "PRIORITY SEQUENCE IN PRACTICE:\n"
+            "1. LIFE THREATS / SAFETY: stop major bleeding, open the airway, get clear of immediate danger "
+            "(fire, water, traffic, falling hazards).\n"
+            "2. SHELTER / THERMAL REGULATION: get out of wind, wet, and cold — or out of sun and heat; "
+            "INSULATE FROM THE GROUND. Protecting core temperature usually outranks water.\n"
+            "3. WATER: locate, procure, and treat water within the first day.\n"
+            "4. FIRE / SIGNAL: warmth, water treatment, morale, cooking, and rescue signaling.\n"
+            "5. FOOD: last priority — you have weeks; don't spend scarce early energy chasing calories.\n"
+            "6. NAVIGATION / RESCUE: if lost, STAY PUT (you're easier to find) and signal; otherwise "
+            "self-rescue deliberately, not in a panic.\n\n"
+            "CAVEATS: the numbers shift hard with conditions — immersion in cold water cuts the '3 hours' to "
+            "minutes; intense heat/exertion cuts the '3 days' of water to one. Treat the Rule of 3s as an "
+            "ORDER OF OPERATIONS, not a guarantee.\n\n"
+            "COMMON MISTAKE: people obsess over food and weapons and neglect SHELTER and WATER — the things "
+            "that actually kill first. Build your skills and kit around the TOP of this list. RELATED: see "
+            "the Water & Hydration, Caloric Needs, Emergency Shelter, Cold & Heat Injuries, Survival "
+            "Psychology, and Signaling & Rescue docs."
+        ),
+    },
+    {
+        "title": "Bug-Out Bag, Get-Home Bag & Everyday Carry (EDC) Kit Contents",
+        "tags": "bug-out bag,bug out bag,go bag,get-home bag,get home bag,edc,everyday carry,survival kit,"
+                "72-hour kit,72 hour kit,preparedness,gear,packing list,go-bag,grid-down,survival",
+        "content": (
+            "BUILD EVERY KIT AROUND THE RULE OF 3s — shelter, water, fire, and first aid come before food "
+            "and gadgets. Gear without the skill to use it is dead weight.\n\n"
+            "THREE KIT TIERS:\n"
+            "• EDC (Everyday Carry) — on your person daily: folding knife/multitool, lighter or ferro rod, "
+            "small flashlight, phone + battery bank, cash, ID, pen, mini first-aid + a tourniquet if "
+            "trained, water bottle, a few feet of cordage, whistle.\n"
+            "• GET-HOME BAG — in your vehicle or at work, sized to WALK home (1-2 days): sturdy shoes/socks, "
+            "water + filter, calorie-dense snacks, weather/rain layer, headlamp, compact first aid, paper "
+            "map, multitool, fire, dust mask, gloves, a charged handheld radio.\n"
+            "• BUG-OUT BAG (BOB) — a 72-hour pack to leave home fast, carrying the full load below.\n\n"
+            "BUG-OUT BAG CONTENTS (prioritized by the Rule of 3s):\n"
+            "• SHELTER/WARMTH: tarp or bivy, emergency space blanket, dry insulating layers, hat + gloves, "
+            "rain shell, sleeping/ground pad.\n"
+            "• WATER: 2-3 L carry capacity + a filter (Sawyer/LifeStraw) + chemical tablets (redundancy).\n"
+            "• FIRE: two lighters + a ferro rod + dry tinder.\n"
+            "• FIRST AID / MEDS: an IFAK (tourniquet, hemostatic gauze, pressure bandage) + a minor-injury "
+            "kit + personal prescriptions + OTCs (pain, antihistamine, anti-diarrheal).\n"
+            "• FOOD: 72 hours of calorie-dense, no-cook food (bars, jerky, nut butter); a metal cup/stove "
+            "if weight allows.\n"
+            "• LIGHT / COMMS / NAV: headlamp + spare batteries, handheld radio, whistle + signal mirror, "
+            "map + compass, charged power bank.\n"
+            "• TOOLS: a fixed-blade knife, multitool, paracord, duct tape, work gloves.\n"
+            "• DOCS / CASH: copies of ID and key documents, cash in small bills, a contact list.\n"
+            "• HYGIENE: hand sanitizer, wipes, a trowel, toilet paper, any personal items.\n\n"
+            "PACKING PRINCIPLES:\n"
+            "• Keep it LIGHT — aim for no more than ~20-25% of your body weight; you must be able to move "
+            "and walk far with it.\n"
+            "• 'Two is one, one is none' — carry redundancy on the things that kill you fastest (fire, water).\n"
+            "• Tailor to your climate, season, route, and skill level; a desert kit and a winter kit differ.\n"
+            "• Rotate consumables (water, food, meds, batteries) every few months so nothing is expired.\n"
+            "• A get-home bag you actually carry beats a giant bug-out bag that stays in the closet. "
+            "RELATED: see the Emergency Shelter, Water & Hydration, Signaling & Rescue, Field Trauma (IFAK), "
+            "and Survival Priorities docs."
+        ),
+    },
 ]
 
 
@@ -3641,9 +3789,11 @@ class AIManager:
                        "solar still", "transpiration", "condensation", "collect water",
                        "find water", "procure water"],
         "fire":       ["fire", "tinder", "ignit", "spark", "flame", "campfire"],
-        "shelter":    ["shelter", "bivouac", "tarp", "insul", "sleep", "tent"],
+        "shelter":    ["shelter", "bivouac", "tarp", "insul", "sleep", " tent"],
         "food":       ["food", "forag", "edible", "plant", "mushroom", "calor",
-                       "garden", "crop", "livestock", "harvest", "berr"],
+                       "garden", "crop", "livestock", "harvest", "berr",
+                       "starvation", "starving", "fasting", "rationing",
+                       "macronutrient", "how long without food", "nutrition"],
         "medical":    ["medic", "first aid", "wound", "bleed", "hemorrh", "tourni",
                        "cpr", "shock", "airway", "infect", "fractur", "burn",
                        "hypotherm", "trauma", "bite", "sting", "inject",
@@ -3663,7 +3813,12 @@ class AIManager:
         "firearms":   ["firearm", "rifle", "pistol", "handgun", "malfunction",
                        "caliber", "ammunition", "trigger", "clean"],
         "grid_down":  ["grid-down", "grid down", "collapse", "shtf", "barter",
-                       "trade goods", "sustain", "long-term survival", "community defense"],
+                       "trade goods", "sustain", "long-term survival", "community defense",
+                       "bug-out", "bug out", "go bag", "go-bag", "get-home", "get home bag",
+                       "edc", "everyday carry", "every day carry", "survival kit",
+                       "72-hour", "72 hour", "rule of three", "rule of 3", "rule of threes",
+                       "survival priorit", "how long can a human survive", "packing list",
+                       "what to pack", "what should i pack"],
         "vehicles":   ["vehicle", "fuel", "oil change", "tire", "off-road", "recover",
                        "engine", "mainten"],
         "wildlife":   ["wildlife", "animal", "snake", "bear", "mountain lion", "wolf",
@@ -3724,7 +3879,9 @@ class AIManager:
         "security":   ["security", "opsec"],
         "ballistics": ["ballistic", "moa", "mil", "drop", "wind"],
         "firearms":   ["firearm", "rifle", "pistol", "caliber", "malfunction"],
-        "grid_down":  ["grid", "collapse", "barter", "sustain"],
+        "grid_down":  ["grid", "collapse", "barter", "sustain", "bug-out", "go bag",
+                       "get-home", "edc", "everyday carry", "survival kit",
+                       "preparedness", "rule of three", "priorities"],
         "vehicles":   ["vehicle", "fuel", "maintenance"],
         "wildlife":   ["wildlife", "snake", "bear", "spider", "venomous",
                        "rabies", "alligator"],

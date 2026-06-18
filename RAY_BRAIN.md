@@ -156,7 +156,7 @@ Everything below lives in [`ai_manager.py`](ai_manager.py).
 
 ```
 SEED DOCUMENTS (ai_manager.py)
-  ~71 docs across 20+ topic clusters:
+  ~75 docs across 20+ topic clusters:
   Survival · Radio/Comms · Ballistics · Medical · Firearms
   Navigation (+ MGRS/UTM) · Wildlife · Grid-Down · Power
   Nuclear/CBRN · EMP/Solar-Storm · Weather & Disasters
@@ -199,7 +199,7 @@ SEED DOCUMENTS (ai_manager.py)
 
 **GPU embedding:** the 0.6B embedder runs on the GPU (no `num_gpu:0` CPU pin).
 With `OLLAMA_MAX_LOADED_MODELS=2` it stays co-resident with the chat model, so
-embedding is fast (71 docs → ~225 passages in ~85 s) without evicting qwen2.5:3b.
+embedding is fast (75 docs → ~240 passages in ~90 s) without evicting qwen2.5:3b.
 
 **When a doc is edited:** its `embedding` column is set to NULL. The background
 thread re-chunks and re-embeds it on the next cycle. The FTS index updates in the
@@ -351,7 +351,7 @@ flowchart TD
     PP --> ANS([Answer])
 
     subgraph IDX [Indexing — startup background thread · format v3]
-        D[Seed docs ~71] --> CH[_chunk_document_text\nsplit body into\nsection passages]
+        D[Seed docs ~75] --> CH[_chunk_document_text\nsplit body into\nsection passages]
         CH --> E[qwen3-embedding:0.6b on GPU\ntitle + passage\n→ 1024-dim vector per chunk]
         E --> DB[(SQLite ai_documents.embedding\nv3: chunks of h·t·e\nFTS5 BM25 whole-doc index)]
     end
