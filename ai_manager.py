@@ -680,7 +680,51 @@ SURVIVAL_DOCS = [
             "• Running > standing water. Avoid near dead animals.\n\n"
             "Improvised filter (pre-treatment only — always boil/treat after):\n"
             "Layer in container: gravel → sand → crushed wood charcoal.\n\n"
-            "NEVER drink seawater (2× dehydration rate) or urine."
+            "NEVER drink seawater (2× dehydration rate) or urine.\n\n"
+            "SCOPE: these methods kill GERMS (bacteria/viruses/protozoa) only. They do NOT remove "
+            "radioactive fallout, chemicals, heavy metals, or salt — and BOILING actually concentrates "
+            "them. For water after a nuclear, chemical, or flood event, see the Contaminated Water doc."
+        ),
+    },
+    {
+        "title": "Contaminated Water: Radiological, Chemical & Floodwater — What Treatment Removes",
+        "tags": "contaminated water,radioactive water,radiological water,fallout water,chemical "
+                "contamination,floodwater,flood water,heavy metals,salt,is the water safe,"
+                "purify radioactive water,decontaminate water,distillation,reverse osmosis,activated "
+                "carbon,water,nuclear,fallout,cbrn,survival,grid-down",
+        "content": (
+            "RULE: killing germs is NOT the same as removing contamination. Boiling, bleach, iodine, "
+            "SODIS, and squeeze filters (Sawyer/LifeStraw) kill PATHOGENS but do NOT remove dissolved "
+            "radioactive material, chemicals, heavy metals, or salt. BOILING makes radioactive/chemical "
+            "water WORSE — the water leaves as steam and the contaminant stays behind, concentrated. "
+            "Never assume 'boiled = safe' after a nuclear, chemical, or industrial event.\n\n"
+            "RADIOACTIVE (FALLOUT) WATER:\n"
+            "• Best water is what was COVERED/SEALED before fallout fell — capped bottles, closed tanks, "
+            "the water heater, water already inside house pipes, a well with an intact cap.\n"
+            "• Fallout is mostly PARTICLES. Let cloudy water SETTLE, pour off the clear top, then run it "
+            "through a tight filter or a packed sand-and-clay/charcoal column to catch the particles — "
+            "this removes most fallout radioactivity. Dissolved radioiodine/cesium are harder.\n"
+            "• Reverse osmosis and DISTILLATION remove most dissolved radionuclides; ion-exchange and "
+            "activated carbon help with some. When unsure, drink stored/covered water and ration.\n\n"
+            "CHEMICAL / INDUSTRIAL / FLOODWATER:\n"
+            "• Assume floodwater carries BOTH sewage and fuel/pesticide/industrial chemicals.\n"
+            "• ACTIVATED CARBON removes many organic chemicals (fuel, solvents, pesticides) and odor — "
+            "but NOT salt, metals, or most radionuclides.\n"
+            "• DISTILLATION (boil, condense the steam on a clean cool surface, collect the drips) removes "
+            "salt, heavy metals, and most non-volatile chemicals and radionuclides — but NOT volatile "
+            "solvents/fuels that boil and travel WITH the steam. If it smells of fuel/solvent, that "
+            "source is unsafe even to distill — find another.\n\n"
+            "WHAT REMOVES WHAT (quick reference):\n"
+            "• Boil / bleach / iodine / SODIS → germs ONLY.\n"
+            "• Settle + decant → particles (helps fallout).\n"
+            "• Squeeze/hollow-fiber filter → germs + particles, NOT dissolved chem/salt/radionuclides.\n"
+            "• Activated carbon → many organic chemicals + taste, NOT salt/metals/most radionuclides.\n"
+            "• Reverse osmosis → nearly everything, including salt, metals, many radionuclides.\n"
+            "• Distillation → salt, metals, non-volatile chemicals + radionuclides (NOT volatile fuels).\n\n"
+            "ORDER OF OPERATIONS: remove particles first (settle + filter), then distill or RO if you "
+            "have it, and disinfect for germs LAST. RELATED: Water Purification in the Field (germs); "
+            "Nuclear & Radiological Survival (fallout/dose); Radiological Protection (CBRN/decon); "
+            "Severe Weather & Natural Disasters (floodwater); Emergency Water Procurement."
         ),
     },
     {
@@ -703,7 +747,46 @@ SURVIVAL_DOCS = [
             "WET CONDITIONS: dead wood under thick bark stays dry. Split wet wood to access dry interior.\n"
             "Birch bark burns even wet (contains oils).\n\n"
             "SIGNALING: 3 fires in triangle = international distress. "
-            "Green vegetation = white smoke (day). Rubber/plastic = black smoke."
+            "Green vegetation = white smoke (day). Rubber/plastic = black smoke.\n\n"
+            "SAFETY: never burn a fire, stove, or heater inside a tent, snow shelter, vehicle, or "
+            "sealed room — combustion makes carbon monoxide, which kills. See the Carbon Monoxide doc."
+        ),
+    },
+    {
+        "title": "Carbon Monoxide: The Silent Killer in Shelters, Tents, Vehicles & After Storms",
+        "tags": "carbon monoxide,co,co poisoning,silent killer,generator,generator indoors,stove,"
+                "heater,propane heater,kerosene,charcoal,grill,exhaust,fumes,ventilation,vent,"
+                "snow cave,quinzhee,tent,enclosed space,fire indoors,garage,headache,survival,grid-down",
+        "content": (
+            "RULE: anything that burns fuel — flame OR engine — makes CARBON MONOXIDE (CO), an "
+            "invisible, ODORLESS gas that kills with no warning. After winter storms and disasters, CO "
+            "kills more people than the cold or the event itself. Never run an engine or burn fuel in an "
+            "enclosed space without strong through-ventilation.\n\n"
+            "SOURCES THAT KILL INDOORS / IN SHELTERS:\n"
+            "Gasoline/propane GENERATORS, camp STOVES and backpacking burners, CHARCOAL and grills, "
+            "propane/kerosene HEATERS, vehicle engines, and open FIRES — used inside tents, snow caves/"
+            "quinzhees, sealed rooms, basements, garages, or vehicles. CHARCOAL indoors is especially "
+            "lethal. A running car in a closed (or snow-blocked) garage is fatal within minutes.\n\n"
+            "WHY YOUR OWN SHELTER IS THE TRAP: a good weather shelter is sealed to hold heat — which is "
+            "exactly what traps CO. This is the real reason a quinzhee/snow cave MUST keep a vent hole, "
+            "and why even a fallout shelter must ventilate. Heat safely with body heat, warm water "
+            "bottles, and insulation — NOT with combustion inside the space.\n\n"
+            "SAFE PRACTICE:\n"
+            "• Generators: run OUTSIDE only, ≥20 ft from any door/window/vent, exhaust pointed away.\n"
+            "• Cooking/heating with a flame: outdoors, or only with a wide cross-draft (two openings).\n"
+            "• Snow shelter: keep a vent open to the outside and clear it often so it can't ice over.\n"
+            "• Never sleep with a fuel-burning stove or heater running in a tent or vehicle.\n"
+            "• Put a battery CO ALARM in any shelter, RV, cabin, vehicle, or home — cheap, lifesaving.\n\n"
+            "SYMPTOMS (mistaken for flu, altitude, or fatigue — but there is NO fever): headache, "
+            "dizziness, nausea, weakness, confusion, blurred vision; then drowsiness, collapse, death. "
+            "RED FLAG: several people or pets in the same space getting sick at once. Judgment fails "
+            "early, so victims often don't realize what's happening.\n\n"
+            "RESPONSE: get the person into FRESH AIR immediately and turn off the source; open "
+            "everything. If unresponsive or not breathing, start rescue breathing/CPR and evacuate to "
+            "medical care — CO binds blood ~200x tighter than oxygen and takes hours to clear "
+            "(high-flow oxygen speeds recovery). RELATED: Emergency Shelter Construction (vent it), "
+            "Expedient Fallout Shelter (ventilate, don't seal), Fire Starting Techniques, Off-Grid "
+            "Power and Battery Management (generators), Cold & Heat Injuries (safe rewarming)."
         ),
     },
 
@@ -727,7 +810,13 @@ SURVIVAL_DOCS = [
             "Add back wall + side wings. Position facing a reflector fire.\n\n"
             "QUINZHEE (winter, snow):\n"
             "Pile snow 8 ft high. Let sinter 2 hrs. Insert sticks as thickness gauges (8 in). Hollow out. Vent hole required.\n\n"
-            "PRIORITY ORDER: 1. Ground insulation  2. Windbreak  3. Rain protection  4. Heat retention"
+            "PRIORITY ORDER: 1. Ground insulation  2. Windbreak  3. Rain protection  4. Heat retention\n\n"
+            "SCOPE — WEATHER/EXPOSURE ONLY: these shelters (debris hut, lean-to, quinzhee, tarp) "
+            "protect from cold, wind, and rain. They provide ZERO radiation shielding — there is no "
+            "mass to stop gamma. For nuclear fallout you need an earth/mass shelter: see the "
+            "Expedient Fallout Shelter and Nuclear & Radiological Survival docs. For tornado/hurricane "
+            "see Severe Weather; for chemical/biological threats see the Radiological Protection (CBRN) "
+            "doc. To pick the right shelter for a given threat, see Choosing the Right Shelter for the Threat."
         ),
     },
 
@@ -2027,9 +2116,102 @@ SURVIVAL_DOCS = [
             "for urgent needs once a meter (or the 7-10 rule estimate) shows the rate has fallen.\n"
             "4. Food in cans/sealed packaging is safe — fallout is external dust; wipe the container, "
             "wash hands. Covered/stored water is safe; running tap water is generally usable.\n"
-            "RELATED: see the Radiological Protection (KI/decontamination/CBRN) doc for potassium iodide, "
-            "decontamination, and protective gear; and the EMP & Solar Storm doc for electronics survival "
-            "after a nuclear or solar event."
+            "RELATED: to BUILD radiation protection from scratch when no basement or hardened "
+            "building is available, see the Expedient Fallout Shelter doc. See the Radiological "
+            "Protection (KI/decontamination/CBRN) doc for potassium iodide, decontamination, and "
+            "protective gear; and the EMP & Solar Storm doc for electronics survival after a nuclear "
+            "or solar event."
+        ),
+    },
+    {
+        "title": "Expedient Fallout Shelter: Building Radiation Protection from Earth & Mass",
+        "tags": "fallout shelter,radiation shelter,nuclear shelter,blast shelter,expedient shelter,"
+                "earth shelter,trench shelter,build a fallout shelter,build a radiation shelter,"
+                "how to build a shelter from radiation,shielding,halving thickness,protection factor,"
+                "sandbags,packed earth,below grade,nuclear,fallout,radiation,cbrn,survival,grid-down",
+        "content": (
+            "RULE: radiation shielding is MASS and DISTANCE — nothing else. Gamma rays are stopped "
+            "ONLY by putting dense material between you and the fallout. A lean-to, tent, tarp, "
+            "plastic sheeting, branches, or duct tape stop fallout DUST but do NOT reduce gamma dose "
+            "at all. Do not confuse a weather shelter with a fallout shelter — they are built on "
+            "opposite principles (insulation vs. mass). The goal here is a high PROTECTION FACTOR "
+            "(PF 40+): see the Nuclear & Radiological Survival doc for dose, the 7-10 rule, and PF.\n\n"
+            "HOW MUCH MASS — HALVING THICKNESS (each layer halves the gamma dose):\n"
+            "Packed earth ~3.3 in · Concrete ~2.4 in · Steel ~0.7 in · Water ~4.8 in · Wood ~11 in. "
+            "Stacking ~10 halvings cuts dose ~1000x. Practical target: about 24-36 in (2-3 ft) of "
+            "packed earth — or its equivalent — on EVERY side AND overhead.\n\n"
+            "BEST OPTION — GO BELOW GRADE (earth is free mass):\n"
+            "DOOR-COVERED TRENCH (Kearny expedient, highest PF you can dig by hand):\n"
+            "1. Dig a trench as deep as you can — at least chest-to-head deep (3.5-4+ ft), just wide "
+            "enough to sit/lie in. The earth walls already shield you from ground-level fallout.\n"
+            "2. Roof it with interior doors, poles, or planks laid across the trench.\n"
+            "3. Pile 18-30 in of packed earth on top of the roof. Mound earth around the edges too.\n"
+            "4. Leave a small crawl entrance — see ENTRANCE below.\n\n"
+            "IF YOU CANNOT DIG (rock, frozen ground, high water table) — BUILD UP WITH FILLED MASS:\n"
+            "Make walls and a roof of anything you can fill with earth, sand, or water: sandbags, "
+            "earth-filled boxes/totes/drawers/trash cans, stacked full water containers, dense "
+            "firewood, packed books. Build a SMALL box around yourself — ~2 ft of packed earth "
+            "equivalent on all four sides and on the roof. Small footprint = less mass needed.\n\n"
+            "INSIDE AN EXISTING HOUSE (fastest, often best):\n"
+            "Pick the basement corner with the most earth around it. Pile mass OVERHEAD on the floor "
+            "above (sandbags, full water containers, earth-filled furniture) and against the walls; "
+            "block any basement windows with sandbags or earth from outside. A basement core can reach "
+            "PF 20-100 with added mass.\n\n"
+            "GEOMETRY THAT MULTIPLIES YOUR MASS:\n"
+            "• Keep the space SMALL and the ceiling LOW — less surface to shield, less mass to move.\n"
+            "• ENTRANCE: gamma travels in straight lines and also scatters ('skyshine'). Use an "
+            "L-shaped / right-angle crawl entrance or a baffle so no fallout-covered sky or ground "
+            "has a straight line into where you sit. A 90° turn blocks most scattered radiation.\n\n"
+            "VENTILATION — DO NOT SEAL AIRTIGHT:\n"
+            "Fallout is DUST, not gas, so you need airflow to breathe. Leave a vent and an air "
+            "intake; pump air with a hinged flap (Kearny Air Pump / KAP) if it is stuffy. Cover the "
+            "intake with cloth to filter grit. (This is the OPPOSITE of chemical/biological sheltering, "
+            "where you DO seal airtight and filter the air — see the CBRN doc.)\n\n"
+            "WHAT DOES NOT WORK (do not rely on these for radiation): open lean-to, tent, tarp, "
+            "single layer of plywood or branches, plastic sheeting, duct-taped gaps. They keep dust "
+            "off but provide essentially ZERO gamma shielding. Mass is the only thing that counts.\n"
+            "OCCUPY: hardest for the first 48 hours; plan for up to ~2 weeks. RELATED: Nuclear & "
+            "Radiological Survival (dose, 7-10 rule, PF); Choosing the Right Shelter for the Threat; "
+            "Radiological Protection (KI/decon/CBRN); Emergency Shelter Construction (weather shelters "
+            "only — NOT radiation)."
+        ),
+    },
+    {
+        "title": "Choosing the Right Shelter for the Threat: Weather vs. Fallout vs. Storm vs. CBRN",
+        "tags": "shelter selection,which shelter,what kind of shelter,shelter for radiation,"
+                "shelter for tornado,shelter for fallout,shelter decision,threat shelter,"
+                "weather shelter vs fallout shelter,disambiguation,shelter type,survival,grid-down",
+        "content": (
+            "RULE: the kind of shelter you build depends entirely on the THREAT. The principles are "
+            "different — sometimes OPPOSITE — so do not blend them. Pick the threat, then build the "
+            "matching shelter. This is the map that connects the shelter, nuclear, weather, and CBRN "
+            "docs.\n\n"
+            "COLD / WIND / RAIN / EXPOSURE  → WEATHER SHELTER (insulation):\n"
+            "Debris hut, lean-to, or quinzhee. The job is to trap body heat and block wind/rain. "
+            "Mass does not matter; INSULATION and ground insulation do. → Emergency Shelter "
+            "Construction doc. NOTE: provides ZERO radiation protection.\n\n"
+            "NUCLEAR FALLOUT / RADIATION  → FALLOUT SHELTER (mass + distance):\n"
+            "Get below grade or behind 2-3 ft of packed earth (or equivalent) on all sides and "
+            "overhead; aim for PF 40+; ventilate (dust, not gas). A lean-to or tarp does NOTHING "
+            "here. → Expedient Fallout Shelter + Nuclear & Radiological Survival docs.\n\n"
+            "TORNADO / EXTREME WIND  → INTERIOR REFUGE (structure + distance from windows):\n"
+            "Smallest interior room, lowest floor, center of the building, away from glass; basement "
+            "or storm cellar is best; cover with mattresses against debris. → Severe Weather doc.\n\n"
+            "HURRICANE / FLOOD  → opposite of tornado for water: evacuate the flood zone or go to a "
+            "HIGHER floor of a sound structure; never the basement in a flood. → Severe Weather doc.\n\n"
+            "CHEMICAL / BIOLOGICAL (CBRN gas/aerosol)  → SEALED ROOM (airtight + filtered air):\n"
+            "Here the hazard IS a gas/aerosol, so you DO seal airtight, tape vents, and use a "
+            "respirator/filtered air — the OPPOSITE of fallout (where sealing airtight would suffocate "
+            "you). → Radiological Protection (CBRN) doc.\n\n"
+            "WILDFIRE  → do NOT shelter in a flimsy structure; evacuate early. Last resort: a wide "
+            "cleared area, a vehicle with vents closed, or a body of water. → Severe Weather doc.\n\n"
+            "KEY RELATIONSHIPS (so the answers never get mixed up):\n"
+            "• Fallout shelter ≠ weather shelter: fallout needs MASS; cold needs INSULATION.\n"
+            "• Fallout shelter ≠ chemical shelter: fallout is loose DUST → VENTILATE; chemical/bio is "
+            "a GAS → SEAL AIRTIGHT + filter.\n"
+            "• Tornado ≠ flood: tornado go LOW and central; flood go HIGH.\n"
+            "RELATED: Emergency Shelter Construction; Expedient Fallout Shelter; Nuclear & "
+            "Radiological Survival; Radiological Protection (CBRN); Severe Weather & Natural Disasters."
         ),
     },
     {
@@ -2403,7 +2585,14 @@ SURVIVAL_DOCS = [
             "BODY/AIR REPLY FROM AIRCRAFT: a pilot rocking the wings (or a green light) = 'message "
             "received, understood'; circling/flying a straight line away then back can indicate a direction "
             "to travel. STAY VISIBLE and stay put once spotted — most lost persons are found near their last "
-            "known point. RELATED: see the Knots & Rope Work, fire-starting, and navigation docs."
+            "known point.\n\n"
+            "WHEN NOT TO SIGNAL — RESCUE vs. OPSEC (opposite goals): signaling broadcasts your exact "
+            "location to EVERYONE in range. If rescue is coming (lost hiker, SAR active), signal big and "
+            "loud — everything above. If your threat is other PEOPLE and no rescue is coming (lawless "
+            "grid-down period), do the OPPOSITE: go low-visibility — no signal fires, light and noise "
+            "discipline at night, cook by day to hide flame/smoke. Decide which problem you actually have "
+            "first. RELATED: see the Situational Awareness & Security doc for staying hidden, and the "
+            "Knots & Rope Work, fire-starting, and navigation docs."
         ),
     },
     {
@@ -3431,6 +3620,17 @@ _BM25_GATE = 0.35
 # the window and the lowest-ranked (often most relevant) docs were truncated out.
 _RAG_CONTEXT_CHAR_BUDGET = 7000
 
+# A single doc can answer a broad "how do I X" query with several sibling
+# passages (e.g. "Emergency Shelter Construction" has LEAN-TO, QUINZHEE and a
+# ground-conduction rule). Injecting only the single highest-cosine chunk per doc
+# meant a near-tie picked ONE method and dropped the rest — "build a shelter" got
+# the QUINZHEE snow chunk (0.5915) over the 3-season LEAN-TO (0.5892), so Ray
+# answered with a snow shelter in June. Inject up to this many sibling passages
+# per doc whose cosine is within _SIBLING_MARGIN of that doc's best chunk so the
+# model sees all the relevant methods and can pick the situation-appropriate one.
+_MAX_PASSAGES_PER_DOC = 3
+_SIBLING_MARGIN = 0.12
+
 # Phrases that mark a query as location-sensitive. When present, rag_search()
 # augments the embedding query with the user's resolved region so "near me"
 # pulls the regional passage instead of generically-dangerous far-away species.
@@ -3470,19 +3670,130 @@ def _region_for_state(state_name):
     return _STATE_REGION.get((state_name or "").strip())
 
 
+# Full state names sorted longest-first so "West Virginia" wins over "Virginia"
+# and "Washington DC" over "Washington" when scanning a query.
+_STATE_NAMES_BY_LEN = sorted(set(_US_STATE.values()), key=len, reverse=True)
+_ABBR_TOKEN_RE = re.compile(r"\b([A-Z]{2})\b")
+
+
+def _state_from_query(msg):
+    """Return the full US state name explicitly mentioned in a query, or None.
+
+    Matches a full state name in ANY case ("virginia", "North Carolina") or a
+    2-letter abbreviation — but only when UPPERCASE ("VA", "NC"). Lowercase
+    abbreviations are ignored on purpose: "in", "or", "me", "ok", "hi", "pa",
+    "de", "la", "ma" are all common English words and would fire constantly.
+    """
+    if not msg:
+        return None
+    ml = msg.lower()
+    for full in _STATE_NAMES_BY_LEN:
+        if re.search(r"\b" + re.escape(full.lower()) + r"\b", ml):
+            return full
+    for m in _ABBR_TOKEN_RE.finditer(msg):
+        full = _US_STATE.get(m.group(1))
+        if full:
+            return full
+    return None
+
+
+def _names_location(text, terms):
+    """True if `text` names any location term as a WHOLE WORD (not a substring).
+
+    Word-boundary matching is essential: a substring test lets the state term
+    "virginia" match inside "Quercus virginiana" (the Live Oak species name),
+    which wrongly handed the Southeast passage the regional boost for a Virginia
+    query and surfaced Longleaf Pine instead of the Mid-Atlantic White Oak.
+    """
+    if not text or not terms:
+        return False
+    low = text.lower()
+    return any(re.search(r"\b" + re.escape(t) + r"\b", low) for t in terms)
+
+
+# Cues that a question is actually about the user's surroundings. Only these
+# queries get the location string folded into their embedding (see rag_search);
+# topic questions like "how to clean water" must embed plainly so geography does
+# not deflate the correct passage's cosine.
+_LOCATION_SCOPED_CUES = (
+    "near me", "around me", "near here", "near my", "nearby",
+    "my area", "my region", "my location", "where i am", "where i'm",
+    "in my", "around here", "this area", "this region", "close to me",
+    "local to me", "locally",
+)
+
+
+def _is_location_scoped_query(query: str) -> bool:
+    """True when the query explicitly asks about the user's surroundings.
+
+    A NAMED place ('best tree to plant in Texas') is NOT location-scoped to the
+    device — _resolve_location_hint already resolves the named place, and the
+    structured region boost handles ranking, so it needs no embed pollution.
+    """
+    if not query:
+        return False
+    q = query.lower()
+    return any(cue in q for cue in _LOCATION_SCOPED_CUES)
+
+
+_WINTER_ONLY_CUES = ("winter", "snow", "quinzhee", "igloo", "ice ", "subzero", "sub-zero")
+
+
+def _passage_off_season(text: str, season: str) -> bool:
+    """True when a passage describes a winter-only technique out of winter.
+
+    Lets the injector sink (not drop) a 'QUINZHEE (winter, snow)' passage below the
+    3-season 'LEAN-TO' one in summer, so the small model leads with the method that
+    actually fits the date instead of whichever chunk won the cosine by 0.003.
+    """
+    if season == "winter" or not text:
+        return False
+    return any(c in text.lower() for c in _WINTER_ONLY_CUES)
+
+
+def _season_for(month: int) -> str:
+    """Meteorological season for a month (Northern Hemisphere).
+
+    Used purely to ground time-sensitive advice — June → 'summer' tells the model
+    not to suggest a snow shelter. Meteorological (not astronomical) boundaries
+    keep it unambiguous for the LLM.
+    """
+    return {
+        12: "winter", 1: "winter", 2: "winter",
+        3: "spring", 4: "spring", 5: "spring",
+        6: "summer", 7: "summer", 8: "summer",
+        9: "fall", 10: "fall", 11: "fall",
+    }.get(month, "")
+
+
 def _resolve_location_hint(user_loc, gps_fix):
     """Return a short 'City, State, Region US' hint for RAG query augmentation.
 
-    Prefers an explicit user-provided location, then the device GPS fix. Returns
-    None when no usable position is available.
+    An explicitly NAMED place in the query takes priority over ambient GPS —
+    "best tree to plant in Texas" resolves to Texas even if the device is sitting
+    in Virginia. Otherwise falls back to user-provided coords, then the device GPS
+    fix. Returns None when no usable position is available.
     """
+    if user_loc and user_loc.get("type") == "named":
+        name = user_loc.get("name")
+        if not name:
+            return None
+        # Normalize a 2-letter abbreviation ("VA") to the full state name so the
+        # region lookup works and we never emit a 2-char location term, which would
+        # substring-match unrelated words ("va" inside "nevada", "savanna").
+        full = _US_STATE.get(name.strip().upper(), name)
+        # Expand a known state to its region so location terms include e.g.
+        # "mid-atlantic" — knowledge-base passages key their regional sections by
+        # region name, not the abbreviation, so "virginia" alone never matches.
+        region = _region_for_state(full)
+        return f"{full}, {region} US" if region else full
     lat = lon = None
     if user_loc and user_loc.get("type") == "coords":
         lat, lon = user_loc.get("lat"), user_loc.get("lon")
     elif gps_fix and gps_fix.get("latitude") is not None:
         lat, lon = gps_fix.get("latitude"), gps_fix.get("longitude")
     if lat is None:
-        return user_loc.get("name") if user_loc else None
+        return None
     try:
         city = _reverse_geocode(lat, lon)  # 'Herndon, Virginia'
     except Exception:
@@ -3503,15 +3814,24 @@ def _doc_passage_heading(passage):
     return ""
 
 
-def _chunk_document_text(content, target=700, hard_max=1100):
+def _chunk_document_text(content, target=700, hard_max=1100, min_section=130, min_keep=110):
     """Split a knowledge-base doc body into section-sized passages for embedding.
 
-    Heuristic: begin a new passage at a 'header' line (short, ends in ':' or
-    written in ALL CAPS) once the current passage has reached ~60% of target,
-    and hard-split anything exceeding hard_max chars. This keeps each species /
-    region section independently retrievable so a long, multi-topic doc no longer
-    collapses into a single averaged vector (which buried the right section and,
-    once injected whole, overflowed the context window).
+    Each labeled section (a 'header' line — short, ends in ':' or written in ALL
+    CAPS) becomes its own passage so a long, multi-topic doc no longer collapses
+    into a single averaged vector (which buried the right section and, once
+    injected whole, overflowed the context window).
+
+    Split rule: start a new passage at a header line once the current passage
+    already holds a header plus at least `min_section` chars of content. The
+    "already holds a header" guard is what stops a short intro/preamble from
+    swallowing the first real section — the original heuristic required the chunk
+    to reach ~60% of target before any header could split, so a ~190-char intro
+    absorbed the section that followed it (e.g. the "EASTERN US → White Oak"
+    section was buried in the doc's intro chunk, so a Virginia query never matched
+    a clean Mid-Atlantic passage). Anything over hard_max is force-split, and
+    runt passages below `min_keep` are merged into a neighbour so we never emit a
+    near-empty header-only vector.
     """
     lines = (content or "").split("\n")
 
@@ -3524,24 +3844,39 @@ def _chunk_document_text(content, target=700, hard_max=1100):
         letters = [c for c in s if c.isalpha()]
         return bool(letters) and sum(1 for c in letters if c.isupper()) / len(letters) >= 0.7
 
-    chunks, cur, cur_len = [], [], 0
-    soft = target * 0.6
+    chunks, cur, cur_len, cur_has_header = [], [], 0, False
     for ln in lines:
-        if cur and _is_header(ln) and cur_len >= soft:
+        is_h = _is_header(ln)
+        if cur and is_h and cur_has_header and cur_len >= min_section:
             chunks.append("\n".join(cur).strip())
-            cur, cur_len = [], 0
+            cur, cur_len, cur_has_header = [], 0, False
         cur.append(ln)
         cur_len += len(ln) + 1
+        cur_has_header = cur_has_header or is_h
         if cur_len >= hard_max:
             chunks.append("\n".join(cur).strip())
-            cur, cur_len = [], 0
+            cur, cur_len, cur_has_header = [], 0, False
     tail = "\n".join(cur).strip()
     if tail:
         chunks.append(tail)
     chunks = [c for c in chunks if c]
-    if not chunks and content and content.strip():
+
+    # Merge runt passages (below min_keep) into the previous chunk — or the next
+    # one for a leading runt — without pushing any chunk past hard_max.
+    merged = []
+    for c in chunks:
+        if merged and len(c) < min_keep and len(merged[-1]) + len(c) + 2 <= hard_max:
+            merged[-1] = merged[-1] + "\n\n" + c
+        else:
+            merged.append(c)
+    if (len(merged) >= 2 and len(merged[0]) < min_keep
+            and len(merged[0]) + len(merged[1]) + 2 <= hard_max):
+        merged[1] = merged[0] + "\n\n" + merged[1]
+        merged = merged[1:]
+
+    if not merged and content and content.strip():
         return [content.strip()]
-    return chunks
+    return merged
 
 
 class AIManager:
@@ -3828,7 +4163,14 @@ class AIManager:
         "nuclear":    ["nuclear", "radiation", "radioact", "fallout", "dosimet",
                        "geiger", "roentgen", "sievert", "cbrn", "nuke", "dirty bomb",
                        "rad ", "rem ", "potassium iodide", "iodide", "contaminat",
-                       "acute radiation", "7-10 rule", "7 10 rule", "decontaminat"],
+                       "acute radiation", "7-10 rule", "7 10 rule", "decontaminat",
+                       # phrases that must beat the generic "shelter" category so a
+                       # "build a fallout shelter" query surfaces the mass/earth doc,
+                       # not the wilderness lean-to.
+                       "fallout shelter", "radiation shelter", "nuclear shelter",
+                       "blast shelter", "expedient shelter", "shelter from fallout",
+                       "shelter from radiation", "shield from radiation",
+                       "protection factor", "halving thickness"],
         # "emp" is intentionally matched only as a phrase, never as a bare
         # substring — "emp" lives inside "temperature", "attempt", etc.
         "emp":        ["emp attack", "emp event", "emp strike", "emp blast",
@@ -4633,8 +4975,13 @@ class AIManager:
 
         A doc is scored by its best chunk: max cosine over that doc's passages.
         location_hint (e.g. 'Herndon, Virginia, Mid-Atlantic US') is appended to
-        the embedding query for 'near me' questions so regional passages outrank
-        generically-dangerous-but-far-away species.
+        the embedding query ONLY for location-scoped questions ('near me', 'here',
+        'my area'). Appending it to an ordinary question (e.g. 'how to clean water')
+        polluted the query vector with geography and dropped the correct passage's
+        cosine by ~0.10-0.12 — enough to flip HIGH→LOW and even push good docs below
+        _RAG_MIN_SCORE so they were dropped from context. Regional ranking for those
+        queries is instead handled by the structured location_terms boost below
+        (+0.08 passage nudge, x1.15 region boost), which needs no embed pollution.
 
         Hybrid score = max(v, 0.6*v + 0.4*bm25_norm) when v >= _BM25_GATE, else v.
         BM25 can only boost semantically plausible candidates — never surface an
@@ -4644,7 +4991,13 @@ class AIManager:
         doc_embs = self._get_doc_embeddings()
         if not doc_embs:
             return [], 0.0
-        embed_query = f"{query} (location: {location_hint})" if location_hint else query
+        # Only fold the location string into the embedded query when the user is
+        # explicitly asking about their surroundings; otherwise it corrupts the
+        # semantic match for topic questions (see docstring). Location-aware
+        # ranking for all queries still happens via location_terms further down.
+        embed_query = query
+        if location_hint and _is_location_scoped_query(query):
+            embed_query = f"{query} (location: {location_hint})"
         try:
             query_emb = self.get_embed(embed_query, embed_model=embed_model, is_query=True)
         except Exception as e:
@@ -4665,30 +5018,41 @@ class AIManager:
         # Score every doc by its best-matching passage. Chunk vectors whose
         # dimension doesn't match the query (e.g. left over from a previous embed
         # model) are skipped rather than crashing numpy.dot / scoring as garbage.
-        vec_scores = {}   # doc_id -> raw cosine of the selected passage
+        vec_scores = {}   # doc_id -> raw cosine of the selected (region-nudged) passage
+        max_cos    = {}   # doc_id -> max raw cosine over the doc's passages
         best_chunk = {}   # doc_id -> (heading, passage_text)
+        doc_chunks = {}   # doc_id -> [(cosine, heading, passage), ...] sorted desc
         doc_by_id  = {}
         dim_skips = 0
         for doc, chunks in doc_embs:
-            best_rank, best_v, best_c = -2.0, -1.0, None
+            best_rank, best_v, best_c, doc_max = -2.0, -1.0, None, -1.0
+            scored_chunks = []
             for c in chunks:
                 e = c.get("e")
                 if not e or len(e) != qdim:
                     dim_skips += 1
                     continue
                 v = cosine_similarity(query_emb, e)
-                # Region-scoped queries nudge passage selection toward the section
-                # that names the user's region; vec_scores keeps the raw cosine so
-                # the threshold and confidence footer are not inflated.
+                doc_max = max(doc_max, v)
+                scored_chunks.append((v, c.get("h", ""), c.get("t", "")))
+                # Region-scoped queries nudge passage SELECTION toward the section
+                # that names the user's region (+0.08; enough to beat a generic
+                # passage like "universal planting principles" that otherwise edges
+                # out the regional one). This only steers which passage we inject —
+                # the confidence footer uses max_cos (the doc's strongest raw match)
+                # so region re-ranking never inflates *or* deflates the score.
                 rank_v = v
-                if location_terms and any(t in (c.get("t") or "").lower() for t in location_terms):
-                    rank_v = v + 0.04
+                if location_terms and _names_location(c.get("t"), location_terms):
+                    rank_v = v + 0.08
                 if rank_v > best_rank:
                     best_rank, best_v, best_c = rank_v, v, c
             if best_c is None:
                 continue
             vec_scores[doc["id"]] = best_v
+            max_cos[doc["id"]]    = doc_max
             best_chunk[doc["id"]] = (best_c.get("h", ""), best_c.get("t", ""))
+            scored_chunks.sort(key=lambda x: x[0], reverse=True)
+            doc_chunks[doc["id"]] = scored_chunks
             doc_by_id[doc["id"]]  = doc
         if dim_skips:
             logger.warning(
@@ -4721,10 +5085,7 @@ class AIManager:
                 hybrid = v
             scored.append((hybrid, v, doc_by_id[doc_id]))
 
-        # Sort; capture raw cosine of the top doc so the confidence footer
-        # reflects actual semantic similarity, not BM25-inflated hybrid score.
         scored.sort(key=lambda x: x[0], reverse=True)
-        top_score = scored[0][1] if scored else 0.0
 
         # Topic-router boost: detect the query's category and give matching docs
         # a small edge (+8%) so the right cluster surfaces even when border-case
@@ -4743,13 +5104,13 @@ class AIManager:
         # generically-dangerous far-away ones (e.g. VA copperhead over AZ Gila monster).
         if location_terms:
             def _passage_in_region(doc):
-                txt = (best_chunk.get(doc["id"], ("", ""))[1] or "").lower()
-                return any(t in txt for t in location_terms)
+                txt = best_chunk.get(doc["id"], ("", ""))[1]
+                return _names_location(txt, location_terms)
             scored = [(h * 1.15 if _passage_in_region(doc) else h, v, doc) for h, v, doc in scored]
             scored.sort(key=lambda x: x[0], reverse=True)
 
-        # Filter by threshold and attach the matched passage to each surviving
-        # doc so build_context injects just that section, not the whole doc.
+        # Filter by threshold and attach the matched passage(s) to each surviving
+        # doc so build_context injects just the relevant sections, not the whole doc.
         out = []
         for h, v, doc in scored:
             if h < _RAG_MIN_SCORE:
@@ -4760,9 +5121,35 @@ class AIManager:
             d["_heading"] = heading
             d["_score"]  = round(h, 3)   # final hybrid+boost score used for ranking
             d["_cosine"] = round(v, 3)   # raw semantic similarity (un-inflated)
+            # Sibling passages: a broad "how do I X" query often needs every method
+            # in a single-topic doc, not just the highest-cosine one (a 0.003 tie
+            # between QUINZHEE and LEAN-TO must not silently drop one). Carry the
+            # doc's other chunks within _SIBLING_MARGIN of its best, selected one
+            # first, capped at _MAX_PASSAGES_PER_DOC. Most docs add nothing here
+            # because only one chunk is in-band.
+            sel_h = (heading, passage)
+            siblings = [sel_h]
+            doc_best = max_cos.get(doc["id"], v)
+            for cv, ch, ct in doc_chunks.get(doc["id"], []):
+                if (ch, ct) == sel_h:
+                    continue
+                if cv >= doc_best - _SIBLING_MARGIN and cv >= _RAG_MIN_SCORE:
+                    siblings.append((ch, ct))
+                if len(siblings) >= _MAX_PASSAGES_PER_DOC:
+                    break
+            d["_passages"] = [{"heading": sh, "passage": sp} for sh, sp in siblings if sp]
             out.append(d)
             if len(out) >= top_k:
                 break
+
+        # Confidence footer = the STRONGEST raw cosine among the passages actually
+        # injected — not the hybrid-#1 doc's cosine. BM25/category/region boosts can
+        # rank a weaker-cosine doc first (e.g. "Solar Still" hybrid 0.76 outranks the
+        # better "Water Purification" passage at cos 0.65 for "how to purify water"),
+        # yet the stronger passage is still injected as a source. Confidence must
+        # reflect the best evidence on hand, so take the max over injected docs.
+        top_score = max((max_cos.get(d["id"], d.get("_cosine", 0.0)) for d in out),
+                        default=0.0)
         return out, top_score
 
     # ------------------------------------------------------------------
@@ -4802,6 +5189,24 @@ class AIManager:
         except Exception:
             _units = "metric"
         meta["units"] = _units
+
+        # Current date & season — always injected so time-sensitive advice (shelter
+        # type, clothing, planting, foraging, hunting seasons, expected weather) is
+        # grounded in the real date. Without it the model had no sense of time and
+        # suggested a QUINZHEE snow shelter in June.
+        import datetime as _dt
+        _now = _dt.datetime.now()
+        _season = _season_for(_now.month)
+        parts.append(
+            "=== CURRENT DATE ===\n"
+            f"{_now.strftime('%A, %B %d, %Y')} — season: {_season} (Northern Hemisphere).\n"
+            f"IMPORTANT: Tailor every season-dependent answer to {_season}. Lead with the "
+            f"method that fits {_season}. Do NOT recommend or lead with cold/winter-only "
+            "techniques (snow shelters, quinzhee, ice fishing) unless the user explicitly "
+            "asks about winter or snow.\n"
+            "=== END DATE ==="
+        )
+        meta["season"] = _season
 
         # Live "senses" are retrieved on demand, not always-on.  An unrelated
         # survival/ballistics/general question is no longer flooded with host
@@ -5138,12 +5543,27 @@ class AIManager:
             try:
                 top_k = int(settings.get("rag_top_k", DEFAULT_SETTINGS["rag_top_k"]))
                 embed_model = settings.get("embed_model", DEFAULT_SETTINGS["embed_model"])
-                # Location-sensitive queries ("dangerous animals near me") get the
-                # user's resolved region appended to the embedding query so the
-                # regional passage outranks far-away species.
+                # Location-sensitive queries get the user's resolved region
+                # appended to the embedding query so the regional passage outranks
+                # far-away ones. This fires for two cases:
+                #   1. Deictic phrasing ("dangerous animals near me") → resolve via GPS.
+                #   2. An explicitly NAMED place in the query ("best tree to plant in
+                #      Virginia") → meta['user_location'] is already set by the location
+                #      agent above, so resolve it to 'State, Region US'. Without this the
+                #      query named a state but no region passage got boosted, and a
+                #      generic passage (e.g. "universal planting principles") won over the
+                #      regional "Eastern US → White Oak" one.
                 location_hint = None
-                if any(k in msg_lower for k in _LOCATION_INTENT_KEYS):
+                if meta.get("user_location") or any(k in msg_lower for k in _LOCATION_INTENT_KEYS):
                     location_hint = _resolve_location_hint(meta.get("user_location"), meta.get("gps_fix"))
+                # Fall back to any US state named in the query that the capitalized
+                # _NAMED_LOC_RE missed — lowercase full names ("in virginia") and
+                # uppercase abbreviations ("in VA") — so they're region-aware too.
+                if not location_hint:
+                    st = _state_from_query(user_message)
+                    if st:
+                        region = _region_for_state(st)
+                        location_hint = f"{st}, {region} US" if region else st
                 relevant_docs, rag_top_score = self.rag_search(
                     user_message, top_k=top_k, embed_model=embed_model, location_hint=location_hint
                 )
@@ -5163,19 +5583,39 @@ class AIManager:
                 ]
                 if relevant_docs:
                     meta["has_rag"] = True
-                    # Inject the best-matching passage per doc (not the whole
-                    # multi-topic doc) and cap the total so the KNOWLEDGE BASE block
-                    # can't overflow num_ctx and truncate the lowest-ranked matches.
+                    # Inject the matched passage(s) per doc (not the whole multi-topic
+                    # doc) and cap the total so the KNOWLEDGE BASE block can't overflow
+                    # num_ctx and truncate the lowest-ranked matches. A doc can carry
+                    # several sibling passages (_passages) so a broad query sees every
+                    # method (lean-to AND quinzhee), not just the top-cosine one.
                     rag_lines, used = [], 0
                     for doc in relevant_docs:
-                        passage = doc.get("_passage") or doc.get("content") or ""
-                        heading = doc.get("_heading") or ""
-                        label = doc["title"] + (f" — {heading}" if heading else "")
-                        block = f"--- {label} ---\n{passage}"
-                        if rag_lines and used + len(block) > _RAG_CONTEXT_CHAR_BUDGET:
+                        passages = doc.get("_passages") or [
+                            {"heading": doc.get("_heading") or "",
+                             "passage": doc.get("_passage") or doc.get("content") or ""}
+                        ]
+                        # Sink winter-only passages below in-season ones (stable) so a
+                        # broad query in summer leads with the 3-season method, not the
+                        # snow one that edged it out on cosine.
+                        if _season and len(passages) > 1:
+                            passages = sorted(
+                                passages,
+                                key=lambda p: _passage_off_season(
+                                    f"{p.get('heading','')} {p.get('passage','')}", _season),
+                            )
+                        for p in passages:
+                            passage = p.get("passage") or ""
+                            if not passage:
+                                continue
+                            heading = p.get("heading") or ""
+                            label = doc["title"] + (f" — {heading}" if heading else "")
+                            block = f"--- {label} ---\n{passage}"
+                            if rag_lines and used + len(block) > _RAG_CONTEXT_CHAR_BUDGET:
+                                break
+                            rag_lines.append(block)
+                            used += len(block)
+                        if rag_lines and used > _RAG_CONTEXT_CHAR_BUDGET:
                             break
-                        rag_lines.append(block)
-                        used += len(block)
                     rag_block = (
                         "=== KNOWLEDGE BASE (use as primary source — supplement with training knowledge if needed) ===\n"
                         + "\n\n".join(rag_lines)
@@ -5195,10 +5635,17 @@ class AIManager:
     def _confidence_label(self, meta):
         """Return a confidence footer derived from build_context metadata.
 
-        Confidence tiers:
-          HIGH   — strong RAG match (score ≥ 0.70) or live data present
-          MEDIUM — moderate RAG match (0.50 ≤ score < 0.70) or system stats only
-          LOW    — weak RAG match (below 0.50 but above threshold) or training only
+        Confidence tiers (calibrated to qwen3-embedding:0.6b against the LIVE
+        knowledge base, not synthetic passages). Measured best-passage cosines for
+        correct answers from real section-sized chunks: snakebite 0.74, water-purify
+        0.63, best-tree 0.61, deer-caliber 0.56 — i.e. correct answers cluster
+        0.55-0.74. The old 0.60 HIGH bar sat in the MIDDLE of that cluster, so the
+        lower half of perfectly-correct answers were mislabelled MEDIUM. The bar is
+        now 0.55, below the cluster; wrong/loose passages sit at 0.44-0.48, leaving a
+        safe gap:
+          HIGH   — strong RAG match (score ≥ 0.55) or live data present
+          MEDIUM — moderate RAG match (0.47 ≤ score < 0.55) or system stats only
+          LOW    — weak RAG match (below 0.47 but above threshold) or training only
         Sources are listed explicitly so the user knows what grounded the answer.
         """
         score     = meta.get("rag_top_score", 0.0)
@@ -5235,9 +5682,9 @@ class AIManager:
             # Live data and the self-architecture doc are ground truth; RAG is a bonus
             tier = "HIGH"
         elif has_rag:
-            if score >= 0.70:
+            if score >= 0.55:
                 tier = "HIGH"
-            elif score >= 0.50:
+            elif score >= 0.47:
                 tier = "MEDIUM"
             else:
                 tier = "LOW"

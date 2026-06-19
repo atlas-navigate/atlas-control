@@ -1389,10 +1389,136 @@ def api_gps_share():
         "warning": privacy_warning,
     })
 
+# ── Offline address + POI index (places.db, built by build_places_index.py) ──
+# Searches street addresses and points of interest (gas, food, shops, ATMs,
+# hospitals, hotels, …) extracted from the local OSM .pbf state files. 100%
+# offline. Absent until build_places_index.py has run.
+_PLACES_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "static", "data", "places.db")
+
+# "<thing> near me" → coarse category column in places.db.
+_CATEGORY_SYNONYMS = [
+    ("fuel", ("gas station", "petrol", "gasoline", "diesel", "fuel",
+              "fill up", "charging station", "ev charger")),
+    ("food", ("restaurant", "fast food", "place to eat", "somewhere to eat",
+              "food", "diner", "coffee", "cafe", "pizza", "burger",
+              "breakfast", "lunch", "dinner", "pub")),
+    ("grocery", ("grocery", "groceries", "supermarket", "food store", "market")),
+    ("finance", ("atm", "bank", "cash machine")),
+    ("health", ("hospital", "emergency room", "urgent care", "clinic",
+                "doctor", "pharmacy", "drugstore", "dentist", "medical")),
+    ("lodging", ("hotel", "motel", "lodging", "place to stay", "campground",
+                 "campsite", "camp site", "camping", "hostel")),
+    ("emergency", ("police station", "police", "fire station", "sheriff")),
+    ("facility", ("bathroom", "restroom", "toilet", "drinking water",
+                  "post office", "rest area")),
+    ("shop", ("hardware store", "shopping mall", "shopping", "store")),
+]
+_CAT_STOPWORDS = set((
+    "gas station petrol gasoline diesel fuel fill up charging ev charger "
+    "restaurant fast food place eat somewhere diner coffee cafe pizza burger "
+    "breakfast lunch dinner pub grocery groceries supermarket store market atm "
+    "bank cash machine hospital emergency room urgent care clinic doctor "
+    "pharmacy drugstore dentist medical hotel motel lodging stay campground "
+    "campsite camp site camping hostel police sheriff fire bathroom restroom "
+    "toilet drinking water post office rest area shopping mall hardware "
+    "near me around here nearby the and for"
+).split())
+
+
+def _detect_category(q_lower):
+    for cat, cues in _CATEGORY_SYNONYMS:
+        for cue in cues:
+            if cue in q_lower:
+                return cat
+    return None
+
+
+def _fts_expr(tokens):
+    """Safe FTS5 MATCH expression: phrase-quoted tokens, prefix on the last."""
+    toks = [t for t in tokens if t]
+    if not toks:
+        return None
+    return " ".join([f'"{t}"' for t in toks[:-1]] + [f'"{toks[-1]}"*'])
+
+
+def _search_places(q, has_pos, near_lat, near_lon, limit=14):
+    """Search the offline address/POI index. Returns geocode-result dicts."""
+    if not os.path.exists(_PLACES_DB):
+        return []
+    import re as _re
+    tokens = [t for t in _re.findall(r"[a-z0-9]+", q.lower()) if len(t) >= 2]
+    if not tokens:
+        return []
+    name_toks = [t for t in tokens if t not in _CAT_STOPWORDS]
+    out = []
+    try:
+        import sqlite3 as _sq
+        con = _sq.connect(f"file:{_PLACES_DB}?mode=ro", uri=True)
+        category = _detect_category(q.lower())
+        rows = []
+        if category and has_pos:
+            # "<thing> near me": bounding-box prefilter, widen until we get hits.
+            for win in (0.4, 1.2, 3.5):
+                rows = list(con.execute(
+                    "SELECT name,kind,addr,city,state,lat,lon FROM places "
+                    "WHERE category=? AND lat BETWEEN ? AND ? "
+                    "AND lon BETWEEN ? AND ?",
+                    (category, near_lat - win, near_lat + win,
+                     near_lon - win, near_lon + win)))
+                if name_toks:
+                    rows = [r for r in rows
+                            if any(t in (r[0] or "").lower() for t in name_toks)]
+                if rows:
+                    break
+        else:
+            expr = _fts_expr(name_toks or tokens)
+            if expr:
+                try:
+                    rows = list(con.execute(
+                        "SELECT p.name,p.kind,p.addr,p.city,p.state,p.lat,p.lon "
+                        "FROM places_fts f JOIN places p ON p.id=f.rowid "
+                        "WHERE places_fts MATCH ? LIMIT 200", (expr,)))
+                except Exception:
+                    rows = []
+        con.close()
+    except Exception as _e:
+        logger.debug(f"Places geocode: {_e}")
+        return []
+
+    seen = []
+    for name, kind, addr, city, state, lat, lon in rows:
+        if lat is None or lon is None:
+            continue
+        if any(abs(lat - s[0]) < 3e-4 and abs(lon - s[1]) < 3e-4 for s in seen):
+            continue
+        seen.append((lat, lon))
+        pretty_kind = (kind or "").replace("_", " ")
+        disp = name or addr or pretty_kind.title()
+        if not disp:
+            continue
+        sub = []
+        if name and addr:
+            sub.append(addr)
+        if pretty_kind and pretty_kind not in disp.lower():
+            sub.append(pretty_kind)
+        sub.append(city or state)
+        out.append({
+            "lat": str(lat), "lon": str(lon),
+            "display_name": disp,
+            "subtitle": " · ".join(x for x in sub if x),
+            "type": "place",
+        })
+    if has_pos and out:
+        out.sort(key=lambda r: (float(r["lat"]) - near_lat) ** 2
+                 + (float(r["lon"]) - near_lon) ** 2)
+    return out[:limit]
+
+
 # ------------------------------------------------------------------ API: Navigation
 @app.route("/api/nav/geocode")
 def api_nav_geocode():
-    """Offline geocoder: searches mesh nodes, local city DB, and trail/trailhead DBs."""
+    """Offline geocoder: addresses + POIs (places.db), cities, parks/trails, mesh nodes."""
     import re
 
     q = (request.args.get("q") or "").strip()
@@ -1692,8 +1818,11 @@ def api_nav_geocode():
     park_out.sort(key=lambda r: (-int(r.get("_score", 0)), r.get("display_name", "")))
     _trail_results.sort(key=lambda r: (-int(r.get("_score", 0)), r.get("display_name", "")))
 
+    # ── Source 1: offline address + POI index (street addresses + places) ──────
+    place_out = _search_places(q, has_pos, near_lat, near_lon)
+
     merged = []
-    for r in park_out[:8] + _trail_results[:12] + city_out + node_out:
+    for r in park_out[:8] + _trail_results[:12] + place_out[:14] + city_out + node_out:
         r.pop("_score", None)
         rlat, rlon = float(r["lat"]), float(r["lon"])
         if not any(_dist_m(rlat, rlon, float(s["lat"]), float(s["lon"])) < 100

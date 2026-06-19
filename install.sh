@@ -1207,8 +1207,14 @@ else:
 "
 log "Serial port settings normalized"
 
-sudo -u "$ATLAS_USER" "$VENV/bin/python3" -c "
-import sys; sys.path.insert(0, '$APP_DIR')
+# NOTE: run via a quoted heredoc (<<'PYEOF'), not python3 -c "...". The inline
+# -c form is a double-quoted shell string, so the inner double quotes in the SQL
+# (e.g. the INSERT...ON CONFLICT below) closed it early and bash choked on the
+# parentheses — a syntax error that aborted the whole install at this step. A
+# quoted heredoc passes the body to Python verbatim; APP_DIR comes via the env.
+sudo -u "$ATLAS_USER" APP_DIR="$APP_DIR" "$VENV/bin/python3" - <<'PYEOF'
+import os, sys
+sys.path.insert(0, os.environ["APP_DIR"])
 import database
 s = database.ai_get_settings()
 updates = {}
@@ -1225,7 +1231,7 @@ if s.get('num_ctx') == '2048':
 # Stale 512-token limit causes mid-sentence truncation; raise to 1024
 if s.get('num_predict') in (None, '', '512'):
     updates['num_predict'] = '1024'
-# rag_top_k 3→5: retrieve more docs per query so border-case docs aren't missed
+# rag_top_k 3->5: retrieve more docs per query so border-case docs aren't missed
 if s.get('rag_top_k') in (None, '', '3'):
     updates['rag_top_k'] = '5'
 # system_prompt: old default caused "As Ray, I am..." self-intros and verbose
@@ -1235,10 +1241,10 @@ if 'Try to provide several options' in old_prompt:
     conn = database.get_db()
     conn.execute("DELETE FROM ai_settings WHERE key='system_prompt'")
     conn.commit()
-    print('Removed stale system_prompt — AI_DEFAULTS will apply')
+    print('Removed stale system_prompt -- AI_DEFAULTS will apply')
 # Migrate the embedder to qwen3-embedding:0.6b. nomic (768-dim) and qwen3
 # (1024-dim) vectors are incompatible, so any change wipes stored doc
-# embeddings — the app re-embeds them on next startup.
+# embeddings -- the app re-embeds them on next startup.
 if s.get('embed_model') in (None, '', 'nomic-embed-text'):
     if s.get('embed_model') != 'qwen3-embedding:0.6b':
         updates['embed_model'] = 'qwen3-embedding:0.6b'
@@ -1246,7 +1252,7 @@ if s.get('embed_model') in (None, '', 'nomic-embed-text'):
         n = conn.execute('UPDATE ai_documents SET embedding=NULL').rowcount
         conn.commit()
         print(f'Cleared {n} stale doc embedding(s) for re-embed')
-# embed_format_v →3: documents are now embedded per-section (passage-level /
+# embed_format_v ->3: documents are now embedded per-section (passage-level /
 # chunked) so retrieval surfaces the one relevant paragraph instead of a whole
 # multi-topic doc. init_db() handles the migration and embedding wipe; this
 # block just surfaces it in install logs. (v2 was the title+tags whole-doc vector.)
@@ -1256,13 +1262,13 @@ if s.get('embed_format_v') not in ('3',):
     conn.commit()
     conn.execute("INSERT INTO ai_settings (key, value) VALUES ('embed_format_v', '3') ON CONFLICT(key) DO UPDATE SET value='3'")
     conn.commit()
-    print(f'embed_format_v→3: cleared {n} doc embedding(s) for passage-level re-embed')
+    print(f'embed_format_v->3: cleared {n} doc embedding(s) for passage-level re-embed')
 if updates:
     database.ai_set_settings(updates)
     print(f'Updated AI defaults: {updates}')
 else:
     print('AI defaults already normalized')
-"
+PYEOF
 log "AI settings normalized"
 
 # Fix all ownership
@@ -1346,6 +1352,13 @@ echo ""
 if [[ "$INSTALL_MODE" == "full" && "${STATE_INPUT,,}" == "none" ]]; then
     echo -e "  ${YLW}Routing data not installed.${NC} Add states:"
     echo -e "    sudo $APP_DIR/install.sh --full   (re-run and choose states)"
+    echo ""
+fi
+if [[ ! -f "$APP_DIR/static/data/places.db" ]]; then
+    echo -e "  ${YLW}Offline address/POI search not built yet.${NC} To enable \"<place> near me\""
+    echo -e "  and street-address geocoding from the downloaded map data (one-time, heavy —"
+    echo -e "  pauses Ray and caps memory so it can't swamp the box):"
+    echo -e "    sudo bash $APP_DIR/build_places_safe.sh"
     echo ""
 fi
 echo -e "  ${CYN}Updating later:${NC} ${BLD}sudo $APP_DIR/install.sh --update${NC}"

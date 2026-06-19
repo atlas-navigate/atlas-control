@@ -269,17 +269,18 @@ def init_db():
     row = c.execute("SELECT value FROM ai_settings WHERE key='system_prompt'").fetchone()
     if row and _DEF_ANCHOR in row[0] and _NEW_FRAG not in row[0]:
         c.execute("DELETE FROM ai_settings WHERE key='system_prompt'")
-    # Embedding-format migration v3: documents are now embedded per-section
-    # (passage-level / chunked), so the stored embedding is a {"v":3,"chunks":[…]}
-    # object instead of a single flat whole-doc vector. The shape changes every
-    # record, so clear stored embeddings on first boot after this migration and
-    # let the background re-embedder regenerate them in the chunked format.
-    # (v2 was the earlier title+tags-prefixed whole-doc vector.)
-    if not c.execute("SELECT 1 FROM ai_settings WHERE key='embed_format_v' AND value='3'").fetchone():
+    # Embedding-format migration: documents are embedded per-section (passage-level
+    # / chunked), so the stored embedding is a {"v":3,"chunks":[…]} object instead
+    # of a single flat whole-doc vector. Clear stored embeddings whenever the
+    # format version bumps and let the background re-embedder regenerate them.
+    # (v2 = title+tags-prefixed whole-doc vector. v3 = passage-level chunks. v4 =
+    # passage-level chunks with the section-aware chunker that no longer lets a
+    # short intro swallow the first labeled section — re-chunk every doc.)
+    if not c.execute("SELECT 1 FROM ai_settings WHERE key='embed_format_v' AND value='4'").fetchone():
         c.execute("UPDATE ai_documents SET embedding=NULL")
         c.execute(
-            "INSERT INTO ai_settings (key, value) VALUES ('embed_format_v', '3') "
-            "ON CONFLICT(key) DO UPDATE SET value='3'"
+            "INSERT INTO ai_settings (key, value) VALUES ('embed_format_v', '4') "
+            "ON CONFLICT(key) DO UPDATE SET value='4'"
         )
 
     # FTS5 index for BM25 hybrid search (title weighted 10×, tags 5×, content 1×)
