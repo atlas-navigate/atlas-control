@@ -57,6 +57,7 @@ _meshtastic_util.Queue = _RealQueue
 import os
 import sys
 import ast
+import re
 import json
 import math
 import time
@@ -1262,6 +1263,71 @@ def _km_doc_passage_vectors(raw_embedding):
     return []
 
 
+# Curated cross-references: many knowledge docs end with a "RELATED: <Title>,
+# <Title>; …" line naming the other docs they relate to. These are
+# human-authored and far more accurate than embedding cosine alone, but the map
+# historically ignored them. The helpers below parse those references and
+# resolve each to a document id so they can be drawn as authoritative edges.
+_KM_RELATED_RE = re.compile(r'RELATED:\s*(.+?)(?:\n\n|$)', re.S)
+
+def _km_norm(s: str) -> str:
+    """Normalise a title or reference for comparison: drop parentheticals,
+    'see the'/'the'/'doc(s)' filler, and punctuation; collapse whitespace."""
+    s = re.sub(r'\(.*?\)', ' ', s or '')
+    s = s.replace("see the ", "").replace("see ", "").replace("the ", "")
+    s = re.sub(r'\b(doc|docs)\b', '', s.lower())
+    s = re.sub(r'[^a-z0-9& ]', ' ', s)
+    return re.sub(r'\s+', ' ', s).strip()
+
+def _km_curated_edges(docs):
+    """Return a set of frozenset({id1,id2}) curated relation pairs parsed from
+    each doc's 'RELATED:' cross-references.
+
+    A reference is matched against each doc's MAIN title (the part before the
+    ':' subtitle). A reference that ties across several DIFFERENT titles is
+    genuinely ambiguous (e.g. a bare 'navigation') and is skipped rather than
+    guessed; a tie among docs that share the SAME main title (a two-part series
+    like the 'Field Trauma:' docs) links to all of them.
+    """
+    titles = [(d["id"], _km_norm((d.get("title") or "").split(":")[0])) for d in docs]
+
+    def resolve(ref):
+        r = _km_norm(ref)
+        if len(r) < 5:
+            return []
+        cands = []
+        for did, mp in titles:
+            if mp and (r == mp or r in mp or mp in r):
+                rw = {w for w in r.split() if len(w) > 2}
+                mw = {w for w in mp.split() if len(w) > 2}
+                cands.append((len(rw & mw), did, mp))
+        if not cands:                       # fall back to significant-word overlap
+            rw = {w for w in r.split() if len(w) > 3}
+            if len(rw) < 2:
+                return []
+            for did, mp in titles:
+                n = len(rw & {w for w in mp.split() if len(w) > 3})
+                if n >= 2 and n >= 0.6 * len(rw):
+                    cands.append((n, did, mp))
+            if not cands:
+                return []
+        top = max(c[0] for c in cands)
+        winners = [c for c in cands if c[0] == top]
+        if len({c[2] for c in winners}) == 1:   # same titled series → link all
+            return [c[1] for c in winners]
+        return []                                # cross-topic ambiguity → skip
+
+    edges = set()
+    for d in docs:
+        src = d["id"]
+        for mm in _KM_RELATED_RE.finditer(d.get("content") or ""):
+            for ref in re.split(r'[;,]|\band\b', mm.group(1).strip()):
+                for tgt in resolve(ref.strip().rstrip(".").strip()):
+                    if tgt != src:
+                        edges.add(frozenset((src, tgt)))
+    return edges
+
+
 @app.route("/api/ai/knowledge-map")
 def api_ai_knowledge_map():
     """Return nodes and high-cosine edges for the knowledge-map visualisation."""
@@ -1286,12 +1352,13 @@ def api_ai_knowledge_map():
         if units:
             units_by_id[doc["id"]] = units
 
-    # Edge weight between two docs = their best-matching passage pair (max cosine),
-    # mirroring RAG's "a doc is scored by its single best chunk" rule. Vectors are
-    # pre-normalised above, so each passage comparison is just a dot product. Each
-    # unordered pair is scored once, then mirrored into both nodes' peer lists.
+    # Cosine similarity between two docs = their best-matching passage pair (max
+    # cosine), mirroring RAG's "a doc is scored by its single best chunk" rule.
+    # Vectors are pre-normalised above, so each passage comparison is a dot
+    # product. Every unordered pair is scored once into sim[].
     ids = list(units_by_id.keys())
     peers = {id_: [] for id_ in ids}
+    sim = {}
     for i in range(len(ids)):
         id1 = ids[i]
         passages1 = units_by_id[id1]
@@ -1306,15 +1373,33 @@ def api_ai_knowledge_map():
                     if s > best:
                         best = s
             if best >= 0.55:
+                sim[frozenset((id1, id2))] = best
                 peers[id1].append((best, id2))
                 peers[id2].append((best, id1))
 
-    edges = []
+    # Symmetric k-NN: keep an edge if it is in the top-6 of EITHER endpoint, so
+    # every node shows its strongest links. (The old code only emitted a pair if
+    # the lower-id node ranked it, so a doc whose single best relation pointed at
+    # a lower id could lose it — an arbitrary, id-order-dependent omission.)
+    kept = set()
     for id1 in ids:
         peers[id1].sort(reverse=True)
-        for s, id2 in peers[id1][:6]:  # at most 6 edges per node
-            if id1 < id2:              # deduplicate (only emit each pair once)
-                edges.append({"from": id1, "to": id2, "weight": round(s, 3)})
+        for s, id2 in peers[id1][:6]:
+            kept.add(frozenset((id1, id2)))
+
+    # Authoritative curated relations from "RELATED:" cross-references. Always
+    # drawn (independent of the cosine cap) and flagged so the UI can render them
+    # distinctly; weight is floored so they read as strong on the slate→amber ramp.
+    curated = _km_curated_edges(docs)
+
+    edges = []
+    for pair in kept | curated:
+        id1, id2 = sorted(pair)
+        is_curated = pair in curated
+        cos = sim.get(pair, 0.0)
+        weight = round(max(cos, 0.80), 3) if is_curated else round(cos, 3)
+        edges.append({"from": id1, "to": id2, "weight": weight,
+                      "curated": is_curated})
 
     return jsonify({"nodes": nodes, "edges": edges,
                     "categories": {k: {"label": v["label"], "color": v["color"]}

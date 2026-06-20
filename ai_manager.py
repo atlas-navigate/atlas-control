@@ -577,37 +577,107 @@ _BALLISTIC_SPECIFIC_KEYWORDS = {
     "dope", "dope card", "dope table",
 }
 
-# Keywords that trigger injection of the [CALC:] tag fallback instruction
-_MATH_KEYWORDS = {
-    "calculat", "comput", "solv", "equation", "formula", "convert", "conversion",
-    "how many", "how much", "how far", "how fast", "how long",
-    "plus", "minus", "multipl", "divid", "add", "subtract", "total",
-    "sum", "average", "percent", "%", "ratio", "proportion",
-    "velocity", "acceleration", "force", "mass", "weight", "gravity",
-    "energy", "momentum", "pressure", "density",
-    "kinetic", "potential", "ballistic", "trajectory", "projectile",
-    "muzzle", "bullet", "range", "drop", "drift",
-    "sqrt", "square root", "log", "logarithm",
-    "sin", "cos", "tan", "degree", "radian",
-    "meter", "kilomet", "kilometer", "mile", "feet", "foot", "yard",
-    "inch", "pound", "kilogram", "gram", "ounce", "liter", "gallon",
-    "celsius", "fahrenheit", "kelvin", "mph", "kph",
-    "distance", "speed", "time", "height", "altitude", "depth",
-    "area", "volume", "circumference", "radius", "diameter",
+# Short, collision-prone tokens that must match as WHOLE WORDS, never as bare
+# substrings. These are abbreviations, math-function names, and units of
+# measure — tokens whose substring matches land in UNRELATED common words and
+# flip a query's routing:
+#   mil → miles/military/millionaire   lat → relate/plate/installation
+#   lon → "how long"/along/colony      ram → paramedic/program/mainframe
+#   tan → distance/mountain            add → address/saddle      grain → migraine
+#   gram → program/telegram            force → reinforce/enforce
+# Matching these as substrings is what routed a nuclear "30 miles from the
+# blast" question to ballistics. Same precedent as the phrase-only "emp" guard.
+#
+# Deliberately EXCLUDED: topical content words (snake, water, wound, infect,
+# signal, power, voltage…) whose "collisions" are on-topic variants we WANT to
+# keep matching (rattlesnake, waterproof, wounded, infections). A trailing 's'
+# is tolerated so real plurals still match ("hold 2 mils", "30 miles").
+# Consulted by _kw_hit(); everything not listed here stays a substring match.
+_WORD_BOUNDARY_KEYWORDS = {
+    # unit & angular abbreviations
+    "mil", "moa", "mrad", "fps", "mph", "kph",
+    # math function names & operators
+    "sin", "cos", "tan", "log", "sqrt", "add", "sum", "plus", "minus",
+    "total", "ratio", "mass", "area", "inch", "time",
+    # units of measure
+    "mile", "feet", "foot", "yard", "gram", "ounce", "pound", "meter",
+    "liter", "gallon",
+    # ballistic / quantity short tokens
+    "spin", "drift", "drop", "range", "force", "grain", "rifle", "bullet",
+    "speed",
+    # host-telemetry abbreviations (live-sense gate)
+    "ram", "cpu", "gpu", "snr", "rssi", "gps", "lat", "lon", "hop", "hops",
+    "temp", "temps", "stat", "stats", "status", "node", "nodes", "link",
+    "disk", "map", "model", "relay", "online", "sensor",
+    # "radio" must be whole-word so "radioactive"/"radiology"/"radiogram" do
+    # not pull in mesh-radio context or the comms topic category.
+    "radio",
+    # survival/nav acronyms that collide with common words
+    "utm", "mgrs", "cbrn", "gmrs", "edc", "cme", "sos",
 }
 
-# Keywords that trigger the full two-pass agent loop (extract → compute → answer)
-_PHYSICS_KEYWORDS = {
+
+def _kw_hit(kw, text):
+    """True if keyword kw appears in (lowercased) text.
+
+    Most keywords use a plain substring test. Tokens in _WORD_BOUNDARY_KEYWORDS
+    instead match on word boundaries (with an optional plural 's') so a 3-char
+    unit like 'mil' cannot fire on '30miles'.
+    """
+    if kw in _WORD_BOUNDARY_KEYWORDS:
+        return re.search(r'\b' + re.escape(kw) + r's?\b', text) is not None
+    return kw in text
+
+# Explicit arithmetic operators / function names that, on their own, mean the
+# user wants a number computed — enough to offer the [CALC:] tag hint. Bare unit
+# and quantity nouns ("range", "distance", "depth", "mile") are deliberately NOT
+# here: they pepper ordinary survival questions, and _is_math_query gates them
+# behind compute intent (via _is_physics_query) instead, so "how deep within 30
+# miles of a blast" no longer gets calculator instructions stapled to its prompt.
+_MATH_OPERATOR_KEYWORDS = {
+    "plus", "minus", "multipl", "divid", "subtract",
+    "sum", "average", "percent", "%", "ratio", "proportion",
+    "sqrt", "square root", "log", "logarithm",
+    "sin", "cos", "tan", "radian",
+    "equation", "formula", "arithmetic",
+}
+
+# Keywords that trigger the full two-pass calculator agent (extract → compute →
+# answer), split by strength.
+#
+# STRONG keywords name an unambiguous computation on their own — a physics word
+# problem or a trajectory query.
+#
+# WEAK keywords are bare units / quantity nouns ("range", "mile", "depth",
+# "distance") that also pepper ordinary survival questions ("within 30 miles of
+# a blast", "how deep should the trench be", "how far to the next town"). On
+# their own they must NOT fire the calculator agent: with no real arithmetic to
+# do, the small extraction model fabricates an expression (it emitted
+# mps_to_fps(30e5) for the blast-depth question) which then gets injected as a
+# "pre-verified" result. A WEAK keyword only counts when the query ALSO shows
+# explicit compute/conversion intent (_COMPUTE_INTENT_KEYWORDS).
+_PHYSICS_STRONG_KEYWORDS = {
     "ballistic", "trajectory", "projectile", "bullet drop", "bullet",
     "muzzle velocity", "muzzle energy", "flight time", "time of flight",
-    "range", "maximum range", "elevation angle", "angle of elevation",
-    "kinetic energy", "momentum", "velocity", "acceleration", "gravity",
-    "force", "physics", "fps", "grain", "caliber", "rifle", "parabolic",
-    "convert", "conversion", "celsius", "fahrenheit", "kelvin",
-    "mph", "kph", "km/h", "m/s", "feet per second",
+    "maximum range", "elevation angle", "angle of elevation",
+    "kinetic energy", "momentum", "parabolic", "feet per second",
+}
+_PHYSICS_WEAK_KEYWORDS = {
+    "range", "velocity", "acceleration", "gravity",
+    "force", "physics", "fps", "grain", "caliber", "rifle",
+    "celsius", "fahrenheit", "kelvin",
+    "mph", "kph", "km/h", "m/s",
     "meter", "kilomet", "kilometer", "mile", "feet", "foot", "yard",
-    "kilogram", "pound", "pound", "ounce", "gram",
+    "kilogram", "pound", "ounce", "gram",
     "distance", "speed", "height", "altitude", "depth",
+}
+# Explicit "compute a number for me" signals. Only these license a WEAK physics
+# keyword to fire the calculator agent. Kept deliberately tight: broad question
+# stems like "how far"/"how long"/"how fast" are NOT here because they are
+# overwhelmingly non-arithmetic in survival questions.
+_COMPUTE_INTENT_KEYWORDS = {
+    "calculat", "comput", "convert", "conversion",
+    "how many", "how much", "equation", "formula", "solve",
 }
 
 _CALC_INSTRUCTION = (
@@ -1339,7 +1409,9 @@ SURVIVAL_DOCS = [
             "• Never reveal stockpile size or cache location\n"
             "• Trade with a lookout present; vary meeting times\n"
             "• Start small; build trust before large transactions\n\n"
-            "TIMELINE: Days 1–7: cash. Weeks 2–4: barter starts. Month 1–3: commodity money dominates."
+            "TIMELINE: Days 1–7: cash. Weeks 2–4: barter starts. Month 1–3: commodity money dominates.\n\n"
+            "RELATED: Community Defense and Mutual Aid Group; Survival Priorities; "
+            "Bug-Out Bag; Field Antibiotics and Common Medications."
         ),
     },
     {
@@ -1524,7 +1596,9 @@ SURVIVAL_DOCS = [
             "PEST/DISEASE MANAGEMENT:\n"
             "Crop rotation: never same plant family in same bed two years running.\n"
             "Neem oil: organic pesticide + fungicide. Diatomaceous earth: kills crawling insects.\n"
-            "Marigolds: companion plant that repels aphids and nematodes."
+            "Marigolds: companion plant that repels aphids and nematodes.\n\n"
+            "RELATED: Survival Gardening; Food Preservation Without Refrigeration; "
+            "Caloric Needs and Food Rationing; Trapping, Snaring & Fishing."
         ),
     },
 
@@ -1551,7 +1625,9 @@ SURVIVAL_DOCS = [
             "Starting watts = running watts × 1.5–3× for motor loads.\n"
             "3,500W handles: refrigerator + lights + phone charging.\n\n"
             "CONSERVATION: maintain tire pressure (+3% fuel use when under-inflated); "
-            "remove excess weight (100 lb ≈ 1% worse mpg); minimize idling."
+            "remove excess weight (100 lb ≈ 1% worse mpg); minimize idling.\n\n"
+            "RELATED: Vehicle Maintenance and Off-Road Recovery; "
+            "Off-Grid Power and Battery Management; Barter Economics."
         ),
     },
     {
@@ -1577,7 +1653,8 @@ SURVIVAL_DOCS = [
             "Snatch block doubles pulling force and allows direction change.\n\n"
             "MAINTENANCE SCHEDULE:\n"
             "Oil: 3,000–5,000 mi. Air filter: 12,000–15,000 mi (more in dust).\n"
-            "Coolant flush: 2 years. Belts/hoses: inspect annually. Battery: test annually, replace at 5+ yrs."
+            "Coolant flush: 2 years. Belts/hoses: inspect annually. Battery: test annually, replace at 5+ yrs.\n\n"
+            "RELATED: Fuel Storage and Vehicle Fuel Math; Off-Grid Power and Battery Management."
         ),
     },
 
@@ -4261,7 +4338,7 @@ class AIManager:
         q = query.lower()
         best_cat, best_hits = None, 0
         for cat, keywords in self._QUERY_CATEGORY_KEYS.items():
-            hits = sum(1 for kw in keywords if kw in q)
+            hits = sum(1 for kw in keywords if _kw_hit(kw, q))
             if hits > best_hits:
                 best_cat, best_hits = cat, hits
         return best_cat if best_hits >= 1 else None
@@ -4414,25 +4491,47 @@ class AIManager:
 
     # ------------------------------------------------------------------
     def _is_math_query(self, user_message):
-        """Return True if the user message appears to require computation."""
+        """Return True if the user message appears to require computation.
+
+        Fires on an explicit compute/conversion verb, a bare arithmetic
+        operator / math-function token, or anything _is_physics_query already
+        recognises (strong physics, ballistics, or a unit noun WITH compute
+        intent). A bare quantity noun alone no longer qualifies, so survival
+        questions that merely mention a distance/depth don't get the [CALC:]
+        hint injected."""
         msg_lower = user_message.lower()
-        return any(kw in msg_lower for kw in _MATH_KEYWORDS)
+        if any(kw in msg_lower for kw in _COMPUTE_INTENT_KEYWORDS):
+            return True
+        if any(_kw_hit(kw, msg_lower) for kw in _MATH_OPERATOR_KEYWORDS):
+            return True
+        return self._is_physics_query(user_message)
 
     def _is_physics_query(self, user_message):
         """Return True if the query involves physics/ballistics — triggers the agent loop.
 
-        Ballistic queries ALWAYS qualify: compose the two gates so a keyword gap in
-        _PHYSICS_KEYWORDS can never starve the compute path (this exact drift between
-        _is_ballistic_query and _is_physics_query is what let "spin drift of a 9mm…"
-        fall through to the bare model)."""
+        Three gates, in order of confidence:
+          1. Ballistic queries ALWAYS qualify (a keyword gap here must never
+             starve the compute path — this exact drift is what let "spin drift
+             of a 9mm…" fall through to the bare model).
+          2. A STRONG physics keyword names a computation on its own.
+          3. A WEAK keyword (bare unit / quantity noun) only qualifies alongside
+             explicit compute intent, so an ordinary survival question that
+             merely mentions a distance ("within 30 miles of a blast") does not
+             drag in the calculator agent and its fabricated expressions.
+        """
         msg_lower = user_message.lower()
-        return (self._is_ballistic_query(user_message)
-                or any(kw in msg_lower for kw in _PHYSICS_KEYWORDS))
+        if self._is_ballistic_query(user_message):
+            return True
+        if any(_kw_hit(kw, msg_lower) for kw in _PHYSICS_STRONG_KEYWORDS):
+            return True
+        if any(_kw_hit(kw, msg_lower) for kw in _PHYSICS_WEAK_KEYWORDS):
+            return any(kw in msg_lower for kw in _COMPUTE_INTENT_KEYWORDS)
+        return False
 
     def _is_ballistic_query(self, user_message):
         """Return True if the query is specifically about bullet trajectory / ballistic drop."""
         msg_lower = user_message.lower()
-        return any(kw in msg_lower for kw in _BALLISTIC_SPECIFIC_KEYWORDS)
+        return any(_kw_hit(kw, msg_lower) for kw in _BALLISTIC_SPECIFIC_KEYWORDS)
 
     def _identify_round(self, user_message):
         """
@@ -5213,8 +5312,8 @@ class AIManager:
         # telemetry + the full mesh state (which the small model otherwise tries
         # to narrate and hallucinates around).  GPS grounding stays always-on.
         msg_lower   = user_message.lower()
-        wants_stats = any(k in msg_lower for k in _SYSTEM_STATS_KEYWORDS)
-        wants_mesh  = any(k in msg_lower for k in _MESH_CONTEXT_KEYWORDS)
+        wants_stats = any(_kw_hit(k, msg_lower) for k in _SYSTEM_STATS_KEYWORDS)
+        wants_mesh  = any(_kw_hit(k, msg_lower) for k in _MESH_CONTEXT_KEYWORDS)
 
         # System stats context — only when the message asks about host telemetry
         try:
@@ -5351,10 +5450,10 @@ class AIManager:
                 offline = [n for n in nodes if n not in online]
 
                 msg_lower = user_message.lower()
-                want_pos = any(w in msg_lower for w in ("location","position","map","gps","lat","lon","coord","where"))
-                want_topo = any(w in msg_lower for w in ("topology","link","snr","rssi","signal","hop","route","path","neighbor"))
-                want_tel = any(w in msg_lower for w in ("telemetry","battery","voltage","humidity","pressure","temp","sensor"))
-                want_msg = any(w in msg_lower for w in ("message","chat","said","text","sent","received","broadcast"))
+                want_pos = any(_kw_hit(w, msg_lower) for w in ("location","position","map","gps","lat","lon","coord","where"))
+                want_topo = any(_kw_hit(w, msg_lower) for w in ("topology","link","snr","rssi","signal","hop","route","path","neighbor"))
+                want_tel = any(_kw_hit(w, msg_lower) for w in ("telemetry","battery","voltage","humidity","pressure","temp","sensor"))
+                want_msg = any(_kw_hit(w, msg_lower) for w in ("message","chat","said","text","sent","received","broadcast"))
 
                 node_lines = []
                 for n in nodes:
@@ -5537,7 +5636,7 @@ class AIManager:
             logger.info("Self-query detected: injected Ray self-architecture doc")
 
         # RAG context — skip if the query is about live dashboard data (already injected above)
-        is_live_query = any(kw in msg_lower for kw in _LIVE_DATA_KEYWORDS)
+        is_live_query = any(_kw_hit(kw, msg_lower) for kw in _LIVE_DATA_KEYWORDS)
         meta["is_live_query"] = is_live_query
         if settings.get("rag_enabled", "true").lower() == "true" and not is_live_query:
             try:
