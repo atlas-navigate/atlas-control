@@ -820,8 +820,9 @@ def get_latest_positions_per_node():
 
 _APP_SETTING_DEFAULTS = {
     "serial_port": "AUTO",
-    "gps_port": "AUTO",
+    "gps_port": "AUTO",            # AUTO scans USB, 40-pin UART (ttyTHS*), then I2C/DDC; or e.g. i2c:7:0x42
     "gps_baud": "9600",
+    "local_node_id": "",          # canonical node id of this Atlas device; unifies GPS fixes with the radio's "Atlas Control" node
     "web_port": "5000",
     "dashboard_refresh_s": "5",
     "battery_alert_pct": "20",

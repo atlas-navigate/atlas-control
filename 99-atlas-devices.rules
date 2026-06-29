@@ -5,5 +5,8 @@
 # Heltec WiFi LoRa 32 v4 (Espressif 303a:1001)
 SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="1001", SYMLINK+="meshtastic", MODE="0666"
 
-# u-blox NEO-M8U GPS (1546:01a8)
+# u-blox NEO-M8U GPS over USB (1546:01a8). When the GPS is instead wired to
+# the 40-pin header it presents NOT as a tty but as I2C/DDC on /dev/i2c-7 at
+# address 0x42 (header pins 3=SDA, 5=SCL) — no udev symlink applies; access is
+# via the i2c group (granted by install.sh) and gps_node.py auto-detects it.
 SUBSYSTEM=="tty", ATTRS{idVendor}=="1546", ATTRS{idProduct}=="01a8", SYMLINK+="gps", MODE="0666"

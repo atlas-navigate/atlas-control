@@ -3424,7 +3424,12 @@ ATLAS_DOCS = [
         "content": (
             "Atlas Control integrates GPS at two levels: the host device GPS and mesh node GPS.\n\n"
             "HOST GPS (SparkFun NEO-M8U):\n"
-            "• The Jetson has a dedicated SparkFun NEO-M8U GPS/IMU receiver connected via serial port.\n"
+            "• The Jetson has a dedicated SparkFun NEO-M8U GPS/IMU receiver. It connects either over USB "
+            "or over the 40-pin GPIO header — as I2C/Qwiic (the u-blox DDC interface, /dev/i2c-7 at address "
+            "0x42) or as a UART (/dev/ttyTHS1). Atlas auto-detects all of these; the active port (e.g. "
+            "'i2c:7:0x42') is shown in GPS Status.\n"
+            "• The host GPS fix is attributed to this Atlas device's own node ('Atlas Control'), not a "
+            "separate entry, so the device shows as a single node on the map and node list.\n"
             "• Fix status is shown in the Dashboard top bar (Atlas + GPS Status tile) and on the Stats tab.\n"
             "• When a fix is acquired, the GPS position is shown on the Map as a distinct 'you are here' marker.\n"
             "• The GPS position is also injected into AI chat context when 'Inject mesh context' is enabled.\n"

@@ -24,6 +24,12 @@ import logging
 from typing import Optional, Callable
 
 try:
+    import fcntl          # Linux-only; needed for the I2C (DDC) GPS path
+    _HAS_FCNTL = True
+except ImportError:
+    _HAS_FCNTL = False
+
+try:
     import numpy as np
     _HAS_NUMPY = True
 except ImportError:
@@ -220,6 +226,181 @@ class _Kalman2D:
 _GPS_UDEV = "/dev/gps"
 
 
+# ── I2C (u-blox DDC) GPS support ─────────────────────────────────────────────
+#
+# The SparkFun NEO-M8U also exposes its receiver on a Qwiic / I2C connector
+# (SDA/SCL on the Jetson 40-pin header pins 3 & 5 = /dev/i2c-7). u-blox calls
+# this the DDC port. The whole GpsNode is written against a pyserial object,
+# so rather than fork the read loop we wrap I2C in a tiny serial-compatible
+# shim and feed it through unchanged.
+#
+# DDC protocol: register 0xFD/0xFE hold the 16-bit count of bytes available;
+# register 0xFF is the data stream (NMEA + UBX, returns 0xFF when idle). We
+# set the pointer to 0xFD, read the count, then read exactly that many bytes
+# from the stream.
+
+_I2C_SLAVE       = 0x0703    # <linux/i2c-dev.h> ioctl: bind slave address to fd
+_DDC_DEFAULT_ADDR = 0x42     # u-blox default DDC (I2C) 7-bit address
+_I2C_PORT_RE     = "i2c:"    # sentinel prefix for a resolved I2C GPS target
+
+
+def _parse_i2c_port(spec):
+    """Parse an 'i2c:<bus>:<addr>' sentinel into (bus:int, addr:int).
+    Address is optional and defaults to the u-blox DDC address. Returns
+    None if `spec` is not an I2C target."""
+    if not isinstance(spec, str) or not spec.startswith(_I2C_PORT_RE):
+        return None
+    parts = spec[len(_I2C_PORT_RE):].split(":")
+    try:
+        bus = int(parts[0])
+    except (ValueError, IndexError):
+        return None
+    addr = _DDC_DEFAULT_ADDR
+    if len(parts) > 1 and parts[1]:
+        try:
+            addr = int(parts[1], 0)
+        except ValueError:
+            pass
+    return bus, addr
+
+
+class _I2CSerial:
+    """Minimal pyserial-compatible reader for a u-blox GPS on the I2C/DDC bus.
+
+    Implements only the surface GpsNode uses: ``is_open``, ``read(size)``,
+    ``write(data)``, ``close()``. Bytes are pulled from the DDC stream into
+    an internal buffer; ``read`` drains that buffer with the same timeout
+    semantics as ``serial.Serial`` (returns what's available, possibly
+    fewer than requested, b"" on timeout)."""
+
+    def __init__(self, bus, addr=_DDC_DEFAULT_ADDR, baud=0, timeout=1.0):
+        self.bus      = bus
+        self.addr     = addr
+        self.timeout  = timeout
+        self._buf     = bytearray()
+        self._fd      = os.open(f"/dev/i2c-{bus}", os.O_RDWR)
+        try:
+            fcntl.ioctl(self._fd, _I2C_SLAVE, addr)
+        except OSError:
+            os.close(self._fd)
+            raise
+        self.is_open  = True
+
+    def _poll(self, cap=255):
+        """Pull any pending DDC bytes into the buffer; return count read."""
+        try:
+            os.write(self._fd, b"\xFD")          # point at byte-count register
+            hl = os.read(self._fd, 2)
+            if len(hl) < 2 or hl[0] == 0xFF:     # 0xFFFF => bus idle
+                return 0
+            n = (hl[0] << 8) | hl[1]
+            if n <= 0:
+                return 0
+            chunk = os.read(self._fd, min(n, cap))  # pointer is now at 0xFF
+            if chunk:
+                self._buf.extend(chunk)
+            return len(chunk)
+        except OSError:
+            return 0
+
+    def read(self, size=1):
+        deadline = time.time() + (self.timeout or 0.0)
+        while not self._buf:                      # wait for first byte(s)
+            if self._poll():
+                break
+            if self.timeout is not None and time.time() >= deadline:
+                return b""
+            time.sleep(0.02)
+        self._poll()                              # opportunistically top up
+        n = min(size, len(self._buf))
+        out = bytes(self._buf[:n])
+        del self._buf[:n]
+        return out
+
+    def write(self, data):
+        try:
+            os.write(self._fd, bytes(data))       # DDC accepts raw UBX/NMEA in
+            return len(data)
+        except OSError:
+            return 0
+
+    def reset_input_buffer(self):
+        self._buf.clear()
+
+    def flush(self):
+        pass
+
+    def close(self):
+        self.is_open = False
+        try:
+            os.close(self._fd)
+        except OSError:
+            pass
+
+
+def _i2c_has_gps(bus, addr=_DDC_DEFAULT_ADDR, budget=2.0):
+    """Return True if a u-blox-style GPS at (bus, addr) is streaming
+    NMEA/UBX over DDC within `budget` seconds."""
+    if not _HAS_FCNTL or not os.path.exists(f"/dev/i2c-{bus}"):
+        return False
+    try:
+        s = _I2CSerial(bus, addr, timeout=0.5)
+    except OSError:
+        return False
+    try:
+        deadline = time.time() + budget
+        buf = bytearray()
+        while time.time() < deadline and len(buf) < 256:
+            chunk = s.read(256)
+            if chunk:
+                buf.extend(chunk)
+            if b"$G" in buf or b"$B" in buf or b"\xb5\x62" in buf:
+                return True
+        return b"$G" in buf or b"$B" in buf or b"\xb5\x62" in buf
+    finally:
+        s.close()
+
+
+def _scan_gps_i2c(exclude_addrs=(0x41,)):
+    """Probe the 40-pin header I2C buses for a u-blox GPS at 0x42 and
+    return an 'i2c:<bus>:0x42' sentinel, or None. Bus 7 = header pins
+    3/5 (also carries the UPS at 0x41), bus 1 = pins 27/28."""
+    if not _HAS_FCNTL:
+        return None
+    addr = _DDC_DEFAULT_ADDR
+    if addr in exclude_addrs:
+        return None
+    for bus in (7, 1, 0, 2):
+        if _i2c_has_gps(bus, addr):
+            return f"{_I2C_PORT_RE}{bus}:0x{addr:02x}"
+    return None
+
+
+def _sniff_nmea(port, baud, budget=2.5, read_timeout=0.4):
+    """Listen briefly on `port` for an NMEA ``$`` sentence or a UBX sync
+    pair (0xB5 0x62). Returns True if GPS-like traffic appears within
+    `budget` seconds.
+
+    Time-bounded on purpose: an on-board UART such as /dev/ttyTHS1 (the
+    Jetson 40-pin header pins 8/10) always opens even when nothing is
+    wired to it, so a fixed readline count would block budget×N seconds
+    on a silent port and stall GPS startup. We bound by wall-clock
+    instead.
+    """
+    try:
+        with serial.Serial(port, baud, timeout=read_timeout) as s:
+            deadline = time.time() + budget
+            while time.time() < deadline:
+                raw = s.readline()
+                if not raw:
+                    continue
+                if raw[:1] == b"$" or (len(raw) >= 2 and raw[0] == 0xB5 and raw[1] == 0x62):
+                    return True
+    except Exception:
+        return False
+    return False
+
+
 def _scan_gps_port(exclude=None, baud=9600, timeout=2):
     if not _HAS_SERIAL:
         return None
@@ -236,19 +417,21 @@ def _scan_gps_port(exclude=None, baud=9600, timeout=2):
             if os.path.realpath(p) not in excl:
                 return p
 
-    for port in sorted(_glob.glob("/dev/ttyACM*") + _glob.glob("/dev/ttyUSB*")):
+    # USB CDC/FTDI GPS first (historical default), then the on-board
+    # high-speed UARTs exposed on the 40-pin GPIO header (/dev/ttyTHS*),
+    # so a GPS wired to header pins 8 (TX) / 10 (RX) is auto-detected too.
+    candidates = (sorted(_glob.glob("/dev/ttyACM*") + _glob.glob("/dev/ttyUSB*"))
+                  + sorted(_glob.glob("/dev/ttyTHS*")))
+    for port in candidates:
         if os.path.realpath(port) in excl:
             continue
-        try:
-            with serial.Serial(port, baud, timeout=timeout) as s:
-                for _ in range(20):
-                    raw = s.readline()
-                    if not raw:
-                        continue
-                    if raw[:1] == b"$" or (len(raw) >= 2 and raw[0] == 0xB5 and raw[1] == 0x62):
-                        return port
-        except Exception:
-            continue
+        if _sniff_nmea(port, baud, budget=float(timeout)):
+            return port
+
+    # No UART/USB GPS — fall back to the I2C/DDC bus (Qwiic-wired u-blox).
+    i2c = _scan_gps_i2c()
+    if i2c:
+        return i2c
     return None
 
 
@@ -266,6 +449,29 @@ def _hav_m(lat1, lon1, lat2, lon2):
 # ── Main GPS Node ────────────────────────────────────────────────────────────
 
 _FALLBACK_NODE_ID = "local_gps"
+# Persisted canonical id of *this* Atlas device's own node. Once we have ever
+# learned it (from the live mesh radio or the Heltec's USB serial), we remember
+# it so GPS fixes keep landing on the same "Atlas Control" row even when the
+# radio is unplugged — instead of spawning a duplicate "Base Station" node.
+_SELF_ID_SETTING = "local_node_id"
+
+
+def _persisted_self_id() -> Optional[str]:
+    try:
+        v = db.get_app_settings().get(_SELF_ID_SETTING)
+        return v if v and v != _FALLBACK_NODE_ID else None
+    except Exception:
+        return None
+
+
+def _persist_self_id(nid: Optional[str]) -> None:
+    if not nid or nid == _FALLBACK_NODE_ID:
+        return
+    try:
+        if db.get_app_settings().get(_SELF_ID_SETTING) != nid:
+            db.set_app_setting(_SELF_ID_SETTING, nid)
+    except Exception:
+        pass
 
 
 def _heltec_node_id_from_udev() -> Optional[str]:
@@ -463,7 +669,12 @@ class GpsNode:
                     time.sleep(10)
                     continue
 
-                self._ser = serial.Serial(port, self.baud, timeout=1)
+                i2c_target = _parse_i2c_port(port)
+                if i2c_target:
+                    bus, addr = i2c_target
+                    self._ser = _I2CSerial(bus, addr, baud=self.baud, timeout=1)
+                else:
+                    self._ser = serial.Serial(port, self.baud, timeout=1)
                 self._active_port = port
                 self.connected = True
                 self._self_dr_active = False
@@ -532,7 +743,8 @@ class GpsNode:
             time.sleep(0.05)
             self._ser.write(_ubx_cfg_msg(_CLS_ESF, _ID_ESF_STATUS, 5))
             time.sleep(0.05)
-            logger.info("UBX protocol configured on NEO-M8U USB port @ 1 Hz")
+            logger.info("UBX protocol configured on NEO-M8U (%s) @ 1 Hz",
+                        self._active_port or "auto")
         except Exception as e:
             logger.warning(f"UBX cfg (non-fatal): {e}")
 
@@ -971,17 +1183,26 @@ class GpsNode:
     # ── Storage ─────────────────────────────────────────────────────────────
 
     def _get_node_id(self) -> str:
+        # 1. Live mesh connection knows our real node number.
         if self.mesh_manager and self.mesh_manager.my_node_id is not None:
             nid = self.mesh_manager.my_node_id
-            return "!" + format(nid, "08x") if isinstance(nid, int) else str(nid)
-        # Mesh isn't connected yet (or is kill-switched). Use the Heltec
-        # radio's canonical Meshtastic node ID derived from its USB serial
-        # so the GPS reader populates the same row the radio will use once
-        # mesh comes back. Falls through to the legacy "local_gps"
-        # placeholder only if no Heltec/Espressif device is attached.
+            sid = "!" + format(nid, "08x") if isinstance(nid, int) else str(nid)
+            _persist_self_id(sid)
+            return sid
+        # 2. Heltec radio present on USB — derive its canonical Meshtastic node
+        # ID from its USB serial so the GPS reader populates the same row the
+        # radio will use once mesh comes back.
         derived = _heltec_node_id_from_udev()
         if derived:
+            _persist_self_id(derived)
             return derived
+        # 3. Radio unplugged / mesh down, but we've resolved our id before:
+        # reuse it so GPS fixes stay on the one "Atlas Control" node instead
+        # of forking a separate "Base Station" placeholder.
+        persisted = _persisted_self_id()
+        if persisted:
+            return persisted
+        # 4. No identity available at all — legacy placeholder.
         return _FALLBACK_NODE_ID
 
     def _cleanup_fallback(self):

@@ -30,7 +30,17 @@ sudo systemctl restart atlas-control
 sleep 3
 echo ""
 echo "Devices:"
-ls -la /dev/meshtastic /dev/gps /dev/ttyACM* /dev/ttyUSB* 2>/dev/null || true
+ls -la /dev/meshtastic /dev/gps /dev/ttyACM* /dev/ttyUSB* /dev/ttyTHS* 2>/dev/null || true
+
+echo ""
+echo "I2C GPS (u-blox DDC @ 0x42; 40-pin header pins 3/5 = bus 7):"
+for b in 7 1; do
+  if command -v i2cdetect >/dev/null 2>&1 && [ -e "/dev/i2c-$b" ]; then
+    if i2cdetect -y -r "$b" 2>/dev/null | grep -q ' 42'; then
+      echo "  bus $b: GPS detected at 0x42"
+    fi
+  fi
+done
 
 echo ""
 echo "Service command:"
