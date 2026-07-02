@@ -1,7 +1,16 @@
 """
 Meshtastic Device Manager
-Handles connection to Heltec V4. Uses /dev/meshtastic udev symlink when available,
-falls back to meshtastic library auto-scan across all serial ports.
+Handles connection to Heltec V4 over either transport:
+  * USB-C  — enumerates as USB CDC (Espressif 303a:1001) and gets the
+             /dev/meshtastic udev symlink; also reachable via the library's
+             USB auto-scan.
+  * UART   — wired to the Jetson 40-pin header (pins 8=TX/10=RX = /dev/ttyTHS1).
+             There is no USB device, so no udev symlink applies and the
+             meshtastic library's USB-only auto-scan can't see it; we probe the
+             on-board UARTs ourselves and connect on the fixed 115200-baud
+             client-API rate.
+On AUTO the resolver tries the USB symlink, then any probed UART, then a USB
+auto-scan as a last resort.
 """
 import base64
 import os
@@ -219,6 +228,86 @@ def _display_power_w(voltage_v: float | None, current_ma: float | None) -> float
         return round(float(voltage_v) * (float(current_ma) / 1000.0), 3)
     except Exception:
         return None
+
+
+# ── Heltec-on-UART support (40-pin header) ───────────────────────────────────
+# When the Heltec V4 is wired to the Jetson 40-pin header (pins 8=TX/10=RX)
+# instead of USB-C, it presents as an on-board UART (/dev/ttyTHS1) rather than a
+# USB CDC device. The meshtastic client-API framing runs at a fixed 115200 baud
+# and every framed packet starts with the two magic bytes below.
+_UART_BAUD    = 115200
+_FRAME_START1 = 0x94
+_FRAME_START2 = 0xC3
+
+
+def _meshtastic_uart_responds(port, budget=3.0):
+    """Return True if a meshtastic radio answers on `port` (a raw UART).
+
+    The meshtastic library's auto-scan (util.findPorts) only matches known USB
+    VID/PIDs, so a Heltec wired to the 40-pin header UART is invisible to it and
+    must be probed explicitly. We open at the fixed 115200-baud client-API rate,
+    send the wake/resync bytes plus a want_config request, and watch for a
+    framed reply header (START1 START2). Time-bounded on purpose: an on-board
+    UART such as /dev/ttyTHS1 always opens even with nothing wired to it, so the
+    blocking SerialInterface handshake would otherwise stall startup ~20 s per
+    silent port."""
+    if not HAS_MESHTASTIC:
+        return False
+    try:
+        import random
+        import serial  # pyserial, pulled in by the meshtastic dependency
+    except Exception:
+        return False
+    try:
+        with serial.Serial(port, _UART_BAUD, timeout=0.4, write_timeout=1) as s:
+            # Wake a sleeping device / force the parser to resync, then ask for
+            # config so it is guaranteed to emit at least one framed packet.
+            s.write(bytes([_FRAME_START2] * 32))
+            to_radio = mesh_pb2.ToRadio()
+            to_radio.want_config_id = random.randint(1, 0xFFFFFFFF)
+            payload = to_radio.SerializeToString()
+            s.write(bytes([_FRAME_START1, _FRAME_START2,
+                           (len(payload) >> 8) & 0xFF, len(payload) & 0xFF]) + payload)
+            s.flush()
+            deadline = time.time() + budget
+            prev = None
+            while time.time() < deadline:
+                b = s.read(1)
+                if not b:
+                    continue
+                if prev == _FRAME_START1 and b[0] == _FRAME_START2:
+                    return True
+                prev = b[0]
+    except Exception as e:
+        logger.debug("UART probe on %s failed: %s", port, e)
+        return False
+    return False
+
+
+def _scan_meshtastic_uart(exclude=None, budget=3.0):
+    """Return on-board UART device paths (/dev/ttyTHS*) that answer the
+    meshtastic framing, for a Heltec wired to the 40-pin header instead of
+    USB-C. `exclude` skips a path already queued (e.g. the USB symlink target)."""
+    import glob
+    excl = set()
+    for p in (exclude or ()):
+        if not p:  # skip None / "" (e.g. absent USB symlink target)
+            continue
+        try:
+            excl.add(os.path.realpath(p))
+        except (OSError, TypeError):
+            pass
+    found = []
+    for port in sorted(glob.glob("/dev/ttyTHS*")):
+        try:
+            if os.path.realpath(port) in excl:
+                continue
+        except OSError:
+            pass
+        if _meshtastic_uart_responds(port, budget=budget):
+            logger.info("Meshtastic radio detected on UART %s (40-pin header)", port)
+            found.append(port)
+    return found
 
 
 class MeshManager:
@@ -599,9 +688,17 @@ class MeshManager:
 
         self.connecting = True
         try:
+            # Release any interface lingering from a previous attempt before we
+            # probe, so a stale exclusive lock on /dev/ttyTHS1 (our own reader
+            # thread mid-teardown) can't make the UART probe below fail to open
+            # the very port the radio is on.
+            self._teardown_interface()
+
             candidates = []
             symlink_target = None
             if self.port in ("AUTO", None):
+                # 1) USB-C path: the udev symlink only exists when a USB Heltec
+                #    is plugged in.
                 if os.path.exists(_UDEV_SYMLINK):
                     logger.info("Using udev symlink %s", _UDEV_SYMLINK)
                     candidates.append(_UDEV_SYMLINK)
@@ -609,11 +706,15 @@ class MeshManager:
                         symlink_target = os.path.realpath(_UDEV_SYMLINK)
                     except OSError:
                         symlink_target = None
-                # Fall back to Meshtastic's own auto-scan only when the
-                # symlink isn't pointing at anything — otherwise auto-scan
-                # will pick the same /dev/ttyACMx and burn another 30 s on
-                # the same unresponsive radio.
-                if symlink_target is None:
+                # 2) UART path: Heltec wired to the 40-pin header (/dev/ttyTHS1).
+                #    The meshtastic library's USB-only auto-scan can't find a raw
+                #    UART, so probe the on-board UARTs ourselves and add any that
+                #    speak the meshtastic framing.
+                candidates.extend(_scan_meshtastic_uart(exclude=[symlink_target]))
+                # 3) USB auto-scan as a last resort — only when nothing concrete
+                #    was queued above. (Skipping it when the symlink is present
+                #    avoids burning another ~30 s re-scanning the same radio.)
+                if not candidates:
                     candidates.append(None)
             else:
                 candidates.append(self.port)

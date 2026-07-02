@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Atlas Control — Local Offline GUI
-For Jetson Orin Nano + Heltec V4 on /dev/ttyACM0
+For Jetson Orin Nano + Heltec V4 on the 40-pin header UART (/dev/ttyTHS1;
+falls back to USB-C /dev/ttyACM0 if plugged in)
 """
 # Save the real stdlib Queue BEFORE monkey patching.
 # meshtastic's DeferredExecution runs in a real OS thread (not a greenlet),
@@ -4241,9 +4242,9 @@ def main():
 
     # Kill switch: if /atlas_data/atlas-control/data/mesh_disabled exists,
     # don't try to talk to the radio. The Heltec V4 firmware can spew
-    # continuous USB-CDC bytes that aren't valid Meshtastic frames; the
-    # library's reader thread then pulls those bytes one at a time in a
-    # tight Python loop and pins a core, starving the gevent WSGI worker.
+    # continuous bytes (over USB-CDC or the UART) that aren't valid Meshtastic
+    # frames; the library's reader thread then pulls those bytes one at a time
+    # in a tight Python loop and pins a core, starving the gevent WSGI worker.
     # Touch the file to disable, remove it to re-enable, then restart.
     _mesh_kill = os.path.join(_BASE_DIR, "data", "mesh_disabled")
     if args.demo:

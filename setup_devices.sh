@@ -33,6 +33,19 @@ echo "Devices:"
 ls -la /dev/meshtastic /dev/gps /dev/ttyACM* /dev/ttyUSB* /dev/ttyTHS* 2>/dev/null || true
 
 echo ""
+echo "Heltec V4 mesh radio (USB-C = /dev/meshtastic, or 40-pin UART pins 8/10 = /dev/ttyTHS1):"
+if [ -e /dev/meshtastic ]; then
+  echo "  USB: /dev/meshtastic present"
+fi
+"$SCRIPT_DIR/venv/bin/python3" -c "
+import sys; sys.path.insert(0, '$SCRIPT_DIR')
+import mesh_manager as mm
+found = mm._scan_meshtastic_uart(exclude=[None])
+print('  UART: meshtastic radio on ' + ', '.join(found) if found
+      else '  UART: no meshtastic radio answering on /dev/ttyTHS* (check wiring pins 8=TX/10=RX/GND + Serial module PROTO @115200 on the Heltec)')
+" 2>/dev/null || echo "  UART: probe skipped (mesh_manager import failed)"
+
+echo ""
 echo "I2C GPS (u-blox DDC @ 0x42; 40-pin header pins 3/5 = bus 7):"
 for b in 7 1; do
   if command -v i2cdetect >/dev/null 2>&1 && [ -e "/dev/i2c-$b" ]; then

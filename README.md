@@ -24,6 +24,45 @@ Runs 100% offline — no internet required after installation.
 - Heltec V4 Meshtastic radio
 - Optional: Waveshare UPS module with INA219 telemetry
 
+### Heltec V4 mesh radio: USB-C or 40-pin UART
+
+The radio works over USB-C out of the box (udev symlinks it to
+`/dev/meshtastic`). To free the USB port it can instead be wired to the
+Jetson 40-pin header (see `heltec-v4-pinmap.webp`):
+
+| Jetson (40-pin)      | Heltec V4 (header J2)   |
+| -------------------- | ----------------------- |
+| pin 8 (UART1 TX)     | J2 pin 5 (`U0RXD`)      |
+| pin 10 (UART1 RX)    | J2 pin 6 (`U0TXD`)      |
+| GND (pin 6/9)        | J2 pin 1 (GND)          |
+| 5V (pin 2/4) or USB  | J2 pin 2 (5V in)        |
+
+Two one-time setup steps for the UART path:
+
+1. **Radio:** the ESP32-S3 serves the Meshtastic client API over native USB
+   only, so the Serial module must be told to serve it on the header pins
+   (run once, over USB):
+
+   ```bash
+   meshtastic --port /dev/ttyACM0 \
+     --set serial.enabled true --set serial.mode PROTO \
+     --set serial.rxd 44 --set serial.txd 43 --set serial.baud BAUD_115200
+   ```
+
+   The device commits config slowly — verify with `--get serial` after it
+   reboots (expect `enabled: True`, `mode: 2`).
+
+2. **Jetson:** JetPack 6.2.2+ has a kernel bug that corrupts UART RX on
+   `/dev/ttyTHS1` (DMA'd bytes arrive as `0x00`). `install.sh` detects
+   affected devices and installs the fix automatically (a reboot is
+   required); see `jetson-orin-uart/README.md`.
+
+`mesh_manager.py` finds the radio on either transport automatically (AUTO
+order: USB symlink → probed UART → USB scan). If both are connected at once
+(e.g. USB used purely for power), pin the UART explicitly:
+`PUT /api/settings {"serial_port": "/dev/ttyTHS1"}`, then restart the
+service.
+
 ## Installation
 
 Requires internet access once to download map data. After that, fully offline.
