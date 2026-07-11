@@ -1261,7 +1261,10 @@ import sys; sys.path.insert(0, '$APP_DIR')
 import database
 s = database.get_app_settings()
 updates = {}
-if s.get('serial_port') in (None, '', '/dev/ttyACM1'):
+if s.get('serial_port') in (None, '', '/dev/ttyACM1', '/dev/ttyTHS1'):
+    # /dev/ttyTHS1 was pinned while the Heltec rode the 40-pin UART (Jun 2026);
+    # the radio is back on USB-C. AUTO covers both: it prefers the USB symlink
+    # and still probes the UART when no USB radio is present.
     updates['serial_port'] = 'AUTO'
 if s.get('gps_port') in (None, '', '/dev/ttyACM0'):
     updates['gps_port'] = 'AUTO'

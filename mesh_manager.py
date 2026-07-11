@@ -9,8 +9,10 @@ Handles connection to Heltec V4 over either transport:
              meshtastic library's USB-only auto-scan can't see it; we probe the
              on-board UARTs ourselves and connect on the fixed 115200-baud
              client-API rate.
-On AUTO the resolver tries the USB symlink, then any probed UART, then a USB
-auto-scan as a last resort.
+On AUTO the resolver uses the USB symlink when it exists (the udev VID/PID
+match is definitive, so the UART probe is skipped — it costs ~3 s per silent
+on-board UART on every reconnect); otherwise it probes the UARTs, then falls
+back to the library's USB auto-scan.
 """
 import base64
 import os
@@ -695,22 +697,21 @@ class MeshManager:
             self._teardown_interface()
 
             candidates = []
-            symlink_target = None
             if self.port in ("AUTO", None):
                 # 1) USB-C path: the udev symlink only exists when a USB Heltec
-                #    is plugged in.
+                #    is plugged in, so its presence is a definitive VID/PID
+                #    match — no need to probe anything else.
                 if os.path.exists(_UDEV_SYMLINK):
                     logger.info("Using udev symlink %s", _UDEV_SYMLINK)
                     candidates.append(_UDEV_SYMLINK)
-                    try:
-                        symlink_target = os.path.realpath(_UDEV_SYMLINK)
-                    except OSError:
-                        symlink_target = None
-                # 2) UART path: Heltec wired to the 40-pin header (/dev/ttyTHS1).
-                #    The meshtastic library's USB-only auto-scan can't find a raw
-                #    UART, so probe the on-board UARTs ourselves and add any that
-                #    speak the meshtastic framing.
-                candidates.extend(_scan_meshtastic_uart(exclude=[symlink_target]))
+                else:
+                    # 2) UART path: Heltec wired to the 40-pin header
+                    #    (/dev/ttyTHS1). The meshtastic library's USB-only
+                    #    auto-scan can't find a raw UART, so probe the on-board
+                    #    UARTs ourselves and add any that speak the meshtastic
+                    #    framing. Only done when no USB radio is present: each
+                    #    silent UART costs ~3 s of probe budget per reconnect.
+                    candidates.extend(_scan_meshtastic_uart())
                 # 3) USB auto-scan as a last resort — only when nothing concrete
                 #    was queued above. (Skipping it when the symlink is present
                 #    avoids burning another ~30 s re-scanning the same radio.)

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
 Atlas Control — Local Offline GUI
-For Jetson Orin Nano + Heltec V4 on the 40-pin header UART (/dev/ttyTHS1;
-falls back to USB-C /dev/ttyACM0 if plugged in)
+For Jetson Orin Nano + Heltec V4 on the front USB-C port (udev symlink
+/dev/meshtastic; the 40-pin header UART /dev/ttyTHS1 remains supported as a
+fallback — see README "Heltec V4 mesh radio")
 """
 # Save the real stdlib Queue BEFORE monkey patching.
 # meshtastic's DeferredExecution runs in a real OS thread (not a greenlet),
@@ -2516,6 +2517,17 @@ def api_settings_get():
 def api_settings_put():
     data = request.json or {}
     db.set_app_settings(data)
+    # Apply a serial-port change to the running mesh manager. connect()
+    # resolves candidates from mesh.port, which is captured once at startup —
+    # without this hand-off a new value only takes effect after a service
+    # restart (which is how a stale pin kept the mesh off the radio when it
+    # moved between the 40-pin UART and USB-C).
+    if mesh and "serial_port" in data:
+        new_port = (data.get("serial_port") or "AUTO").strip() or "AUTO"
+        if new_port != mesh.port:
+            mesh.port = new_port
+            if db.get_app_settings().get("comms_enabled", "true") == "true":
+                threading.Thread(target=mesh.reconnect, daemon=True).start()
     return jsonify({"ok": True, "settings": db.get_app_settings()})
 
 # ------------------------------------------------------------------ API: Phone Tracker

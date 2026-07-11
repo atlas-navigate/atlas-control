@@ -58,10 +58,10 @@ Two one-time setup steps for the UART path:
    required); see `jetson-orin-uart/README.md`.
 
 `mesh_manager.py` finds the radio on either transport automatically (AUTO
-order: USB symlink → probed UART → USB scan). If both are connected at once
-(e.g. USB used purely for power), pin the UART explicitly:
-`PUT /api/settings {"serial_port": "/dev/ttyTHS1"}`, then restart the
-service.
+order: USB symlink if present, otherwise probed UART, then USB scan). If both
+are connected at once (e.g. USB used purely for power), pin the UART
+explicitly: `PUT /api/settings {"serial_port": "/dev/ttyTHS1"}` — the change
+applies live, no restart needed (`"AUTO"` switches back).
 
 ## Installation
 

@@ -5,7 +5,10 @@
 set -e
 
 SUDOERS_FILE="/etc/sudoers.d/atlas-smartctl"
-USER_NAME="${SUDO_USER:-jrfleetwood}"
+# Fall back to the owner of this checkout (matches install.sh) so a root shell
+# without SUDO_USER doesn't grant sudoers to a user that only exists on the
+# dev box.
+USER_NAME="${SUDO_USER:-$(stat -c %U "$(cd "$(dirname "$0")" && pwd)" 2>/dev/null || echo ubuntu)}"
 
 echo "Creating sudoers entry for smartctl..."
 echo "$USER_NAME ALL=(ALL) NOPASSWD: /usr/sbin/smartctl" > "$SUDOERS_FILE"

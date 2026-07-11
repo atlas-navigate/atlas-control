@@ -23,7 +23,9 @@
 set -uo pipefail
 
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ATLAS_USER="${SUDO_USER:-jrfleetwood}"
+# Fall back to the app-dir owner (matches install.sh) so a root shell without
+# SUDO_USER doesn't run the build as a user that only exists on the dev box.
+ATLAS_USER="${SUDO_USER:-$(stat -c %U "$APP_DIR" 2>/dev/null || echo ubuntu)}"
 SWAPFILE="/atlas_data/places_build.swap"
 SWAP_GB=16
 MEM_HIGH="5G"     # soft throttle: at 5G RAM the kernel reclaims/swaps the build hard
