@@ -8569,8 +8569,8 @@ function SettingsPage({
 // Software Update Section
 // ═══════════════════════════════════════════════
 function SoftwareUpdateSection() {
-  const [info, setInfo] = useState(null); // light local info from GET
-  const [check, setCheck] = useState(null); // remote check result from POST
+  const [info, setInfo] = useState(null); // local info + background-check state
+  const [check, setCheck] = useState(null); // latest successful remote result
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState('');
   const [confirming, setConfirming] = useState(false);
@@ -8580,15 +8580,27 @@ function SoftwareUpdateSection() {
   const pollRef = useRef(null);
   const logRef = useRef(null);
   useEffect(() => {
-    api.get('/api/update/check').then(i => {
+    let mounted = true;
+    const loadCheckInfo = () => api.get('/api/update/check').then(i => {
+      if (!mounted) return;
       setInfo(i);
+      if (i !== null && i !== void 0 && i.checked_at) {
+        setCheck(previous => !previous || i.checked_at > previous.checked_at ? i : previous);
+      }
       // Resume the progress view if an update is already running (e.g. the
       // page reloaded mid-update, or another client started one).
-      if (i && i.update_running) setInstall({
+      if (i !== null && i !== void 0 && i.update_running) setInstall(current => current || {
         startVersion: i.version
       });
     }).catch(() => {});
-    return () => clearInterval(pollRef.current);
+    loadCheckInfo();
+    // GitHub checks run on the Atlas service. This lightweight local poll lets
+    // an open Settings page pick up a newly cached result without reloading.
+    const cachePoll = setInterval(loadCheckInfo, 60000);
+    return () => {
+      mounted = false;
+      clearInterval(cachePoll);
+    };
   }, []);
 
   // Poll status while an update runs. The service restarts itself partway
@@ -8623,7 +8635,6 @@ function SoftwareUpdateSection() {
   async function runCheck() {
     setChecking(true);
     setError('');
-    setCheck(null);
     try {
       const r = await api.post('/api/update/check', undefined, {
         timeoutMs: 45000
@@ -8666,6 +8677,7 @@ function SoftwareUpdateSection() {
     color: 'var(--text-muted)'
   };
   const state = status === null || status === void 0 ? void 0 : status.state;
+  const checkedAt = check !== null && check !== void 0 && check.checked_at ? new Date(check.checked_at * 1000).toLocaleString() : '';
   return /*#__PURE__*/React.createElement("div", {
     className: "card",
     style: {
@@ -8689,7 +8701,7 @@ function SoftwareUpdateSection() {
     }
   }, "Atlas Control ", info !== null && info !== void 0 && info.version ? `· ${info.version}` : ''), /*#__PURE__*/React.createElement("div", {
     style: muted
-  }, info !== null && info !== void 0 && info.installed_at ? `Installed ${info.installed_at.slice(0, 10)} · ` : '', "Updates download from GitHub and preserve all data, maps and settings.")), !install && /*#__PURE__*/React.createElement("button", {
+  }, info !== null && info !== void 0 && info.installed_at ? `Installed ${info.installed_at.slice(0, 10)} · ` : '', "Updates download from GitHub and preserve all data, maps and settings.", checkedAt ? ` Last checked ${checkedAt}.` : '')), !install && /*#__PURE__*/React.createElement("button", {
     className: "btn btn-sm",
     style: {
       marginLeft: 'auto'
@@ -8702,7 +8714,13 @@ function SoftwareUpdateSection() {
       fontSize: 12,
       marginBottom: 8
     }
-  }, error), check && !install && (check.update_available ? /*#__PURE__*/React.createElement("div", {
+  }, error), !error && (info === null || info === void 0 ? void 0 : info.last_check_error) && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: 'var(--accent-amber)',
+      fontSize: 12,
+      marginBottom: 8
+    }
+  }, "Automatic check: ", info.last_check_error), check && !install && (check.update_available ? /*#__PURE__*/React.createElement("div", {
     style: {
       border: '1px solid var(--border-bright)',
       borderRadius: 'var(--radius)',
