@@ -1580,7 +1580,7 @@ function DashboardPage({
             className: "card-title"
           }, "\uD83D\uDCF1 Phone Trackers"), /*#__PURE__*/React.createElement("button", {
             className: "btn btn-sm",
-            onClick: () => setPage('map')
+            onClick: () => goTab('map', 'map')
           }, "View on Map")), trackerDevices.length === 0 ? /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
             style: {
               color: 'var(--text-muted)',
@@ -1931,7 +1931,7 @@ function DashboardPage({
           className: "card-title"
         }, "Online Nodes"), /*#__PURE__*/React.createElement("button", {
           className: "btn btn-sm",
-          onClick: () => setPage('mesh')
+          onClick: () => goTab('mesh', 'nodes')
         }, "View All")), /*#__PURE__*/React.createElement("div", {
           className: "table-wrap"
         }, /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Name"), /*#__PURE__*/React.createElement("th", null, "Signal"), /*#__PURE__*/React.createElement("th", null, "Battery"), /*#__PURE__*/React.createElement("th", null, "Last Heard"))), /*#__PURE__*/React.createElement("tbody", null, onlineNodes.slice(0, 8).map(n => {
@@ -1973,7 +1973,7 @@ function DashboardPage({
           className: "card-title"
         }, "Recent Messages"), /*#__PURE__*/React.createElement("button", {
           className: "btn btn-sm",
-          onClick: () => setPage('comms')
+          onClick: () => goTab('comms', 'messages')
         }, "View All")), /*#__PURE__*/React.createElement("div", {
           className: "msg-list",
           style: {
@@ -2006,7 +2006,7 @@ function DashboardPage({
           className: "card-title"
         }, "Active Alerts"), /*#__PURE__*/React.createElement("button", {
           className: "btn btn-sm",
-          onClick: () => setPage('comms')
+          onClick: () => goTab('comms', 'alerts')
         }, "View All")), /*#__PURE__*/React.createElement("div", {
           style: {
             display: 'flex',
@@ -2775,7 +2775,7 @@ function MessagesPage({
   const [text, setText] = useState('');
   const [channels, setChannels] = useState([]);
   const [dmDiagnostics, setDmDiagnostics] = useState(null);
-  const [contactsOpen, setContactsOpen] = useState(() => !isAtlasMobileClient());
+  const [contactsOpen, setContactsOpen] = useState(() => !isSmallScreen());
   const [renameTarget, setRenameTarget] = useState(null); // node for contact rename
   const [channelModal, setChannelModal] = useState(null); // null | 'new' | channel obj
   const [channelShare, setChannelShare] = useState(null); // null | channel obj
@@ -6376,7 +6376,15 @@ function AIPage() {
         e.target.style.borderColor = 'var(--border)';
         e.target.style.color = 'var(--text-muted)';
       }
-    }, "\uD83D\uDD0D explain")), !!(m.tokens || m.duration_ms) && /*#__PURE__*/React.createElement("div", {
+    }, "\uD83D\uDD0D explain")), confLabel && /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 10,
+        color: 'var(--text-muted)',
+        opacity: 0.72,
+        paddingLeft: 18,
+        fontStyle: 'italic'
+      }
+    }, "AI answers can be incorrect \u2014 verify important details."), !!(m.tokens || m.duration_ms) && /*#__PURE__*/React.createElement("div", {
       className: "mono",
       style: {
         fontSize: 10,
@@ -10312,6 +10320,16 @@ function isAtlasMobileClient() {
   const searchParams = new URLSearchParams(window.location.search);
   return searchParams.get('embedded') === '1' || /AtlasMobile(Android|IOS)\//.test(navigator.userAgent);
 }
+// Phone-sized experience — the native apps OR any narrow browser window.
+// Collapsible panels (contacts, directions, park selector) should start
+// closed here so the primary content gets the screen.
+function isSmallScreen() {
+  try {
+    return isAtlasMobileClient() || window.matchMedia('(max-width: 768px)').matches;
+  } catch (e) {
+    return isAtlasMobileClient();
+  }
+}
 function navStepIcon(type, isWalking, size = 16) {
   const s = {
     width: size,
@@ -10495,7 +10513,8 @@ function NavigatePage({
   availableModes = NAV_MODES,
   forceTrailOverlay = false,
   autoShowTrailOverlay = true,
-  searchPlaceholder = 'Search address, place, or lat, lon… (or tap map)'
+  searchPlaceholder = 'Search address, place, or lat, lon… (or tap map)',
+  fullBleed = false
 }) {
   var _device$my_node_id2, _ref, _gpsFix$latitude, _ref2, _gpsFix$longitude;
   const containerRef = useRef(null);
@@ -10529,7 +10548,7 @@ function NavigatePage({
   const [mapLoaded, setMapLoaded] = useState(false);
   const [showTopo, setShowTopo] = useState(false);
   const [showHikeTrails, setShowHikeTrails] = useState(false);
-  const [directionsOpen, setDirectionsOpen] = useState(() => !isAtlasMobileClient());
+  const [directionsOpen, setDirectionsOpen] = useState(() => !isSmallScreen());
   const {
     favorites,
     saveFav,
@@ -11019,11 +11038,11 @@ function NavigatePage({
     style: {
       display: 'flex',
       flexDirection: 'column',
-      gap: 12,
+      gap: fullBleed ? 0 : 12,
       flex: 1,
       minHeight: 0,
       overflow: 'visible',
-      padding: 16
+      padding: fullBleed ? 0 : 16
     }
   }, /*#__PURE__*/React.createElement("div", {
     className: "card",
@@ -11032,7 +11051,14 @@ function NavigatePage({
       flexShrink: 0,
       position: 'relative',
       zIndex: 20,
-      overflow: 'visible'
+      overflow: 'visible',
+      ...(fullBleed ? {
+        borderRadius: 0,
+        borderLeft: 'none',
+        borderRight: 'none',
+        borderTop: 'none',
+        marginBottom: 0
+      } : null)
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -11405,7 +11431,7 @@ function NavigatePage({
     style: {
       flex: 1,
       display: 'flex',
-      gap: 12,
+      gap: fullBleed ? 0 : 12,
       minHeight: 0,
       position: 'relative',
       zIndex: 1
@@ -11415,9 +11441,11 @@ function NavigatePage({
       flex: 2,
       minWidth: 0,
       position: 'relative',
-      borderRadius: 'var(--radius-lg)',
-      border: '1px solid var(--border)',
-      overflow: 'hidden'
+      overflow: 'hidden',
+      ...(fullBleed ? null : {
+        borderRadius: 'var(--radius-lg)',
+        border: '1px solid var(--border)'
+      })
     }
   }, /*#__PURE__*/React.createElement("div", {
     ref: containerRef,
@@ -13944,13 +13972,61 @@ function CalculatorPage() {
 }
 
 // ═══════════════════════════════════════════════
+// Cross-page navigation helpers
+// Sections remember their last-used sub-tab for the session, and any page
+// can deep-link straight to another page's sub-tab via goTab(page, tab).
+// ═══════════════════════════════════════════════
+function rememberTab(pageId, tabId) {
+  try {
+    sessionStorage.setItem('atlasTab:' + pageId, tabId);
+  } catch (e) {}
+}
+function recallTab(pageId) {
+  try {
+    return sessionStorage.getItem('atlasTab:' + pageId);
+  } catch (e) {
+    return null;
+  }
+}
+function goTab(pageId, tabId) {
+  if (tabId) {
+    rememberTab(pageId, tabId);
+    try {
+      window.dispatchEvent(new CustomEvent('atlas-tab', {
+        detail: {
+          page: pageId,
+          tab: tabId
+        }
+      }));
+    } catch (e) {}
+  }
+  if (window._atlasSetPage) window._atlasSetPage(pageId);
+}
+
+// ═══════════════════════════════════════════════
 // Section page wrapper — shared tab chrome for grouped pages
 // ═══════════════════════════════════════════════
 function SectionPage({
+  id,
   tabs,
   children
 }) {
-  const [tab, setTab] = useState(tabs[0].id);
+  const [tab, setTabState] = useState(() => {
+    const saved = id ? recallTab(id) : null;
+    return tabs.some(t => t.id === saved) ? saved : tabs[0].id;
+  });
+  const setTab = t => {
+    setTabState(t);
+    if (id) rememberTab(id, t);
+  };
+  useEffect(() => {
+    if (!id) return;
+    const onTab = e => {
+      if (e.detail && e.detail.page === id && tabs.some(t => t.id === e.detail.tab)) setTabState(e.detail.tab);
+    };
+    window.addEventListener('atlas-tab', onTab);
+    return () => window.removeEventListener('atlas-tab', onTab);
+  }, [id]); // eslint-disable-line
   return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "page-tab-bar"
   }, tabs.map(t => /*#__PURE__*/React.createElement("button", {
@@ -13964,6 +14040,7 @@ function MeshSection({
   device
 }) {
   return /*#__PURE__*/React.createElement(SectionPage, {
+    id: "mesh",
     tabs: [{
       id: 'nodes',
       label: 'Nodes'
@@ -13997,8 +14074,25 @@ function MapSection({
   gpsStatus,
   onRemoveTracker
 }) {
-  const [tab, setTab] = useState('map');
+  const MAP_TABS = ['map', 'navigate'];
+  const [tab, setTabState] = useState(() => {
+    const saved = recallTab('map');
+    return MAP_TABS.includes(saved) ? saved : 'map';
+  });
+  const setTab = t => {
+    setTabState(t);
+    rememberTab('map', t);
+  };
   const [pendingDest, setPendingDest] = useState(null);
+
+  // Deep links from other pages (goTab)
+  useEffect(() => {
+    const onTab = e => {
+      if (e.detail && e.detail.page === 'map' && MAP_TABS.includes(e.detail.tab)) setTabState(e.detail.tab);
+    };
+    window.addEventListener('atlas-tab', onTab);
+    return () => window.removeEventListener('atlas-tab', onTab);
+  }, []); // eslint-disable-line
 
   // Global callback so plain-HTML map popups can trigger navigation
   useEffect(() => {
@@ -14013,7 +14107,8 @@ function MapSection({
     return () => {
       delete window._atlasNavTo;
     };
-  }, []);
+  }, []); // eslint-disable-line
+
   return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "page-tab-bar"
   }, [{
@@ -14058,7 +14153,7 @@ function HikingSection({
   const [selectedTrail, setSelectedTrail] = useState('');
   const [trailQuery, setTrailQuery] = useState('');
   const [pendingDest, setPendingDest] = useState(null);
-  const [selectorOpen, setSelectorOpen] = useState(() => !isAtlasMobileClient());
+  const [selectorOpen, setSelectorOpen] = useState(() => !isSmallScreen());
   const deferredTrailQuery = useDeferredValue(trailQuery);
   const visibleTrails = useMemo(() => {
     const needle = deferredTrailQuery.trim().toLowerCase();
@@ -14134,16 +14229,20 @@ function HikingSection({
     style: {
       display: 'flex',
       flexDirection: 'column',
-      gap: 12,
+      gap: 0,
       flex: 1,
       minHeight: 0
     }
   }, /*#__PURE__*/React.createElement("div", {
     className: "card",
     style: {
-      padding: '16px 18px',
-      margin: '16px 16px 0 16px',
-      flexShrink: 0
+      padding: '10px 16px',
+      margin: 0,
+      flexShrink: 0,
+      borderRadius: 0,
+      borderLeft: 'none',
+      borderRight: 'none',
+      borderTop: 'none'
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -14293,7 +14392,8 @@ function HikingSection({
     defaultMode: "hiking",
     availableModes: NAV_MODES.filter(m => m.value === 'hiking'),
     autoShowTrailOverlay: false,
-    searchPlaceholder: "Search within trails, or enter lat, lon\u2026"
+    searchPlaceholder: "Search within trails, or enter lat, lon\u2026",
+    fullBleed: true
   }));
 }
 function CommsSection({
@@ -14306,6 +14406,7 @@ function CommsSection({
   refresh
 }) {
   return /*#__PURE__*/React.createElement(SectionPage, {
+    id: "comms",
     tabs: [{
       id: 'messages',
       label: 'Messages'
@@ -14326,6 +14427,7 @@ function CommsSection({
 }
 function ToolsSection() {
   return /*#__PURE__*/React.createElement(SectionPage, {
+    id: "tools",
     tabs: [{
       id: 'calculator',
       label: 'Calculator'
@@ -14337,6 +14439,7 @@ function ToolsSection() {
 }
 function SystemSection(props) {
   return /*#__PURE__*/React.createElement(SectionPage, {
+    id: "system",
     tabs: [{
       id: 'wifi',
       label: 'WiFi'
@@ -14357,41 +14460,49 @@ const DEFAULT_PAGES = [{
   id: 'dashboard',
   icon: Icons.dashboard,
   label: 'Dashboard',
+  short: 'Home',
   group: 'main'
 }, {
   id: 'mesh',
   icon: Icons.topology,
   label: 'Mesh',
+  short: 'Mesh',
   group: 'mesh'
 }, {
   id: 'map',
   icon: Icons.map,
   label: 'Map',
+  short: 'Map',
   group: 'map'
 }, {
   id: 'hiking',
   icon: Icons.mountain,
   label: 'Hiking',
+  short: 'Hike',
   group: 'map'
 }, {
   id: 'comms',
   icon: Icons.messages,
   label: 'Messages',
+  short: 'Chat',
   group: 'comms'
 }, {
   id: 'tools',
   icon: Icons.calculator,
   label: 'Tools',
+  short: 'Tools',
   group: 'tools'
 }, {
   id: 'system',
   icon: Icons.settings,
   label: 'Settings',
+  short: 'Setup',
   group: 'sys'
 }, {
   id: 'ai',
   icon: Icons.ai,
   label: 'Ray',
+  short: 'Ray',
   group: 'ai'
 }];
 const ALWAYS_VISIBLE_PAGES = ['system'];
@@ -14402,6 +14513,28 @@ function App() {
   const dashboardTitle = 'Atlas Control';
   const initialPage = searchParams.get('page') || 'dashboard';
   const [page, setPage] = useState(initialPage);
+  // Deep-link support: ?page=&tab= seeds the remembered sub-tab once at startup
+  useState(() => {
+    const t = searchParams.get('tab');
+    if (t) rememberTab(initialPage, t);
+    return null;
+  });
+  // Let goTab() (quick actions, widget links, map popups) switch top-level pages
+  useEffect(() => {
+    window._atlasSetPage = setPage;
+    return () => {
+      delete window._atlasSetPage;
+    };
+  }, []);
+  // Keep the current page in the URL so a refresh restores your place
+  useEffect(() => {
+    try {
+      const u = new URL(window.location.href);
+      if (page === 'dashboard') u.searchParams.delete('page');else u.searchParams.set('page', page);
+      u.searchParams.delete('tab');
+      window.history.replaceState(null, '', u.toString());
+    } catch (e) {}
+  }, [page]);
   const [stats, setStats] = useState({});
   const [nodes, setNodes] = useState([]);
   const [messages, setMessages] = useState([]);
@@ -14849,7 +14982,9 @@ function App() {
     draggable: true,
     onDragStart: e => handleDragStart(e, p.id),
     onDragEnd: handleDragEnd
-  }, p.icon, p.id === 'comms' && hasAlerts && /*#__PURE__*/React.createElement("span", {
+  }, p.icon, /*#__PURE__*/React.createElement("span", {
+    className: "sidebar-btn-label"
+  }, p.short || p.label), p.id === 'comms' && hasAlerts && /*#__PURE__*/React.createElement("span", {
     className: "badge"
   }))))), /*#__PURE__*/React.createElement("div", {
     className: "main-content",
@@ -15000,10 +15135,15 @@ function App() {
       height: '100%',
       margin: 0,
       width: 'auto',
-      minWidth: 44
+      minWidth: 36,
+      maxWidth: 'none',
+      flexDirection: 'column',
+      gap: 3
     },
     onClick: () => setPage(p.id)
-  }, p.icon, p.id === 'comms' && hasAlerts && /*#__PURE__*/React.createElement("span", {
+  }, p.icon, /*#__PURE__*/React.createElement("span", {
+    className: "sidebar-btn-label"
+  }, p.short || p.label), p.id === 'comms' && hasAlerts && /*#__PURE__*/React.createElement("span", {
     className: "badge"
   })))))));
 }

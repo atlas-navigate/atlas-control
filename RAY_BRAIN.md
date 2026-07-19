@@ -156,10 +156,12 @@ Everything below lives in [`ai_manager.py`](ai_manager.py).
 
 ```
 SEED DOCUMENTS (ai_manager.py)
-  ~75 docs across 20+ topic clusters:
+  ~94 docs across 20+ topic clusters:
   Survival · Radio/Comms · Ballistics · Medical · Firearms
   Navigation (+ MGRS/UTM) · Wildlife · Grid-Down · Power
   Nuclear/CBRN · EMP/Solar-Storm · Weather & Disasters
+  Air Quality & Smoke · Bushcraft/Primitive Tech
+  Herbal & Natural Medicine
   Cold/Heat Injury · Field Medications · Sanitation
   Knots/Cordage · Signaling & Rescue · Hunting/Trapping
   Survival Psychology · Atlas App · Ray Self-Doc
@@ -351,7 +353,7 @@ flowchart TD
     PP --> ANS([Answer])
 
     subgraph IDX [Indexing — startup background thread · format v3]
-        D[Seed docs ~75] --> CH[_chunk_document_text\nsplit body into\nsection passages]
+        D[Seed docs ~94] --> CH[_chunk_document_text\nsplit body into\nsection passages]
         CH --> E[qwen3-embedding:0.6b on GPU\ntitle + passage\n→ 1024-dim vector per chunk]
         E --> DB[(SQLite ai_documents.embedding\nv3: chunks of h·t·e\nFTS5 BM25 whole-doc index)]
     end

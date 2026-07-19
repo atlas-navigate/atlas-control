@@ -614,6 +614,12 @@ _WORD_BOUNDARY_KEYWORDS = {
     "radio",
     # survival/nav acronyms that collide with common words
     "utm", "mgrs", "cbrn", "gmrs", "edc", "cme", "sos",
+    # air-quality tokens that live inside unrelated words ("hepatitis", "hazel")
+    "aqi", "hepa", "haze",
+    # "watt" lives inside "wattle" (bushcraft); word-bound it ("watts" still hits)
+    "watt",
+    # herbal tokens: "salve" lives inside "salvage", "herb" inside "herbivore"
+    "salve", "herb",
 }
 
 
@@ -2431,8 +2437,51 @@ SURVIVAL_DOCS = [
             "When thunder roars, go indoors; if you can hear thunder you are in range. 30-30 rule: take "
             "cover if flash-to-bang is under 30 s; wait 30 min after the last thunder. No safe place outside "
             "— avoid high ground, lone trees, water, metal. Last resort: crouch low on the balls of your "
-            "feet, minimal ground contact, NOT lying flat. RELATED: see the Weather Prediction and "
-            "Cold & Heat Injuries docs."
+            "feet, minimal ground contact, NOT lying flat. RELATED: see the Weather Prediction, "
+            "Cold & Heat Injuries, and Air Quality & Wildfire Smoke docs."
+        ),
+    },
+    {
+        "title": "Air Quality & Wildfire Smoke: PM2.5, Masks, Clean Rooms & DIY Filtration",
+        "tags": "air quality,aqi,wildfire smoke,smoke,pm2.5,particulates,n95,kn95,p100,respirator,"
+                "hepa,air purifier,box fan filter,corsi-rosenthal,clean room,haze,smog,ash,"
+                "smoke inhalation,asthma,visibility,canadian wildfires,mask",
+        "content": (
+            "Wildfire smoke can blanket regions THOUSANDS of miles from the fire (Canadian fires have "
+            "repeatedly pushed US city air into the worst categories). The dangerous part is PM2.5 — "
+            "particles under 2.5 microns that pass deep into the lungs and bloodstream. Highest risk: "
+            "asthma/COPD, heart disease, children, elderly, pregnancy.\n\n"
+            "AQI BANDS (US): 0-50 Good · 51-100 Moderate · 101-150 Unhealthy for Sensitive Groups · "
+            "151-200 Unhealthy · 201-300 Very Unhealthy (everyone limit outdoor exertion) · 301+ "
+            "Hazardous (stay inside).\n\n"
+            "NO-INTERNET AQI ESTIMATE (5-3-1 visibility method): face away from the sun and judge how "
+            "far you can see landmarks through the haze. Over ~10 mi: good. ~5 mi: sensitive groups cut "
+            "outdoor exertion. ~3 mi: unhealthy for sensitive groups. ~1.5 mi: unhealthy for EVERYONE. "
+            "Under ~1 mi: very unhealthy/hazardous — stay in.\n\n"
+            "MASKS: cloth masks, surgical masks, and wet bandanas do NOT stop PM2.5. A fitted N95/KN95 "
+            "(or better, P100) respirator filters ≥95% of fine particles — it must seal (beards break "
+            "the seal; pinch the nose wire). An exhalation valve is fine for smoke (it protects the "
+            "wearer). NO particulate mask stops carbon monoxide or hot toxic gases — near an active "
+            "fire the answer is DISTANCE and evacuation, not a mask (see Carbon Monoxide doc).\n\n"
+            "CLEAN ROOM: pick one interior room with few windows. Close all windows/doors and any "
+            "fireplace damper; run HVAC on RECIRCULATE with the best filter it accepts (MERV 13 if the "
+            "blower can handle it); shut fresh-air intakes. Run a HEPA purifier if you have one. While "
+            "smoke is heavy: no candles, incense, frying, wood stove, vacuuming (non-HEPA), or smoking "
+            "indoors — they all add fine particles.\n\n"
+            "DIY BOX-FAN FILTER (Corsi–Rosenthal box): tape one MERV-13 furnace filter to the intake "
+            "side of a box fan (arrow on filter pointing INTO the fan) — or tape four filters + the fan "
+            "into a cube on a cardboard base for more airflow. Cheap and genuinely effective at scrubbing "
+            "PM2.5 from a room. Replace filters when visibly gray. Newer (post-2012) box fans only.\n\n"
+            "VEHICLES: windows up, ventilation on RECIRCULATE. A vehicle is a usable clean-air refuge "
+            "for short trips, not for sleeping near an active fire front.\n\n"
+            "SYMPTOMS: burning eyes, scratchy throat, cough, headache are expected; CHEST PAIN, "
+            "wheezing, real shortness of breath, or confusion mean get to cleaner air and treat as a "
+            "medical problem. Drink water; smoke dehydrates airways.\n\n"
+            "ASH CLEANUP (after the event): wet ash down first, wear N95 + gloves + long sleeves, never "
+            "use leaf blowers, wash ash off skin promptly, keep it out of storm drains and gardens used "
+            "for food. RELATED: Severe Weather & Natural Disasters (wildfire behavior/evacuation); "
+            "Carbon Monoxide: The Silent Killer; Radiological Protection (P100/CBRN PPE); "
+            "Water Purification in the Field."
         ),
     },
     {
@@ -2722,6 +2771,685 @@ SURVIVAL_DOCS = [
             "4. COOK THOROUGHLY — wild game carries trichinella, tularemia, and parasites; never eat "
             "predator/scavenger liver in excess (vitamin A toxicity). Wear gloves dressing rabbits/rodents "
             "(tularemia). RELATED: see the Knots & Rope Work, foraging, and food-preservation docs."
+        ),
+    },
+
+    # ── BUSHCRAFT & PRIMITIVE TECHNOLOGY ─────────────────────────────────────
+    {
+        "title": "Bushcraft Adhesives & Sealants from Nature: Pine Pitch Glue, Birch Tar & Waterproofing",
+        "tags": "bushcraft,primitive,adhesive,glue,sealant,pine pitch,pitch glue,resin,sap,tree resin,"
+                "birch tar,pine tar,make tar,waterproofing,hide glue,beeswax,hafting,seal from nature",
+        "content": (
+            "You can make strong glue, sealant, and true tar entirely from the landscape. Do NOT reach "
+            "for roofing/asphalt products for field repairs — those are petroleum products with toxic "
+            "fumes, and everything they do for gear, pine pitch or birch tar does from nature.\n\n"
+            "COLLECTING RESIN: pine, spruce, and fir bleed sap at wounds that hardens into amber lumps — "
+            "pry these off with a stick or knife spine (sun-warmed lumps come off easier). To harvest "
+            "more, cut a shallow 2–3 in V-notch through the bark low on the trunk of a healthy conifer "
+            "and return in days–weeks; never cut a ring around the tree (girdling kills it).\n\n"
+            "PINE PITCH GLUE (the workhorse):\n"
+            "1. MELT the resin lumps SLOWLY in a tin near coals — never over open flame; hot resin is "
+            "flammable and boils over. A tin-inside-a-tin (double boiler) is safest.\n"
+            "2. STRAIN out bark/bugs (pour through grass bundle or cloth).\n"
+            "3. TEMPER: stir in roughly 1 part fine-ground charcoal powder per 3–4 parts resin, plus a "
+            "pinch of fiber binder (dry-crushed plant fiber, sawdust, or dried herbivore dung). Charcoal "
+            "hardens it; fiber stops cracking. ~10–20% beeswax or hard tallow makes it less brittle "
+            "(more flex, slightly weaker).\n"
+            "4. PITCH STICKS: dip a stick in the melt, cool, re-dip until you have a lollipop of glue. "
+            "To use later, warm the lump and smear. Reheatable forever.\n"
+            "USES: hafting stone/bone points and blades onto handles (wrap with sinew, then coat the "
+            "wrap), sealing seams of bark containers and canoes, waterproofing sewn seams and thread, "
+            "plugging small holes in bottles/gourds/tarps, sticky firestarter.\n\n"
+            "BIRCH TAR (true tar from nature, no petroleum): dry distillation. Pack a lidded tin TIGHT "
+            "with rolled birch bark and punch one small hole in the tin's BOTTOM. Bury a smaller catch "
+            "cup in the ground, set the packed tin on top so the hole drains into the cup, seal dirt "
+            "around the seam, and build a fire AROUND/OVER the packed tin for 1–2 hours. With no oxygen "
+            "inside, the bark bakes instead of burning and dark oil drips down into the cup. Simmer that "
+            "oil gently to thicken it into tar/pitch. Birch tar glues arrowheads, waterproofs leather "
+            "and rope, and protects wood. Resin-rich 'fatwood' pine heartwood dry-distills into pine "
+            "tar the same way.\n\n"
+            "HIDE GLUE: simmer (never boil) hide scrapings, sinew scraps, or split hooves in water for "
+            "hours until the liquid gels when cooled — paint on hot. Very strong on wood (bow backing, "
+            "furniture) but NOT water-resistant; seal it with pitch or wax if it may get wet.\n\n"
+            "MEDICINE TOO: these same materials are real topical medicines — conifer resin salve "
+            "(clinically studied for wound healing), diluted birch/pine tar for skin conditions and "
+            "insect repellent, and fresh spruce gum as an antiseptic cover for minor cuts — full "
+            "uses, dilutions, and cautions in the Medicinal Tars, Resins & Barks doc. "
+            "RELATED: Medicinal Uses of Tree Tars, Resins & Barks; Fire Starting Techniques "
+            "(fatwood/tinder); Bushcraft Cordage (sinew wraps to coat); Primitive Tools & Containers "
+            "(bark containers, hafting); Emergency Shelter Construction."
+        ),
+    },
+    {
+        "title": "Bushcraft Cordage from Nature: Plant Fibers, Sinew & the Reverse Wrap",
+        "tags": "bushcraft,primitive,cordage,natural fiber,plant fiber,dogbane,milkweed,nettle,yucca,"
+                "basswood,cedar bark,sinew,rawhide,spruce root,reverse wrap,bowstring,withies,"
+                "make rope,make string",
+        "content": (
+            "Rope and string are the multiplier for every other bushcraft task — shelters, traps, "
+            "fishing, tools, repairs. Making cordage from plants is slow but the skill is simple.\n\n"
+            "BEST NORTH AMERICAN FIBERS (strongest first):\n"
+            "• SINEW (animal tendon — backstrap and lower legs): strongest per weight; dries hard and "
+            "shrinks tight, ideal for hafting and bowstrings. Pound dry tendon, strip into threads, "
+            "moisten to use.\n"
+            "• RAWHIDE (babiche): cut a wet hide in a spiral into long lace; shrinks vice-tight as it "
+            "dries — lashings, snowshoe webbing, bindings.\n"
+            "• DOGBANE (Indian hemp): the premier plant fiber. Harvest DEAD dry red-brown stalks in "
+            "late fall/winter. Also: MILKWEED and STINGING NETTLE stalks (same processing).\n"
+            "• YUCCA leaves: pound/ret the leaf, keep the long fibers (tip even comes with a needle).\n"
+            "• INNER BARK (bast) of basswood, cedar, willow, tulip poplar, elm: strip bark in spring, "
+            "soak (ret) 2–4 weeks in still water until inner layers peel into ribbons.\n"
+            "• SPRUCE ROOTS (watap): pull up shallow runners, split lengthwise, peel — ready-made "
+            "sewing/lashing material for bark work, no twisting needed.\n"
+            "• Quick-and-weak: cattail/grass braids for temporary ties and mats.\n\n"
+            "PROCESSING STALK FIBER (dogbane/milkweed/nettle): flatten the stalk, snap the woody core "
+            "in sections and peel it away from the bark ribbon, then rub/buff the ribbon between palms "
+            "until soft fiber remains. Wear gloves for fresh nettle (stings until dried).\n\n"
+            "REVERSE-WRAP TWO-PLY (the core technique):\n"
+            "1. Take a bundle of fiber, twist its middle until it kinks, and fold at the kink — you now "
+            "hold two plies.\n"
+            "2. Twist the ply FARTHER from you tightly AWAY from you (clockwise), then wrap it TOWARD "
+            "you back over the other ply (counterclockwise). Repeat with the ply now on top.\n"
+            "3. Opposite twists lock against each other — that opposition is what makes rope rope.\n"
+            "4. SPLICING: when a ply thins, lay a new pinch of fiber alongside and twist it in; stagger "
+            "splices so both plies never thin at the same point.\n"
+            "For thicker rope, reverse-wrap two finished cords together (4-ply), or braid three.\n\n"
+            "STRENGTH RULES: test every cord before trusting it; wet plant cordage is weaker; NEVER "
+            "trust natural cordage for climbing or life-loading. Good two-ply dogbane rivals light "
+            "commercial string and has served as bowstring.\n\n"
+            "WITHIES: green willow/hazel shoots twisted along their length until fibers separate become "
+            "instant heavy 'rope' for lashing frames, rafts, and fences — crude but fast.\n"
+            "USES BY MATERIAL: bow-drill string (rawhide/nettle/dogbane), snares (sinew/dogbane), net "
+            "making, fishing line (nettle), sewing (sinew/spruce root), lashings (bark/withies/rawhide). "
+            "RELATED: Knots & Rope Work for Survival (what to tie with it); Bushcraft Construction "
+            "(lashed structures); Trapping, Snaring & Fishing; Bushcraft Adhesives (sinew + pitch hafting)."
+        ),
+    },
+    {
+        "title": "Bushcraft Construction: Lashed Structures, Wattle & Camp Engineering from Raw Timber",
+        "tags": "bushcraft,primitive,lashing,tripod,shear lashing,square lashing,wattle,daub,"
+                "camp furniture,raised bed,pot hanger,glut,baton,splitting,notch,travois,raft,"
+                "build from nature,build with nothing",
+        "content": (
+            "With poles, cordage, and three lashings you can build most of a camp: beds, racks, "
+            "tripods, shelters, fences, ladders, and rafts — no nails, no hardware.\n\n"
+            "THE THREE LASHINGS (see knots doc for the underlying clove hitch/frapping):\n"
+            "• SQUARE LASHING — joins two poles at ~90°: clove hitch on the vertical, 3+ wraps "
+            "alternating over/under both poles, 2–3 frapping turns BETWEEN the poles to cinch, finish "
+            "with a clove hitch. Platforms, racks, frames.\n"
+            "• DIAGONAL LASHING — for poles that cross at an angle or must be sprung together "
+            "(cross-bracing): timber hitch first, wraps across both diagonals, frap, clove hitch.\n"
+            "• SHEAR (SHEER) LASHING — two or three poles side by side that scissor open: loose wraps "
+            "around all poles, frap between each pair, spread the legs. This is the A-frame and TRIPOD "
+            "lashing.\n"
+            "With NATURAL cordage (bark, withies, rawhide): use more wraps than you would with rope, "
+            "and favor wet rawhide — it shrinks drum-tight as it dries.\n\n"
+            "THE TRIPOD IS THE WORKHORSE: cooking rig over fire, water-filter stand (tripod of cloth "
+            "layers), smoke rack for meat, hide-drying frame, camp chair back, signal-fire platform.\n"
+            "POT HANGER/CRANE: forked stake + leaning pole counterweighted, or a notched 'wagon stick' "
+            "hung from the tripod chain-link style — raise/lower the pot by notch.\n\n"
+            "SLEEP OFF THE GROUND: a RAISED BED (two rails square-lashed to four Y-stakes or two logs, "
+            "cross-slats, then 4+ inches of boughs/duff) beats any ground bed — conduction to ground "
+            "steals more heat than air does (see shelter doc).\n\n"
+            "WATTLE: drive a row of stakes, weave flexible green shoots (willow/hazel) over-under — "
+            "instant fence, windbreak, shelter wall, garden bed, or fish weir. DAUB (clay + chopped "
+            "grass + a little dung, plastered over wattle both sides) turns it into a solid windproof "
+            "wall. Keep daubed walls away from open flame until fully dry.\n\n"
+            "WORKING TIMBER WITHOUT A SAW:\n"
+            "• SPLITTING: baton your knife into the end grain, then drive hardwood WEDGES (gluts) down "
+            "the split with a wooden maul. Rails, slats, and boards from logs.\n"
+            "• FELLING/BUCKING small standing dead: controlled BURN-THROUGH at the cut point (wet mud "
+            "collar limits the burn) beats hours of chopping with poor tools.\n"
+            "• NOTCHES: a saddle notch (round cradle) locks stacked logs — small cabins, raised food "
+            "caches; a V-notch and lashing joins rafters to a ridgepole.\n\n"
+            "MOVING LOADS: TRAVOIS — two long poles crossed and lashed at one end (drag frame with "
+            "cross-slats) hauls loads a person can't carry. RAFT: dry standing-dead logs (they float "
+            "high), two cross-poles top and bottom, shear-lash every crossing with withies/rawhide; "
+            "test in the shallows first.\n"
+            "RELATED: Bushcraft Cordage (the lashing material); Knots & Rope Work for Survival; "
+            "Emergency Shelter Construction; Primitive Tools & Containers (the cutting tools)."
+        ),
+    },
+    {
+        "title": "Primitive Tools & Containers: Stone Knapping, Fire-Hardening, Burn Bowls & Bark Baskets",
+        "tags": "bushcraft,primitive,stone tools,flint knapping,knapping,obsidian,chert,flake,"
+                "fire hardening,burn bowl,coal burning,bark container,birch bark basket,clay pottery,"
+                "bone tools,awl,fish hook,hot rock boiling,digging stick,make tools",
+        "content": (
+            "Tools and containers from stone, wood, bone, and bark — the true 'build with nothing' "
+            "kit.\n\n"
+            "EXPEDIENT STONE TOOLS (a sharp flake in 5 minutes):\n"
+            "• STONE CHOICE: you need glassy, fine-grained rock that breaks with curved (conchoidal) "
+            "shell-shaped fractures — chert/flint, obsidian, jasper, quartzite; thick glass bottle "
+            "bottoms work identically. Grainy granite/sandstone will not knap.\n"
+            "• STRIKE: hold the core, hit near the edge with a palm-sized HAMMERSTONE at a glancing "
+            "~60–80° blow — a flake pops off the underside. A fresh flake is scalpel-sharp as-is: "
+            "skinning, cutting cordage fiber, shaving wood. Brittle — treat as disposable box cutters.\n"
+            "• SAFETY: flakes fly — work downwind, on leather/bark over your leg, eyes averted or "
+            "shielded; never knap barefoot.\n"
+            "• REFINEMENT: an antler tine or hardwood pressure-flaker pushes small flakes off the edge "
+            "to shape scrapers, drills, and points. Dull edges resharpen with one more flake.\n\n"
+            "FIRE-HARDENING WOOD: hold a carved point (spear, digging stick, awl) ABOVE coals, rotating "
+            "— you are baking the moisture out, NOT charring it. Slightly darkened = done; scrape and "
+            "re-harden. Result is dramatically harder tips. The DIGGING STICK (fire-hardened chisel "
+            "tip) is the most underrated tool in bushcraft: roots, tubers, post holes, clay digging.\n\n"
+            "BURN BOWLS & SPOONS (coal burning): set a coal on a dry wood blank, feed it air through a "
+            "hollow reed/tube, let it sink in, then SCRAPE the char out with a shell or stone flake; "
+            "repeat burn-scrape cycles until the bowl is deep. Same method hollows spoons, cups, and "
+            "canoe sections. Slow but nearly effortless attention-wise — tend it beside the fire.\n\n"
+            "BARK CONTAINERS: birch, cedar, and tulip poplar bark peel in workable sheets (easiest in "
+            "spring; take from downed/felled trees — stripping a ring of bark kills a live tree). Score "
+            "and FOLD a rectangle of bark into a box/basket, pin the folds with split twigs, sew rims "
+            "with SPRUCE ROOT, and seal seams with PINE PITCH (see adhesives doc) for a waterproof "
+            "berry bucket or water carrier.\n\n"
+            "BOILING WITHOUT A METAL POT — HOT ROCK BOILING: heat fist-sized DRY rocks from a DRY "
+            "source in the fire (river-soaked rocks can explode from steam), lift with wood tongs, drop "
+            "into a bark/wood/hide container of water; a few rock cycles brings a rolling boil for "
+            "purification and cooking.\n\n"
+            "CLAY POTTERY (where clay exists): find clay subsoil (moist ribbon that holds a bend "
+            "without crumbling), clean it, TEMPER with ~20–30% sand or crushed shell (stops cracking), "
+            "coil-build pots, smooth, dry SLOWLY for days, then pit-fire: pots nested in a fire built "
+            "up gradually and burned hot for hours. Fired clay = cook pots and storage.\n\n"
+            "BONE & ANTLER: awls and sewing needles (grind on abrasive stone, drill the eye with a "
+            "stone flake spun between palms), fish HOOKS and gorges (a sharpened sliver tied "
+            "mid-shank that toggles sideways when swallowed), antler pressure-flakers and wedges, "
+            "scapula hoes. Boil bones first for easier working — and eat the marrow. "
+            "RELATED: Bushcraft Adhesives (hafting/sealing); Bushcraft Cordage (bindings, bow-drill "
+            "string); Bushcraft Construction; Water Purification in the Field (boiling); Wild Food "
+            "Foraging Basics."
+        ),
+    },
+    {
+        "title": "Primitive Weapons & Hunting Tools: Selfbow, Arrows, Atlatl, Sling & Fishing Spear",
+        "tags": "bushcraft,primitive,weapons,selfbow,bow making,arrow making,fletching,atlatl,sling,"
+                "throwing stick,rabbit stick,fishing spear,gig,bow wood,tillering,make a bow,"
+                "make arrows,hunting tools",
+        "content": (
+            "Effective hunting tools from raw wood, stone, and cordage. Check local hunting "
+            "regulations before taking game with any of these; all of them demand PRACTICE before "
+            "you rely on them for food.\n\n"
+            "QUICKIE BOW (days) vs SELFBOW (weeks): a green-wood 'quickie' bow throws an arrow well "
+            "enough for small game at short range and can be made in an afternoon; it loses power as "
+            "it dries and 'follows the string'. A proper selfbow wants a SEASONED stave.\n"
+            "• BOW WOODS (best first): osage orange, hickory, black locust, ash, elm, hard maple; "
+            "in a pinch, any dense straight-grained hardwood sapling ~wrist thick.\n"
+            "• LAYOUT: stave ~as tall as you; the BACK (side facing away from you) must be one "
+            "unbroken growth ring — never cut through it or the bow explodes. All shaping is done on "
+            "the BELLY (side facing you).\n"
+            "• TILLERING (the whole art): remove belly wood a scrape at a time so both limbs bend in "
+            "a smooth even arc, checking constantly against a notched stick. Rushed tillering = "
+            "broken bow. Leave the handle section stiff.\n"
+            "• STRING: sinew, rawhide lace, or reverse-wrapped dogbane/nettle (see cordage doc); "
+            "never overdraw a natural-fiber string on a heavy bow.\n\n"
+            "ARROWS matter more than the bow:\n"
+            "• SHAFTS: straight shoots of red-osier dogwood, viburnum (arrowwood!), cane/bamboo, or "
+            "split-out hardwood. Straighten by heating over coals and bending — sight down the shaft, "
+            "repeat. Nock cut with a stone flake or knife.\n"
+            "• FLETCHING: split feathers from any large bird, three per shaft, bound at both ends "
+            "with fine sinew set in pitch glue. Even unfletched heavy arrows work at very short range.\n"
+            "• POINTS: fire-hardened wood self-point (small game), knapped stone or bone broadhead "
+            "hafted with sinew + pitch (see adhesives doc), or hammered metal scrap.\n\n"
+            "ATLATL (spear-thrower): a 2 ft lever board with a hook/spur at the rear that engages a "
+            "dimple in the back of a flexible 5–7 ft dart. The lever roughly doubles your throwing "
+            "leverage — darts hit far harder than a hand-thrown spear. Easier to master than a bow "
+            "and much faster to make: atlatl + 3 darts in a day.\n\n"
+            "SLING: two ~24 in cords knotted to a diamond leather/woven pouch; smooth round stones. "
+            "One cord looped on a finger, one held; one or two rotations and release toward the "
+            "target. Devastating when practiced, wildly inaccurate before that — practice AWAY from "
+            "camp.\n\n"
+            "THROWING STICK (rabbit stick): a forearm-length curved hardwood club thrown "
+            "side-arm to skim low through brush at rabbits/squirrels/birds. The simplest, most "
+            "underrated meat-getter — always have one in hand while walking.\n\n"
+            "FISHING SPEAR/GIG: split a green pole's end into 4 tines, spread with small twig "
+            "wedges, fire-harden and sharpen each tine — the spread forgives bad aim. Spear fish in "
+            "shallows at night by torchlight; aim BELOW where the fish appears (refraction). "
+            "RELATED: Trapping, Snaring & Fishing (passive methods first — better calorie return); "
+            "Primitive Tools & Containers (points/knapping); Bushcraft Cordage (strings); Bushcraft "
+            "Adhesives (hafting)."
+        ),
+    },
+    {
+        "title": "Hide Tanning & Animal Materials: Rawhide, Brain-Tan Buckskin & Bark Tanning",
+        "tags": "bushcraft,primitive,hide tanning,tanning,buckskin,brain tan,bark tan,rawhide,"
+                "leather,deer hide,pelt,fleshing,smoking hide,sinew,tallow,use every part",
+        "content": (
+            "A deer hide is a sleeping mat, clothing, lashings, bag leather, and cordage stock — if "
+            "you process it. Three end products, in order of effort:\n\n"
+            "1. RAWHIDE (a day): FLESH the hide (scrape ALL fat/meat/membrane off the flesh side "
+            "over a smooth log with a dull edge), optionally dehair (below), then lace it drum-tight "
+            "in a frame or stake it out to dry. Result: stiff, hard, incredibly strong sheet — cut "
+            "into lacing (babiche), bindings, containers (shrinks vice-tight as it dries), drum "
+            "heads, shield/pack stiffener. Not for clothing; turns to slime when soaked.\n\n"
+            "2. BRAIN-TAN BUCKSKIN (several days, the classic): \n"
+            "• DEHAIR/GRAIN: soak the hide 2–4 days in wood-ash lye water (creamy — a handful of "
+            "hardwood ash per gallon) until hair slips, then scrape off hair AND the thin outer "
+            "grain layer. Rinse WELL (a day in clean water, wring repeatedly).\n"
+            "• DRESS: every animal has enough brains to tan its own hide — simmer the brains into a "
+            "warm slurry (or use egg yolks/rendered fat + a little soap as substitutes: it is the "
+            "emulsified OILS that tan), and work it into the damp hide until saturated. Wring, "
+            "repeat 2–3 times.\n"
+            "• SOFTEN: the make-or-break step — stretch, pull, and buff the hide CONTINUOUSLY over "
+            "a stake/cable as it dries (hours). If it dries unworked it reverts to rawhide; re-wet "
+            "and try again.\n"
+            "• SMOKE: sew the hide into a bag over a SMOLDERING punky-wood fire (smoke, never "
+            "flame) until honey-colored both sides. Smoking sets the tan so the buckskin stays soft "
+            "even after soakings. Unsmoked buckskin is ruined by its first rain.\n\n"
+            "3. BARK-TAN LEATHER (weeks–months, real leather): steep crushed oak/hemlock/sumac bark "
+            "in water for days to draw the TANNINS (same astringent chemistry as the oak-bark "
+            "medicine doc), then submerge the dehaired hide, stirring daily and stepping up to "
+            "stronger bark liquor over 2–8+ weeks until the tan has struck through (cut an edge to "
+            "check). Work in oil/tallow while it dries. Result: firm water-resistant leather for "
+            "soles, sheaths, straps.\n\n"
+            "USE EVERY PART: SINEW from the backstrap/legs (bowstrings, sewing, hafting — see "
+            "cordage doc); TALLOW rendered from fat (waterproofing, salve base, lamp fuel, pemmican); "
+            "hooves/hide scraps simmered into HIDE GLUE (see adhesives doc); bones/antler into tools "
+            "(see primitive tools doc); brains for the tan. "
+            "RELATED: Trapping, Snaring & Fishing (field dressing); Bushcraft Cordage; Bushcraft "
+            "Adhesives; Primitive Tools & Containers."
+        ),
+    },
+
+    # ── HERBAL & NATURAL FIELD MEDICINE ──────────────────────────────────────
+    {
+        "title": "Medicinal Uses of Tree Tars, Resins & Barks: Birch Tar, Pine Tar, Resin Salve, Oak & Willow",
+        "tags": "herbal,medicinal,natural remedies,birch tar,pine tar,tar medicinal,resin salve,"
+                "spruce resin,oak bark,willow bark,salicin,tannins,astringent,skin conditions,"
+                "traditional medicine,topical",
+        "content": (
+            "Tree tars, resins, and barks DO have real medicinal uses — topical ones, backed by "
+            "centuries of practice and (for resin salve) modern clinical study. They are TOPICAL "
+            "medicines: never taken internally, always patch-tested, and never a substitute for "
+            "antibiotics or modern wound care when those are available.\n\n"
+            "BIRCH TAR (dry-distilled birch bark — see the adhesives doc for making it): a "
+            "traditional European skin medicine — antiseptic and anti-itch, long used on eczema, "
+            "psoriasis, and stubborn scaly skin, and as a powerful insect repellent (a few drops on "
+            "gear/clothing edges, not bare skin). ALWAYS DILUTE: pure tar irritates and sensitizes "
+            "skin — blend a small amount (~5–10%) into tallow/oil/salve. Patch-test 24 h. Do not "
+            "use on broken/raw skin or take internally.\n\n"
+            "PINE TAR: same story — pine tar soap and weak pine tar ointments have a long history "
+            "for itching, eczema, psoriasis, and dandruff, plus veterinary hoof/wound care. Same "
+            "dilution and patch-test rules.\n\n"
+            "CONIFER RESIN SALVE (spruce/pine/fir — the strongest evidence in this doc): fresh "
+            "conifer resin is antimicrobial (resin acids), and ~10% spruce-resin salves have shown "
+            "genuine wound-healing benefit in modern clinical studies on hard-to-heal wounds and "
+            "pressure ulcers. Field recipe: melt 1 part clean resin into 4–5 parts tallow/oil with "
+            "a little beeswax, strain, cool (see the field-medicine preparations doc). Use a thin "
+            "layer on MINOR cuts, scrapes, cracked skin, and boils under a clean dressing. A pea of "
+            "soft spruce gum pressed onto a small cut is the no-equipment version.\n\n"
+            "OAK BARK (note: oak is NOT a tar tree — its medicine is TANNIN, not tar): simmer inner "
+            "bark 15–20 min into a strong brown decoction. ASTRINGENT uses: cooled wash/compress "
+            "for weeping rashes, poison-ivy blisters, and sweaty foot rot; gargle for sore "
+            "throat/inflamed gums; and short-term (1–2 days) sips for diarrhea when nothing better "
+            "exists — oral rehydration salts remain the priority (see sanitation doc). Long "
+            "internal use irritates the gut.\n\n"
+            "WILLOW BARK: contains salicin — chemistry aspirin was derived from. Decoction of "
+            "spring inner bark (1–2 tsp per cup, simmer 10–15 min, up to 2–3 cups/day) for pain, "
+            "headache, fever, inflammation. Slower but longer-acting than aspirin. SAME CAUTIONS AS "
+            "ASPIRIN: skip if aspirin-allergic, on blood thinners, pregnant, ulcer-prone — and "
+            "never for children/teens with fever (Reye's syndrome risk).\n\n"
+            "LIMITS: infection spreading past a wound (redness advancing, fever, pus, red streaks) "
+            "is an ANTIBIOTIC problem — see Field Antibiotics doc. Deep wounds, burns, and puncture "
+            "wounds need modern care first. RELATED: Field Herbal Medicine (the plants); Making "
+            "Field Medicine (tinctures/salves how-to); Bushcraft Adhesives (making birch tar); "
+            "Field Antibiotics & Common Medications; Wilderness First Aid."
+        ),
+    },
+    {
+        "title": "Field Herbal Medicine: Medicinal Plants of North America",
+        "tags": "herbal,medicinal plants,natural remedies,wild medicine,yarrow,plantain,jewelweed,"
+                "mullein,elderberry,usnea,pine needle tea,cattail,goldenrod,herbs,plant identification,"
+                "poison lookalikes",
+        "content": (
+            "Common, widespread North American plants with genuine traditional medicinal use. RULES "
+            "FIRST: (1) 100% identification or DON'T — a field guide in the bug-out bag is medical "
+            "gear; (2) herbs COMPLEMENT the medications doc, they don't replace it — infection, "
+            "sepsis, and serious illness need real medicine; (3) pregnancy, children, and anyone on "
+            "blood thinners/heart/psych meds: skip internal herbs unless you know the interaction.\n\n"
+            "THE BIG FIVE (learn these first — most are lawn/roadside weeds):\n"
+            "• PLANTAIN (Plantago — the flat lawn weed, not the banana): chew/crush a leaf and "
+            "apply to bee stings, insect bites, splinters, nettle burn — noticeably draws and "
+            "soothes. The all-purpose poultice leaf.\n"
+            "• YARROW (feathery leaves, flat white flower cluster): crushed leaf packed on a minor "
+            "cut is a classic styptic (slows bleeding); hot yarrow tea promotes sweating in early "
+            "fever/chills. CAUTION: white umbrella-flowered LOOKALIKES include deadly poison "
+            "hemlock — yarrow's fern-like feathery leaves and non-hollow stem are distinctive; if "
+            "any doubt, don't.\n"
+            "• JEWELWEED (orange snapdragon-like flower, succulent translucent stem, grows in wet "
+            "ground — often right beside poison ivy and nettle): split the stem and rub the juice "
+            "on fresh poison-ivy contact and stings.\n"
+            "• MULLEIN (giant flannel-soft leaf rosette, tall yellow flower spike): leaf tea for "
+            "coughs and chest congestion — STRAIN THROUGH CLOTH (the fine hairs irritate the "
+            "throat). Flower-infused oil is the traditional earache drop (never into a possibly "
+            "ruptured eardrum). The soft leaves are also the wilderness toilet paper.\n"
+            "• WILLOW BARK: the field aspirin — full details and cautions in the tars/barks doc.\n\n"
+            "ALSO WORTH KNOWING:\n"
+            "• PINE NEEDLE TEA: rich in vitamin C (scurvy prevention on long grid-down winters) — "
+            "chop fresh needles, steep (don't boil hard) 10 min. DEADLY LOOKALIKE WARNING: YEW "
+            "(flat dark needles, red berry-like arils) kills — needle tea only from a POSITIVELY "
+            "identified pine/spruce/fir. Pregnant women should avoid ponderosa-pine needles "
+            "entirely.\n"
+            "• ELDERBERRY: COOKED berry syrup is the traditional immune/flu remedy. Raw berries, "
+            "and ALL leaves/stems/roots, contain cyanide-producing compounds — always cook berries; "
+            "never tea the leaves.\n"
+            "• USNEA ('old man's beard' — the pale green hair lichen with a white elastic core "
+            "thread when gently pulled apart): antimicrobial (usnic acid); the classic use is dry "
+            "wound dust or a tincture for skin infections.\n"
+            "• CATTAIL: the clear gel between young inner leaves soothes minor burns and scrapes "
+            "(plus the plant is a food/cordage/tinder powerhouse — see foraging doc).\n"
+            "• GOLDENROD: leaf/flower tea as a mild urinary-tract flush and for seasonal-allergy "
+            "season (it is NOT the ragweed causing the allergy).\n\n"
+            "ABSOLUTE NO-GO FAMILY: wild parsley/carrot-family (umbrella flower clusters, hollow "
+            "stems) — WATER HEMLOCK and POISON HEMLOCK are North America's deadliest plants and "
+            "kill foragers every year who thought they had something edible or medicinal. No "
+            "remedy in this doc comes from that family. "
+            "RELATED: Medicinal Tars/Resins & Barks; Making Field Medicine (preparation methods); "
+            "Wild Food Foraging Basics; Field Antibiotics & Common Medications; Wilderness First Aid."
+        ),
+    },
+    {
+        "title": "Making Field Medicine: Tinctures, Infusions, Decoctions, Poultices, Salves & Honey Dressings",
+        "tags": "herbal,tincture,tinctures,salve,salves,poultice,infusion,decoction,infused oil,"
+                "natural remedies,herbal preparation,honey dressing,resin salve,make medicine,"
+                "beeswax,dosage",
+        "content": (
+            "How to turn identified medicinal plants into usable medicine with camp equipment. "
+            "Potency of wild plants VARIES WILDLY — start with small doses, one herb at a time, and "
+            "label everything (plant, part, date, solvent).\n\n"
+            "INFUSION (= medicinal tea — for LEAVES & FLOWERS): 1–2 tsp dried (or 2× fresh) herb "
+            "per cup of just-boiled water, COVERED (keeps volatile oils in), steep 10–15 min, "
+            "strain. Drink warm; keeps ~1 day.\n\n"
+            "DECOCTION (for ROOTS, BARKS & seeds — tougher material needs simmering): 1 tbsp cut "
+            "root/bark per 2 cups cold water, bring up and SIMMER gently 15–20 min, strain. This is "
+            "the method for willow bark and oak bark.\n\n"
+            "TINCTURE (alcohol extract — strongest and keeps for YEARS, the bug-out format): fill a "
+            "jar loosely with chopped fresh herb (halfway if dried), cover completely with 80–100 "
+            "proof spirits (vodka/everclear-diluted), cap, shake daily, steep 4–6 weeks in the "
+            "dark, strain into a dropper bottle. Typical folk adult dose: 1 dropperful (~1 ml) in "
+            "water, 1–3×/day — START WITH LESS. No alcohol? Apple-cider vinegar works (weaker, "
+            "6-month shelf life) — also the base for oxymel (vinegar + honey).\n\n"
+            "POULTICE (fastest field medicine): crush, bruise, or literally chew the fresh clean "
+            "leaf (plantain, yarrow) into a paste, pack it on the sting/bite/splinter/boil, cover "
+            "with a cloth strip, refresh every few hours.\n\n"
+            "INFUSED OIL → SALVE: use DRIED herb only (fresh-plant moisture turns oil rancid and "
+            "risks botulism in anaerobic storage). Cover dried herb with olive/rendered oil; either "
+            "sun-steep 2–4 weeks or hold in a double boiler on LOW 4–8 h; strain. For salve: melt "
+            "~1 part beeswax into 4–5 parts infused oil, pour into tins. Add ~10–20% clean conifer "
+            "resin at the melt stage for the antiseptic RESIN SALVE (see tars/resins doc). Tallow "
+            "works as the fat base where there's no plant oil.\n\n"
+            "HONEY DRESSING: honey is genuinely antibacterial (osmotic + peroxide activity) — a "
+            "thin layer on a CLEANED shallow wound or burn under a dressing, changed daily, is one "
+            "of the best-evidenced natural wound treatments there is. Never on deep punctures. "
+            "Never feed honey to infants under 1 year.\n\n"
+            "CHARCOAL: ACTIVATED charcoal (pharmacy) adsorbs many swallowed poisons — use only "
+            "with poison-control/medical guidance; it does nothing for acids, alkalis, alcohols, "
+            "or metals. Plain fire charcoal is far weaker — a crushed-charcoal slurry is a "
+            "last-ditch measure only.\n\n"
+            "WHEN HERBS ARE THE WRONG ANSWER: spreading infection/fever/red streaks (antibiotics "
+            "doc), serious bleeding (trauma doc), dehydration from diarrhea (ORS — sanitation doc), "
+            "anything abdominal-rigid, crushing chest pain, or airway trouble. Field medicine buys "
+            "comfort and time; it does not replace definitive care. "
+            "RELATED: Field Herbal Medicine (which plants); Medicinal Tars, Resins & Barks; Field "
+            "Antibiotics & Common Medications; Wilderness First Aid; Sanitation & Disease Prevention."
+        ),
+    },
+    {
+        "title": "Herbal Remedies for Colds, Flu, Sore Throat, Congestion & Fever",
+        "tags": "herbal,cold,flu,influenza,sore throat,stuffy nose,congestion,cough,fever,chills,"
+                "headache,runny nose,sinus,tea for a cold,what tea,elderberry,yarrow,mullein,"
+                "willow bark,thyme,ginger,honey,gargle,steam inhalation,natural remedies",
+        "content": (
+            "A symptom-by-symptom guide to comfort teas and remedies for the common cold and flu "
+            "(headache, chills, fever, stuffy/runny nose, sinus pressure, sore throat, cough) using "
+            "what you can gather or store. These EASE symptoms; they don't cure a virus. Above all: "
+            "REST, and hydrate hard — warm fluids themselves thin mucus and soothe a throat. Read "
+            "the RED FLAGS at the end.\n\n"
+            "AN ALL-PURPOSE COLD & FLU TEA (safe base): steep grated fresh GINGER (warming, "
+            "anti-nausea, eases aches) with a good squeeze of any citrus if you have it; off the "
+            "boil, stir in HONEY (coats the throat, calms cough — genuinely evidence-backed) and a "
+            "clove of crushed garlic if you can stand it. Drink hot, several times a day. This is "
+            "the one to start with — no salicin, kid-safe over age 1.\n\n"
+            "HEADACHE, BODY ACHES & FEVER — WILLOW BARK (nature's aspirin): decoction of the inner "
+            "bark — 1–2 tsp dried per cup, simmer 10–15 min; up to ~2–3 cups/day. Slower and gentler "
+            "than a pill but the same salicin chemistry. **SALICIN CAUTIONS (do not skip):** do NOT "
+            "use willow bark (or meadowsweet) if you are allergic to aspirin/NSAIDs, on blood "
+            "thinners, ulcer- or bleeding-prone, in the last trimester of pregnancy — and NEVER give "
+            "it to a child or teenager with a fever (aspirin-type compounds are linked to Reye's "
+            "syndrome). In those cases use ginger/elderberry teas and physical cooling instead. "
+            "YARROW tea is the traditional alternative for a feverish chill: hot yarrow makes you "
+            "sweat and ride out the fever — sip it under a blanket (positively ID it against poison "
+            "hemlock first — see the lookalikes doc; avoid in pregnancy).\n\n"
+            "STUFFY NOSE, SINUS & CHEST CONGESTION: the fastest relief is STEAM — lean over a bowl "
+            "of just-boiled water with a towel tent and breathe 5–10 min (add pine/spruce tips, "
+            "thyme, or crushed peppermint if handy); repeat as needed. THYME tea (strong "
+            "decongestant/antiseptic, also a cough tea) and PINE-NEEDLE tea (vitamin C, opens "
+            "sinuses — positively ID a true pine/spruce/fir, NEVER yew: lookalikes doc) both help. "
+            "MULLEIN-leaf tea loosens chest congestion and calms a dry cough — STRAIN THROUGH CLOTH "
+            "so the leaf hairs don't scratch the throat. Warm fluids + steam beat any single herb.\n\n"
+            "SORE THROAT: GARGLE first — warm salt water (½ tsp salt/cup) several times a day is the "
+            "most reliable remedy; a cooled, strong OAK-BARK or plain black-tea decoction (astringent "
+            "tannins) tightens and soothes inflamed tissue; sage tea is a traditional throat gargle. "
+            "Then sip honey in warm water or any of the teas above. A spoon of straight honey coats "
+            "and quiets a cough at bedtime.\n\n"
+            "IMMUNE SUPPORT / EARLY FLU: ELDERBERRY syrup or tea (COOKED berries only — raw berries "
+            "and all green parts are toxic; see plant-ID doc) is the classic remedy taken at the "
+            "first sign of flu. Rosehip and pine-needle teas add vitamin C.\n\n"
+            "GENERAL CAUTIONS: pregnancy, nursing, young children, and anyone on prescription meds "
+            "(blood thinners, heart, blood pressure, diabetes) should check each herb individually — "
+            "'natural' is not 'harmless'. One herb at a time, modest amounts. Never give honey to an "
+            "infant under 1 year.\n\n"
+            "RED FLAGS — STOP HOME CARE, GET REAL MEDICAL HELP: trouble breathing or shortness of "
+            "breath; chest pain; a stiff neck with headache and fever; confusion; a fever over ~103°F "
+            "(39.4°C) or any fever past ~3–4 days; symptoms that improve then suddenly worsen "
+            "(possible bacterial pneumonia/sinus/ear infection — an antibiotics question, see that "
+            "doc); severe throat pain with drooling or inability to swallow; dehydration. "
+            "RELATED: Field Herbal Medicine; Making Field Medicine (how to brew each form); "
+            "Medicinal Tars, Resins & Barks (willow salicin detail); Deadly Lookalikes (yew/hemlock "
+            "safety); Field Antibiotics & Common Medications; Wilderness First Aid."
+        ),
+    },
+
+    # ── SPECIES-LEVEL IDENTIFICATION ─────────────────────────────────────────
+    {
+        "title": "Tree Identification by Bark, Leaf & Silhouette: Exact North American Species",
+        "tags": "tree,tree identification,identify a tree,species,bark,leaf,needles,oak,maple,"
+                "hickory,birch,pine,spruce,fir,hemlock,cedar,willow,basswood,black locust,"
+                "osage orange,walnut,beech,ash,cottonwood,tulip poplar,what tree",
+        "content": (
+            "Field marks for the most USEFUL North American trees — each entry: how to know it, "
+            "then why it matters. (Regional availability: see the Native Trees by US Region doc.)\n\n"
+            "OAKS (Quercus): alternate branching, acorns. WHITE OAK (Q. alba): light ash-gray bark "
+            "in loose vertical plates, leaves with ROUNDED lobes (no bristle tips) — sweeter acorns "
+            "(still leach), premium tool/bow wood, tannin bark for hide tanning and astringent "
+            "medicine. NORTHERN RED OAK (Q. rubra): darker bark with long shiny 'ski-trail' "
+            "stripes, leaves with POINTED bristle-tipped lobes — bitterer acorns, same tannin uses.\n\n"
+            "SUGAR MAPLE (Acer saccharum): OPPOSITE branching, 5-lobed leaf with SMOOTH margins "
+            "and U-shaped notches, gray irregularly-plated bark — tap late winter for syrup "
+            "(any maple works; boxelder is the weedy compound-leaf maple, also tappable).\n\n"
+            "HICKORIES (Carya): alternate, compound leaves of 5–9 leaflets, hard round nuts. "
+            "SHAGBARK (C. ovata) is unmistakable: bark in long peeling vertical strips. Best "
+            "tool-handle/bow wood after osage; top firewood; edible nuts; green-wood smoke for meat.\n\n"
+            "BLACK WALNUT (Juglans nigra): dark deeply-furrowed diamond-pattern bark, huge pinnate "
+            "leaves (15–23 leaflets), tennis-ball green-husked nuts, twig pith CHAMBERED when split "
+            "lengthwise — edible nuts, husk dye, prized wood.\n\n"
+            "AMERICAN BEECH (Fagus grandifolia): smooth silver-gray 'elephant skin' bark at any "
+            "age; papery toothed leaves that often cling all winter — edible beechnuts, dry-leaf "
+            "bedding.\n\n"
+            "CONIFER QUICK KEY — count and feel the needles:\n"
+            "• PINES (Pinus): needles in BUNDLES. Eastern white pine (P. strobus) = 5 soft "
+            "blue-green needles per bundle; red pine = 2 long brittle; pitch/loblolly = 3. All "
+            "pines: resin, fatwood, needle tea (vit C), edible inner bark.\n"
+            "• SPRUCE (Picea): SINGLE needles, SHARP and SQUARE — they roll between fingers; scaly "
+            "gray-brown bark; cones hang DOWN. Resin salve, watap roots, shelter boughs.\n"
+            "• FIR (Abies): single needles, FLAT and FRIENDLY (soft, won't roll), white stripes "
+            "beneath; smooth bark with RESIN BLISTERS you can pop for clean pitch; cones stand UP.\n"
+            "• EASTERN HEMLOCK (Tsuga canadensis — the TREE; unrelated to the deadly poison-hemlock "
+            "PLANT): tiny flat needles with two white lines below, on little stalks; thumbnail-size "
+            "cones; deeply furrowed cinnamon bark = the classic bark-tanning tannin source.\n"
+            "• EASTERN RED CEDAR (Juniperus virginiana): scale-like foliage, stringy red-brown "
+            "bark (tinder/cordage), blue juniper 'berries', rot-proof purple heartwood — posts, "
+            "bow staves in the plains.\n\n"
+            "BIRCHES (Betula): PAPER BIRCH (B. papyrifera): white bark peeling in papery sheets — "
+            "containers, tar, fire-starting champion (burns wet). BLACK/SWEET BIRCH (B. lenta): "
+            "dark non-peeling bark, broken twigs smell of WINTERGREEN — sap and twig tea.\n\n"
+            "WORKHORSE SOFT & FIBER TREES:\n"
+            "• BASSWOOD/LINDEN (Tilia americana): big HEART-SHAPED, lopsided (uneven-based) leaves; "
+            "often several trunks sprouting in a clump; fragrant summer flowers hanging from a "
+            "strap-like winged bract — THE inner-bark cordage tree, easiest friction-fire and "
+            "carving wood, edible young leaves.\n"
+            "• TULIP POPLAR (Liriodendron tulipifera): dead-straight trunk, unique 4-lobed "
+            "'tulip-silhouette' leaf — bark containers, friction fire.\n"
+            "• COTTONWOOD (Populus deltoides): triangular coarse-toothed leaves on flattened stalks "
+            "(they shimmer), deep gray furrows, summer cotton fluff (tinder) — dry root is the "
+            "friction-fire classic.\n\n"
+            "WILLOW (SALIX) — KNOW IT ON SIGHT:\n"
+            "Always at water — streambanks, pond edges, ditches. LEAVES: long and NARROW, "
+            "lance/strap-shaped (many times longer than wide), finely toothed, usually pale or "
+            "silvery beneath, on very short stalks. TWIGS: slender and extremely FLEXIBLE (a shoot "
+            "bends into a hoop without snapping), often yellow/orange/reddish; each bud pressed "
+            "flat to the twig under a SINGLE smooth cap-like scale — no other common tree has "
+            "one-scale buds. FORM: native black willow (S. nigra) is a leaning, often "
+            "multi-trunked streambank tree with dark blocky furrowed bark; planted weeping willow "
+            "drapes twigs to the ground; many willows are just dense thickets of straight shoots. "
+            "IF THE LEAF IS WIDE, OVAL, OR HEART-SHAPED IT IS NOT A WILLOW — that's basswood or "
+            "cottonwood (above), which look nothing alike. USES: inner bark = salicin, the field "
+            "aspirin (dose/cautions in the tars & barks doc); shoots = withies for lashing and "
+            "baskets; light wood = friction-fire sets; cut stakes root where pushed into wet "
+            "ground.\n\n"
+            "TOOL & WEAPON WOODS: OSAGE ORANGE (Maclura pomifera): furrowed orange-tinged bark, "
+            "thorny twigs, softball-size wrinkled green 'brain' fruit — the king bow wood. BLACK "
+            "LOCUST (Robinia pseudoacacia): deeply furrowed ropy bark, PAIRED spines at leaf "
+            "bases, hanging pea-family pods — rot-proof posts and excellent bows (seeds/inner "
+            "bark toxic — tool tree, not food tree). WHITE ASH (Fraxinus americana): OPPOSITE "
+            "compound leaves, tight diamond-furrowed bark — handles, bows, pack frames, and "
+            "pound-to-split basket splints. "
+            "RELATED: Native Trees: Best Species by US Region; Deadly Lookalikes (yew warning); "
+            "Bushcraft Cordage; Bushcraft Adhesives (resins); Primitive Weapons (bow woods); "
+            "Hide Tanning (tannin barks); Wild Food Foraging Basics."
+        ),
+    },
+    {
+        "title": "Medicinal & Useful Plant ID: Exact Species and What They Look Like",
+        "tags": "herbal,medicinal plants,plant identification,identify a plant,species,what plant,"
+                "yarrow,plantain,jewelweed,mullein,nettle,dogbane,milkweed,cattail,elderberry,"
+                "usnea,goldenrod,field marks,botany",
+        "content": (
+            "Exact species and head-to-toe descriptions for the medicine and fiber plants in the "
+            "herbal docs. Confirm EVERY field mark, not just one — and read the Deadly Lookalikes "
+            "doc before using anything here.\n\n"
+            "YARROW (Achillea millefolium), 1–3 ft: leaves soft, feathery, divided into hundreds "
+            "of tiny segments ('millefolium' = thousand-leaf), spirally up a fuzzy, PITH-FILLED "
+            "(not hollow) stem; flat-topped cluster of many small white (sometimes pink) flowers, "
+            "each with ~5 tiny ray petals; strong pleasant-medicinal smell when crushed. Sunny "
+            "fields/roadsides. The white-umbrella HEMLOCKS it must never be confused with have "
+            "HOLLOW, smooth, often purple-marked stems, broader carrot-like leaflets, and a musty "
+            "smell — see lookalikes doc.\n\n"
+            "BROADLEAF PLANTAIN (Plantago major): ground-hugging rosette; broad oval leaves with "
+            "3–7 strongly PARALLEL veins; tear a leaf slowly and stringy vein threads stretch "
+            "between the halves; leafless 'rat-tail' seed spikes from the center. Narrowleaf "
+            "plantain (P. lanceolata): same veins/strings on lance-shaped leaves, short dark cone "
+            "head on a tall stalk. Lawns, paths, compacted soil everywhere.\n\n"
+            "JEWELWEED (Impatiens capensis), 2–5 ft: succulent TRANSLUCENT stem, swollen at the "
+            "joints, juicy when crushed; leaves shed water in silver beads (dunked leaves look "
+            "silvered); orange trumpet flowers with red freckles dangle on threads (pale jewelweed "
+            "I. pallida = yellow); ripe pods SNAP when touched. Shady wet ground — usually near the "
+            "nettle and poison ivy it treats.\n\n"
+            "COMMON MULLEIN (Verbascum thapsus): year 1 = rosette of huge gray-green leaves soft "
+            "as flannel; year 2 = single stout 3–7 ft stalk with a spike of 5-petal yellow "
+            "flowers. Dry waste ground. Nothing else feels like it.\n\n"
+            "STINGING NETTLE (Urtica dioica), 2–6 ft: SQUARE-ish stem, OPPOSITE heart-to-lance "
+            "coarsely-toothed leaves, drooping green thread-flowers from leaf joints, and fine "
+            "stinging hairs throughout — the sting is the confirmation. Rich moist soil. Medicine "
+            "tea, cooked green, and premier cordage fiber.\n\n"
+            "FIBER TWINS — TELL THEM APART (both have MILKY SAP):\n"
+            "• DOGBANE/INDIAN HEMP (Apocynum cannabinum), 2–5 ft: slender SMOOTH REDDISH stems, "
+            "branching near the top, opposite willow-like leaves, tiny white-green flowers, thin "
+            "paired pencil pods; stem stays standing dead all winter = harvest time. TOXIC "
+            "internally — fiber/medicine-external only.\n"
+            "• COMMON MILKWEED (Asclepias syriaca), 3–5 ft: THICK FUZZY UNBRANCHED stem, big oval "
+            "velvety leaves, drooping pink ball-clusters of flowers, fat WARTY pods full of silk "
+            "(tinder/insulation). Fiber is weaker than dogbane.\n\n"
+            "CATTAIL (Typha latifolia): sword leaves in a flat fan from a spongy base, the "
+            "hot-dog brown seed head confirms it. CAUTION before heads form: iris/sweetflag share "
+            "the habitat — cattail's leaf base is spongy-white with clear mucilage gel (the burn "
+            "gel) and no iris's flattened rainbow fan.\n\n"
+            "ELDERBERRY (Sambucus canadensis): a multi-stem woody SHRUB; OPPOSITE compound leaves "
+            "of 5–11 toothed leaflets; young bark studded with corky warts (lenticels); dinner-"
+            "plate flat cream flower clusters → drooping masses of BB-size purple-black berries "
+            "on red-tinged stems. The imposter POKEWEED is a non-woody magenta-stemmed herb with "
+            "SIMPLE leaves and berries in a single column — see lookalikes doc.\n\n"
+            "USNEA (Usnea spp., 'old man's beard'): pale gray-green tufted hair-lichen on dead "
+            "branches; gently stretch a damp strand — a white ELASTIC CORE thread inside the "
+            "green sheath is the definitive test (imposter lichens snap clean).\n\n"
+            "GOLDENROD (Solidago canadensis and kin), 2–5 ft: alternate lance leaves, often "
+            "3-veined; arching one-sided plumes of tiny GOLDEN flowers in late summer. Insect-"
+            "pollinated (sticky pollen) — ragweed, wind-pollinated with green nothing-flowers, is "
+            "the allergy culprit blooming beside it. "
+            "RELATED: Field Herbal Medicine (uses/dosing); Deadly Lookalikes; Bushcraft Cordage "
+            "(dogbane/nettle processing); Wild Food Foraging Basics; Tree Identification."
+        ),
+    },
+    {
+        "title": "Deadly Lookalikes: Toxic Plant Identification — Exact Species to Never Confuse",
+        "tags": "herbal,poison lookalikes,toxic plants,poisonous plant,plant identification,"
+                "water hemlock,poison hemlock,yew,pokeweed,death camas,false hellebore,moonseed,"
+                "poison ivy,poison oak,poison sumac,foraging safety,nightshade,baneberry",
+        "content": (
+            "The short list of North American plants that kill or injure foragers — learn THESE "
+            "to make every other ID safer. Rule zero: NEVER eat or brew anything from the wild "
+            "carrot/parsley family (umbrella-shaped flower clusters, hollow stems) — the family "
+            "contains the continent's two deadliest plants.\n\n"
+            "WATER HEMLOCK (Cicuta maculata) — deadliest plant in North America; a bite can kill "
+            "in hours (violent seizures). 3–6 ft, wet ground; smooth hollow stem, often "
+            "purple-streaked; leaves 2–3× divided into lance toothed leaflets whose VEINS RUN TO "
+            "THE NOTCHES between teeth (not the tips) — the classic tell; white umbrella flower "
+            "clusters; rootstock chambered with yellow oily sap (do NOT cut it to check "
+            "barehanded). Mistaken for: wild parsnip, water parsley, 'wild carrots'.\n\n"
+            "POISON HEMLOCK (Conium maculatum — the plant that killed Socrates; unrelated to the "
+            "hemlock TREE): 3–8 ft; ferny, carrot-like leaves; smooth HOLLOW stem with PURPLE "
+            "BLOTCHES and a whitish bloom; musty 'mousy' smell when crushed; white umbels. Even "
+            "handling warrants a wash. Mistaken for: wild carrot/Queen Anne's lace (which is "
+            "HAIRY-stemmed, no purple blotches — but leave the whole family alone).\n\n"
+            "YEW (Taxus spp.): evergreen shrub/small tree; FLAT, glossy, dark needles in two "
+            "rows, soft to touch, NO white lines beneath and NO cones — instead single seeds in "
+            "fleshy red CUPS (arils). Needles/seeds/wood are cardiotoxic; a handful of needles "
+            "can stop an adult heart, and 'pine-needle tea' errors with yew are the classic "
+            "fatality. TRUE pines/spruces/firs/hemlock-tree all bear CONES; hemlock-tree needles "
+            "have two white stripes below.\n\n"
+            "DEATH CAMAS (Toxicoscordion/Zigadenus spp.) vs WILD ONION: grass-like leaves and a "
+            "bulb, cream-white flower clusters — but NO ONION SMELL. The rule is absolute: no "
+            "onion/garlic odor = not an onion = drop it.\n\n"
+            "FALSE HELLEBORE (Veratrum viride) vs RAMPS: both emerge in spring woods. False "
+            "hellebore = stout stalk of strongly PLEATED/accordion-ribbed leaves, no smell. Ramps "
+            "= 1–3 smooth flat leaves rising straight from a bulb, strong garlic-onion smell.\n\n"
+            "POKEWEED (Phytolacca americana) vs ELDERBERRY: pokeweed is a big non-woody herb with "
+            "smooth MAGENTA stems, large simple leaves, shiny purple berries in a single hanging "
+            "COLUMN — roots/mature plant/berries toxic (traditional cooked-poke-salad prep is "
+            "expert-only). Elderberry is a woody shrub, opposite compound leaves, berries in flat "
+            "sprays (see plant-ID doc).\n\n"
+            "MOONSEED (Menispermum canadense) vs WILD GRAPE: moonseed's dull black 'grapes' hold "
+            "ONE crescent-moon flat seed and the vine has NO tendrils; real grapes have 2–4 round "
+            "pear-shaped seeds and forked TENDRILS. Also skip 'grape' vines with white berries "
+            "(poison ivy) or porcelain-colored berries.\n\n"
+            "NIGHTSHADES (Solanum spp.): star-shaped 5-petal flowers with a yellow beak, berries "
+            "like tiny cherry-tomatoes (green→yellow or black) — never eat wild 'tomatoes'. "
+            "BANEBERRY/DOLL'S-EYES (Actaea): white berries with a black pupil dot on thick red "
+            "stalks — cardiotoxic, and exactly the kind of berry children grab.\n\n"
+            "BUCKEYE (Aesculus) vs EDIBLE CHESTNUT: chestnut burs are sea-urchin SPINY with 2–3 "
+            "flat-sided nuts; buckeye husks are smooth/lightly warty with ONE glossy round nut. "
+            "Buckeyes are toxic raw.\n\n"
+            "CONTACT POISONS: POISON IVY (Toxicodendron radicans): 'leaves of three', middle "
+            "leaflet on a longer stalk, ALTERNATE on the vine, climbing vines shaggy with brown "
+            "aerial-root hairs, white waxy berries. POISON OAK: same but oak-lobed leaflets, "
+            "shrubby, mostly West/Southeast. POISON SUMAC: swamp shrub, 7–13 UNtoothed leaflets "
+            "on RED leaf stems, hanging white berries — while edible staghorn sumac has fuzzy "
+            "stems and UPRIGHT red berry cones (the 'sumac-ade' one). Wash exposed skin+tools "
+            "with soap/cold water fast; jewelweed helps (plant-ID doc); NEVER burn any of them — "
+            "the smoke blisters lungs.\n\n"
+            "IF INGESTION HAPPENS: induce nothing; small sips of water, activated charcoal only "
+            "per the field-medicine doc, evacuate to medical care with a SAMPLE of the plant. "
+            "RELATED: Medicinal & Useful Plant ID; Wild Food Foraging Basics; Field Herbal "
+            "Medicine; Tree Identification (conifer key); US Wildlife: Encounter Protocols "
+            "(bite/sting first aid)."
         ),
     },
 
@@ -4204,8 +4932,9 @@ class AIManager:
     # This query/document asymmetry measurably improves retrieval. Tailored to
     # the Atlas knowledge base (survival / radio / nav / app usage).
     _EMBED_QUERY_INSTRUCT = (
-        "Given a question, retrieve survival, medical, radiological/CBRN, "
-        "weather, radio, navigation, and Atlas Control reference passages "
+        "Given a question, retrieve survival, bushcraft/primitive-technology, "
+        "medical, herbal/natural-remedy, radiological/CBRN, weather, "
+        "air-quality, radio, navigation, and Atlas Control reference passages "
         "that answer it"
     )
 
@@ -4253,7 +4982,14 @@ class AIManager:
         "wildlife":   ["wildlife", "animal", "snake", "bear", "mountain lion", "wolf",
                        "spider", "scorpion", "tick", "rabies", "alligator", "shark",
                        "venomous", "predator", "encounter", "rattlesnake", "bitten"],
-        "trees":      ["tree", "native", "oak", "pine", "maple", "bark", "forest"],
+        # bare "hemlock"/"fir"/"ash"/"willow" deliberately absent: poison-hemlock
+        # belongs to herbal, "fir" hides in "first", "ash" in "wash"/"flash",
+        # willow-bark medicine outranks the tree.
+        "trees":      ["tree", "native", "oak", "pine", "maple", "bark", "forest",
+                       "tree identification", "identify a tree", "what tree",
+                       "tree species", "kind of tree", "tree bark", "hickory",
+                       "birch", "spruce", "cedar", "walnut", "beech", "basswood",
+                       "cottonwood", "osage"],
         "nuclear":    ["nuclear", "radiation", "radioact", "fallout", "dosimet",
                        "geiger", "roentgen", "sievert", "cbrn", "nuke", "dirty bomb",
                        "rad ", "rem ", "potassium iodide", "iodide", "contaminat",
@@ -4275,6 +5011,17 @@ class AIManager:
         "weather":    ["weather", "tornado", "hurricane", "flood", "earthquake",
                        "wildfire", "lightning", "blizzard", "barometr", "forecast",
                        "storm", "cloud", "disaster", "evacuat"],
+        # "smoke" is matched only as phrases — bare "smoke" would collide with
+        # smoking meat (food preservation) and smoke signals. "aqi"/"hepa"/
+        # "haze" are word-boundary tokens (see _WORD_BOUNDARY_KEYWORDS).
+        "air_quality": ["air quality", "aqi", "wildfire smoke", "fire smoke",
+                        "smoke inhalation", "canadian fire", "canada fire",
+                        "canadian wildfire", "canadian smoke",
+                        "smoky", "smoke outside", "smoke in the air", "smoke from",
+                        "pm2.5", "pm 2.5", "particulate", "n95", "kn95", "p100",
+                        "respirator", "hepa", "air purifier", "air filter",
+                        "box fan", "corsi", "clean room", "clean air", "haze",
+                        "smog", "bad air"],
         "cold_heat":  ["hypotherm", "frostbite", "frostnip", "heat stroke",
                        "heat exhaustion", "heat cramp", "trench foot", "rewarm",
                        "cold injury", "heat illness", "overheat"],
@@ -4283,6 +5030,29 @@ class AIManager:
                        "flare"],
         "knots":      ["knot", "rope", "lashing", "cordage", "hitch", "bowline",
                        "paracord", "prusik", "bend "],
+        # "tar" is matched only as phrases — bare "tar" lives inside "start",
+        # "target", "mortar". Same care for "sap" ("sapling") and "pitch"
+        # ("pitch a tent", "pitch dark").
+        "bushcraft":  ["bushcraft", "primitive", "pine pitch", "pitch glue",
+                       "resin", "sap glue", "tree sap", "birch tar", "pine tar",
+                       "make tar", "make a tar", "tar from", "natural glue",
+                       "natural adhesive", "adhesive", "glue", "sealant",
+                       "seal stuff", "waterproof", "from nature", "with nothing",
+                       "plant fiber", "natural fiber", "natural cordage",
+                       "make cordage", "make rope", "make string", "dogbane",
+                       "milkweed", "nettle", "yucca", "sinew", "rawhide",
+                       "reverse wrap", "withies", "wattle", "daub", "travois",
+                       "knapping", "knap ", "stone tool", "flint", "obsidian",
+                       "stone knife", "burn bowl", "bark container", "bark basket",
+                       "fire harden", "fire-harden", "digging stick", "hot rock",
+                       "bone tool", "hide glue", "clay pot", "pottery",
+                       "selfbow", "self bow", "make a bow", "bow making",
+                       "bow wood", "bow stave", "tillering",
+                       "bow and arrow", "make arrows", "arrow making", "fletch",
+                       "atlatl", "spear thrower", "throwing stick", "rabbit stick",
+                       "fishing spear", "gig ", "tanning", "tan a hide",
+                       "brain tan", "bark tan", "buckskin", "deer hide",
+                       "tallow", "render fat"],
         "hunting":    ["trap", "snare", "deadfall", "fishing", "trotline", "gill net",
                        "field dress", "field-dress", "gut ", "snaring", "game meat"],
         "sanitation": ["sanitation", "latrine", "outhouse", "sewage", "cholera",
@@ -4291,6 +5061,35 @@ class AIManager:
                        "metronidazole", "ciprofloxacin", "cipro", "azithromycin",
                        "bactrim", "fish antibiotic", "dosage", "painkiller",
                        "ibuprofen", "acetaminophen", "medication", "expired med"],
+        # "salve"/"herb" are word-boundary tokens ("salvage", "herbivore").
+        # "medicinal benefit(s)" outweighs the medical category's "medic"
+        # substring hit on "medicinal" so tar/herb questions route here.
+        "herbal":     ["herbal", "herb", "tincture", "salve", "poultice",
+                       "decoction", "infusion", "infused oil", "medicinal",
+                       "medicinal benefit", "medicinal plant", "medicinal use",
+                       "natural remed", "home remed", "folk remed", "plant medicine",
+                       "willow bark", "oak bark", "bark tea", "bark decoction",
+                       "yarrow", "plantain", "jewelweed",
+                       "mullein", "usnea", "elderberry", "goldenrod",
+                       "pine needle tea", "resin salve", "pine tar soap",
+                       "honey dressing", "honey on a wound", "oxymel",
+                       "identify a plant", "plant identification", "what plant",
+                       "poisonous plant", "toxic plant", "poison plant",
+                       "lookalike", "look-alike", "look alike",
+                       # bare "hemlock"/"willow" here (not in trees) so
+                       # "water hemlock…"/"willow bark…" queries score 2 and
+                       # beat the water/trees categories' 1-hit ties
+                       "hemlock", "willow",
+                       "water hemlock", "poison hemlock", "pokeweed",
+                       "death camas", "nightshade", "moonseed", "baneberry",
+                       "poison ivy", "poison oak", "poison sumac", "stinging nettle",
+                       # cold/flu symptom-relief teas (focused symptom doc)
+                       "cold remedy", "cold and flu", "flu remedy", "sore throat",
+                       "stuffy nose", "runny nose", "congestion", "decongestant",
+                       "chest congestion", "sinus", "cough remedy", "tea for a cold",
+                       "tea to help", "make a tea", "elderberry", "ginger tea",
+                       "gargle", "steam inhalation", "chills and fever",
+                       "feel sick", "feeling sick", "coming down with"],
         "psychology": ["psychology", "mental", "morale", "mindset", "panic",
                        "will to survive", "s.t.o.p", "stop method", "fear",
                        "stress", "resilience"],
@@ -4334,6 +5133,13 @@ class AIManager:
                        "heliograph", "whistle"],
         "knots":      ["knot", "rope", "cordage", "lashing", "hitch", "bowline",
                        "paracord", "prusik"],
+        "air_quality":["air quality", "aqi", "wildfire smoke", "smoke inhalation",
+                       "pm2.5", "respirator", "n95", "hepa", "air purifier"],
+        "bushcraft":  ["bushcraft", "primitive", "pitch glue", "birch tar",
+                       "knapping", "natural fiber", "bark container", "selfbow",
+                       "hide tanning", "buckskin"],
+        "herbal":     ["herbal", "medicinal", "tincture", "salve", "poultice",
+                       "natural remedies", "wild medicine"],
         "hunting":    ["trap", "snare", "deadfall", "fishing", "trotline", "gill net",
                        "field dress", "procurement"],
         "sanitation": ["sanitation", "latrine", "sewage", "cholera", "dysentery",

@@ -1179,6 +1179,19 @@ _KM_CATEGORIES = {
     "nuclear":     {"label": "Nuclear / CBRN",      "color": "#fde047",
                     "tags": ["nuclear", "radiation", "fallout", "cbrn", "geiger",
                              "roentgen", "decontamination", "radiological"]},
+    # air_quality must precede weather (its docs carry a "wildfire smoke" tag);
+    # herbal must precede bushcraft AND medical (tar-medicine doc carries
+    # "birch tar", and "medicinal" contains the medical tag "medic");
+    # bushcraft must precede knots/water_fire (its docs carry "cordage"/"waterproofing").
+    "air_quality": {"label": "Air Quality & Smoke", "color": "#14b8a6",
+                    "tags": ["air quality", "wildfire smoke", "aqi", "respirator",
+                             "pm2.5"]},
+    "herbal":      {"label": "Herbal & Natural Medicine", "color": "#4ade80",
+                    "tags": ["herbal", "medicinal", "tincture", "salve",
+                             "natural remedies", "wild medicine"]},
+    "bushcraft":   {"label": "Bushcraft & Primitive Tech", "color": "#b45309",
+                    "tags": ["bushcraft", "primitive", "knapping", "pitch glue",
+                             "natural fiber", "selfbow", "hide tanning"]},
     "weather":     {"label": "Weather & Disasters", "color": "#0ea5e9",
                     "tags": ["weather", "tornado", "hurricane", "earthquake",
                              "wildfire", "blizzard", "barometric", "natural disaster"]},

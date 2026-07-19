@@ -342,6 +342,7 @@ code, .mono { font-family: var(--font-mono); }
   background: var(--accent-red);
   border-radius: 50%;
 }
+.sidebar-btn-label { display: none; }
 
 .main-content {
   flex: 1;
@@ -1229,18 +1230,21 @@ button, .btn, .tab-btn, .sidebar-btn, .contact-item, label.power-toggle {
    MOBILE RESPONSIVE  (≤768px)
 ══════════════════════════════════════════════ */
 @media (max-width: 768px) {
-  body, .app { height: 100vh; }
+  /* dvh tracks the real visible viewport when mobile browser toolbars
+     collapse/expand — plain 100vh leaves the bottom nav / chat input
+     clipped behind the toolbar on iOS Safari & Android Chrome. */
+  body, .app { height: 100vh; height: 100dvh; }
   body { overflow: hidden; }
 
   .app { flex-direction: column; }
 
   /* ── Sidebar → bottom navigation ── */
   .sidebar {
-    width: 100%; height: 76px;
+    width: 100%; height: 74px;
     flex-direction: row;
     align-items: center;
     justify-content: space-around;
-    padding: 6px 8px;
+    padding: 5px 2px;
     order: 2;
     border-right: none;
     border-top: 1px solid rgba(255,255,255,0.06);
@@ -1254,11 +1258,21 @@ button, .btn, .tab-btn, .sidebar-btn, .contact-item, label.power-toggle {
   .sidebar-logo { display: none; }
   .sidebar-divider { width: 1px; height: 24px; margin: 0 4px; }
   .sidebar-btn {
-    margin-bottom: 0; flex-shrink: 0;
-    width: 52px; height: 52px;
-    border-radius: 16px;
+    margin-bottom: 0; flex-shrink: 1;
+    /* all 8 tabs must fit a 320px viewport: 8 × 38px + padding */
+    flex: 1 1 0; min-width: 38px; max-width: 84px;
+    width: auto; height: 58px;
+    border-radius: 12px;
+    flex-direction: column; gap: 3px;
+    padding: 5px 0 4px;
   }
-  .sidebar-btn svg { width: 28px; height: 28px; }
+  .sidebar-btn svg { width: 22px; height: 22px; flex-shrink: 0; }
+  .sidebar-btn-label {
+    display: block;
+    font-size: 9px; font-weight: 600; letter-spacing: 0.01em;
+    line-height: 1; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+  }
   .sidebar-btn::after { display: none; } /* tooltips would render off-screen */
 
   /* ── Main content ── */
@@ -1282,6 +1296,15 @@ button, .btn, .tab-btn, .sidebar-btn, .contact-item, label.power-toggle {
   .card { padding: 16px; border-radius: 18px; }
   .settings-grid-2, .device-identity-grid { grid-template-columns: 1fr; }
   .settings-actions { flex-direction: column; align-items: flex-start; }
+
+  /* ── Sub-tab bars: bigger, evenly spread thumb targets ── */
+  .page-tab-btn {
+    flex: 1 1 auto;
+    text-align: center;
+    padding: 13px 10px 11px;
+    min-height: 46px;
+    font-size: 13px;
+  }
 
   /* ── Dashboard stat grid ── */
   .dash-grid {
@@ -1416,7 +1439,8 @@ button, .btn, .tab-btn, .sidebar-btn, .contact-item, label.power-toggle {
 @media (max-width: 480px) {
   .dash-grid { grid-template-columns: 1fr 1fr; }
   .stat-value { font-size: 20px; }
-  .map-container { height: 320px; }
+  /* viewport-relative map so tall phones aren't stuck with a short map */
+  .map-container { height: 340px; height: clamp(300px, 46dvh, 560px); }
   .sys-stats-grid { grid-template-columns: 1fr 1fr; }
   .top-bar { padding: 0 12px; }
   .chat-header { padding: 14px 16px; }
@@ -2280,7 +2304,7 @@ function DashboardPage({ stats, nodes, messages, alerts, setPage, device, gpsSta
           <div key={id} className="card">
             <div className="card-header">
               <div className="card-title">📱 Phone Trackers</div>
-              <button className="btn btn-sm" onClick={() => setPage('map')}>View on Map</button>
+              <button className="btn btn-sm" onClick={() => goTab('map', 'map')}>View on Map</button>
             </div>
             {trackerDevices.length === 0 ? (
               <div>
@@ -2398,7 +2422,7 @@ function DashboardPage({ stats, nodes, messages, alerts, setPage, device, gpsSta
         <div key={id} className="card">
           <div className="card-header">
             <div className="card-title">Online Nodes</div>
-            <button className="btn btn-sm" onClick={() => setPage('mesh')}>View All</button>
+            <button className="btn btn-sm" onClick={() => goTab('mesh', 'nodes')}>View All</button>
           </div>
           <div className="table-wrap">
             <table>
@@ -2428,7 +2452,7 @@ function DashboardPage({ stats, nodes, messages, alerts, setPage, device, gpsSta
         <div key={id} className="card">
           <div className="card-header">
             <div className="card-title">Recent Messages</div>
-            <button className="btn btn-sm" onClick={() => setPage('comms')}>View All</button>
+            <button className="btn btn-sm" onClick={() => goTab('comms', 'messages')}>View All</button>
           </div>
           <div className="msg-list" style={{maxHeight:340}}>
             {recentMsgs.map((m,i) => (
@@ -2449,7 +2473,7 @@ function DashboardPage({ stats, nodes, messages, alerts, setPage, device, gpsSta
         <div key={id} className="card">
           <div className="card-header">
             <div className="card-title">Active Alerts</div>
-            <button className="btn btn-sm" onClick={() => setPage('comms')}>View All</button>
+            <button className="btn btn-sm" onClick={() => goTab('comms', 'alerts')}>View All</button>
           </div>
           <div style={{display:'flex',flexDirection:'column',gap:8}}>
             {recentAlerts.map(a => (
@@ -2917,7 +2941,7 @@ function MessagesPage({ messages, nodes, device, refresh }) {
   const [text, setText] = useState('');
   const [channels, setChannels] = useState([]);
   const [dmDiagnostics, setDmDiagnostics] = useState(null);
-  const [contactsOpen, setContactsOpen] = useState(() => !isAtlasMobileClient());
+  const [contactsOpen, setContactsOpen] = useState(() => !isSmallScreen());
   const [renameTarget, setRenameTarget] = useState(null);       // node for contact rename
   const [channelModal, setChannelModal] = useState(null);       // null | 'new' | channel obj
   const [channelShare, setChannelShare] = useState(null);       // null | channel obj
@@ -5616,6 +5640,11 @@ function AIPage() {
                               )}
                             </div>
                           )}
+                          {confLabel && (
+                            <div style={{ fontSize: 10, color: 'var(--text-muted)', opacity: 0.72, paddingLeft: 18, fontStyle: 'italic' }}>
+                              AI answers can be incorrect — verify important details.
+                            </div>
+                          )}
                           {!!(m.tokens || m.duration_ms) && (
                             <div className="mono" style={{ fontSize: 10, color: 'var(--text-muted)', paddingLeft: 4 }}>
                               {m.tokens && m.duration_ms ? `${(m.tokens / (m.duration_ms / 1000)).toFixed(1)} tok/s · ` : ''}
@@ -7580,6 +7609,14 @@ function isAtlasMobileClient() {
     /AtlasMobile(Android|IOS)\//.test(navigator.userAgent)
   );
 }
+// Phone-sized experience — the native apps OR any narrow browser window.
+// Collapsible panels (contacts, directions, park selector) should start
+// closed here so the primary content gets the screen.
+function isSmallScreen() {
+  try {
+    return isAtlasMobileClient() || window.matchMedia('(max-width: 768px)').matches;
+  } catch (e) { return isAtlasMobileClient(); }
+}
 function navStepIcon(type, isWalking, size = 16) {
   const s = { width:size, height:size, viewBox:'0 0 24 24', fill:'none', stroke:'currentColor',
               strokeWidth:'2', strokeLinecap:'round', strokeLinejoin:'round' };
@@ -7642,6 +7679,7 @@ function NavigatePage({
   forceTrailOverlay = false,
   autoShowTrailOverlay = true,
   searchPlaceholder = 'Search address, place, or lat, lon… (or tap map)',
+  fullBleed = false,
 }) {
   const containerRef    = useRef(null);
   const mapRef          = useRef(null);
@@ -7674,7 +7712,7 @@ function NavigatePage({
   const [mapLoaded,     setMapLoaded]     = useState(false);
   const [showTopo,      setShowTopo]      = useState(false);
   const [showHikeTrails,setShowHikeTrails]= useState(false);
-  const [directionsOpen,setDirectionsOpen]= useState(() => !isAtlasMobileClient());
+  const [directionsOpen,setDirectionsOpen]= useState(() => !isSmallScreen());
   const { favorites, saveFav, renameFav, removeFav } = useFavorites();
 
   const myNodeId = device?.my_node_id ?? null;
@@ -8026,10 +8064,11 @@ function NavigatePage({
   const speedNote = isHiking ? '@ ~2–3 mph on trail' : null;
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:12, flex:1, minHeight:0, overflow:'visible', padding:16 }}>
+    <div style={{ display:'flex', flexDirection:'column', gap: fullBleed ? 0 : 12, flex:1, minHeight:0, overflow:'visible', padding: fullBleed ? 0 : 16 }}>
 
       {/* Search bar */}
-      <div className="card" style={{ padding:'10px 14px', flexShrink:0, position:'relative', zIndex:20, overflow:'visible' }}>
+      <div className="card" style={{ padding:'10px 14px', flexShrink:0, position:'relative', zIndex:20, overflow:'visible',
+        ...(fullBleed ? { borderRadius:0, borderLeft:'none', borderRight:'none', borderTop:'none', marginBottom:0 } : null) }}>
         <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', position:'relative', zIndex:20, overflow:'visible' }}>
           <div style={{ flex:1, minWidth:200, position:'relative' }}>
             <input
@@ -8190,10 +8229,10 @@ function NavigatePage({
       )}
 
       {/* Map + directions */}
-      <div className="nav-map-directions" style={{ flex:1, display:'flex', gap:12, minHeight:0, position:'relative', zIndex:1 }}>
+      <div className="nav-map-directions" style={{ flex:1, display:'flex', gap: fullBleed ? 0 : 12, minHeight:0, position:'relative', zIndex:1 }}>
         {/* Map */}
-        <div style={{ flex:2, minWidth:0, position:'relative',
-          borderRadius:'var(--radius-lg)', border:'1px solid var(--border)', overflow:'hidden' }}>
+        <div style={{ flex:2, minWidth:0, position:'relative', overflow:'hidden',
+          ...(fullBleed ? null : { borderRadius:'var(--radius-lg)', border:'1px solid var(--border)' }) }}>
           <div ref={containerRef} style={{ position:'absolute', top:0, left:0, right:0, bottom:0 }}/>
           {/* Topo toggle */}
           <button onClick={() => setShowTopo(v => !v)}
@@ -9731,10 +9770,41 @@ function CalculatorPage() {
 }
 
 // ═══════════════════════════════════════════════
+// Cross-page navigation helpers
+// Sections remember their last-used sub-tab for the session, and any page
+// can deep-link straight to another page's sub-tab via goTab(page, tab).
+// ═══════════════════════════════════════════════
+function rememberTab(pageId, tabId) {
+  try { sessionStorage.setItem('atlasTab:' + pageId, tabId); } catch (e) {}
+}
+function recallTab(pageId) {
+  try { return sessionStorage.getItem('atlasTab:' + pageId); } catch (e) { return null; }
+}
+function goTab(pageId, tabId) {
+  if (tabId) {
+    rememberTab(pageId, tabId);
+    try { window.dispatchEvent(new CustomEvent('atlas-tab', { detail: { page: pageId, tab: tabId } })); } catch (e) {}
+  }
+  if (window._atlasSetPage) window._atlasSetPage(pageId);
+}
+
+// ═══════════════════════════════════════════════
 // Section page wrapper — shared tab chrome for grouped pages
 // ═══════════════════════════════════════════════
-function SectionPage({ tabs, children }) {
-  const [tab, setTab] = useState(tabs[0].id);
+function SectionPage({ id, tabs, children }) {
+  const [tab, setTabState] = useState(() => {
+    const saved = id ? recallTab(id) : null;
+    return tabs.some(t => t.id === saved) ? saved : tabs[0].id;
+  });
+  const setTab = (t) => { setTabState(t); if (id) rememberTab(id, t); };
+  useEffect(() => {
+    if (!id) return;
+    const onTab = (e) => {
+      if (e.detail && e.detail.page === id && tabs.some(t => t.id === e.detail.tab)) setTabState(e.detail.tab);
+    };
+    window.addEventListener('atlas-tab', onTab);
+    return () => window.removeEventListener('atlas-tab', onTab);
+  }, [id]); // eslint-disable-line
   return (
     <>
       <div className="page-tab-bar">
@@ -9753,7 +9823,7 @@ function SectionPage({ tabs, children }) {
 
 function MeshSection({ nodes, device }) {
   return (
-    <SectionPage tabs={[
+    <SectionPage id="mesh" tabs={[
       {id:'nodes',    label:'Nodes'},
       {id:'topology', label:'Topology'},
       {id:'power',    label:'Power'},
@@ -9772,8 +9842,22 @@ function MeshSection({ nodes, device }) {
 }
 
 function MapSection({ nodes, trackerDevices, device, gpsStatus, onRemoveTracker }) {
-  const [tab,         setTab]         = useState('map');
+  const MAP_TABS = ['map', 'navigate'];
+  const [tab, setTabState] = useState(() => {
+    const saved = recallTab('map');
+    return MAP_TABS.includes(saved) ? saved : 'map';
+  });
+  const setTab = (t) => { setTabState(t); rememberTab('map', t); };
   const [pendingDest, setPendingDest] = useState(null);
+
+  // Deep links from other pages (goTab)
+  useEffect(() => {
+    const onTab = (e) => {
+      if (e.detail && e.detail.page === 'map' && MAP_TABS.includes(e.detail.tab)) setTabState(e.detail.tab);
+    };
+    window.addEventListener('atlas-tab', onTab);
+    return () => window.removeEventListener('atlas-tab', onTab);
+  }, []); // eslint-disable-line
 
   // Global callback so plain-HTML map popups can trigger navigation
   useEffect(() => {
@@ -9782,7 +9866,7 @@ function MapSection({ nodes, trackerDevices, device, gpsStatus, onRemoveTracker 
       setTab('navigate');
     };
     return () => { delete window._atlasNavTo; };
-  }, []);
+  }, []); // eslint-disable-line
 
   return (
     <>
@@ -9823,7 +9907,7 @@ function HikingSection({ nodes, device, gpsStatus }) {
   const [selectedTrail, setSelectedTrail] = useState('');
   const [trailQuery, setTrailQuery] = useState('');
   const [pendingDest, setPendingDest] = useState(null);
-  const [selectorOpen, setSelectorOpen] = useState(() => !isAtlasMobileClient());
+  const [selectorOpen, setSelectorOpen] = useState(() => !isSmallScreen());
   const deferredTrailQuery = useDeferredValue(trailQuery);
 
   const visibleTrails = useMemo(() => {
@@ -9898,8 +9982,10 @@ function HikingSection({ nodes, device, gpsStatus }) {
   }, [selectedTrail, trails]);
 
   return (
-    <div style={{display:'flex',flexDirection:'column',gap:12,flex:1,minHeight:0}}>
-      <div className="card" style={{padding:'16px 18px',margin:'16px 16px 0 16px',flexShrink:0}}>
+    <div style={{display:'flex',flexDirection:'column',gap:0,flex:1,minHeight:0}}>
+      {/* Flush header bar (matches the Node Map page) — the map below gets the rest */}
+      <div className="card" style={{padding:'10px 16px',margin:0,flexShrink:0,
+        borderRadius:0,borderLeft:'none',borderRight:'none',borderTop:'none'}}>
         <div style={{display:'flex',alignItems:'center',gap:12,marginBottom: selectorOpen ? 14 : 0,cursor:'pointer'}}
           onClick={() => setSelectorOpen(o => !o)}>
           <div style={{
@@ -10004,6 +10090,7 @@ function HikingSection({ nodes, device, gpsStatus }) {
         availableModes={NAV_MODES.filter(m => m.value === 'hiking')}
         autoShowTrailOverlay={false}
         searchPlaceholder="Search within trails, or enter lat, lon…"
+        fullBleed
       />
     </div>
   );
@@ -10011,7 +10098,7 @@ function HikingSection({ nodes, device, gpsStatus }) {
 
 function CommsSection({ messages, alerts, setAlerts, nodes, device, gpsStatus, refresh }) {
   return (
-    <SectionPage tabs={[{id:'messages', label:'Messages'}, {id:'alerts', label:'Alerts'}]}>
+    <SectionPage id="comms" tabs={[{id:'messages', label:'Messages'}, {id:'alerts', label:'Alerts'}]}>
       {tab => (
         <>
           {tab === 'messages'  && <MessagesPage messages={messages} nodes={nodes} device={device} refresh={refresh}/>}
@@ -10024,7 +10111,7 @@ function CommsSection({ messages, alerts, setAlerts, nodes, device, gpsStatus, r
 
 function ToolsSection() {
   return (
-    <SectionPage tabs={[{id:'calculator', label:'Calculator'}, {id:'calendar', label:'Calendar'}]}>
+    <SectionPage id="tools" tabs={[{id:'calculator', label:'Calculator'}, {id:'calendar', label:'Calendar'}]}>
       {tab => (
         <>
           {tab === 'calculator' && <CalculatorPage/>}
@@ -10037,7 +10124,7 @@ function ToolsSection() {
 
 function SystemSection(props) {
   return (
-    <SectionPage tabs={[{id:'wifi', label:'WiFi'}, {id:'stats', label:'Stats'}, {id:'settings', label:'Settings'}]}>
+    <SectionPage id="system" tabs={[{id:'wifi', label:'WiFi'}, {id:'stats', label:'Stats'}, {id:'settings', label:'Settings'}]}>
       {tab => (
         <>
           {tab === 'wifi'     && <WifiPage/>}
@@ -10053,14 +10140,14 @@ function SystemSection(props) {
 // Main App
 // ═══════════════════════════════════════════════
 const DEFAULT_PAGES = [
-  { id: 'dashboard', icon: Icons.dashboard,  label: 'Dashboard', group: 'main'  },
-  { id: 'mesh',      icon: Icons.topology,   label: 'Mesh',      group: 'mesh'  },
-  { id: 'map',       icon: Icons.map,        label: 'Map',       group: 'map'   },
-  { id: 'hiking',    icon: Icons.mountain,   label: 'Hiking',    group: 'map'   },
-  { id: 'comms',     icon: Icons.messages,   label: 'Messages',  group: 'comms' },
-  { id: 'tools',     icon: Icons.calculator, label: 'Tools',     group: 'tools' },
-  { id: 'system',    icon: Icons.settings,   label: 'Settings',  group: 'sys'   },
-  { id: 'ai',        icon: Icons.ai,         label: 'Ray',       group: 'ai'    },
+  { id: 'dashboard', icon: Icons.dashboard,  label: 'Dashboard', short: 'Home',  group: 'main'  },
+  { id: 'mesh',      icon: Icons.topology,   label: 'Mesh',      short: 'Mesh',  group: 'mesh'  },
+  { id: 'map',       icon: Icons.map,        label: 'Map',       short: 'Map',   group: 'map'   },
+  { id: 'hiking',    icon: Icons.mountain,   label: 'Hiking',    short: 'Hike',  group: 'map'   },
+  { id: 'comms',     icon: Icons.messages,   label: 'Messages',  short: 'Chat',  group: 'comms' },
+  { id: 'tools',     icon: Icons.calculator, label: 'Tools',     short: 'Tools', group: 'tools' },
+  { id: 'system',    icon: Icons.settings,   label: 'Settings',  short: 'Setup', group: 'sys'   },
+  { id: 'ai',        icon: Icons.ai,         label: 'Ray',       short: 'Ray',   group: 'ai'    },
 ];
 const ALWAYS_VISIBLE_PAGES = ['system'];
 
@@ -10071,6 +10158,26 @@ function App() {
   const dashboardTitle = 'Atlas Control';
   const initialPage = searchParams.get('page') || 'dashboard';
   const [page, setPage] = useState(initialPage);
+  // Deep-link support: ?page=&tab= seeds the remembered sub-tab once at startup
+  useState(() => {
+    const t = searchParams.get('tab');
+    if (t) rememberTab(initialPage, t);
+    return null;
+  });
+  // Let goTab() (quick actions, widget links, map popups) switch top-level pages
+  useEffect(() => {
+    window._atlasSetPage = setPage;
+    return () => { delete window._atlasSetPage; };
+  }, []);
+  // Keep the current page in the URL so a refresh restores your place
+  useEffect(() => {
+    try {
+      const u = new URL(window.location.href);
+      if (page === 'dashboard') u.searchParams.delete('page'); else u.searchParams.set('page', page);
+      u.searchParams.delete('tab');
+      window.history.replaceState(null, '', u.toString());
+    } catch (e) {}
+  }, [page]);
   const [stats, setStats] = useState({});
   const [nodes, setNodes] = useState([]);
   const [messages, setMessages] = useState([]);
@@ -10451,6 +10558,7 @@ function App() {
                 onDragEnd={handleDragEnd}
               >
                 {p.icon}
+                <span className="sidebar-btn-label">{p.short || p.label}</span>
                 {p.id === 'comms' && hasAlerts && <span className="badge"/>}
               </button>
             </React.Fragment>
@@ -10563,10 +10671,11 @@ function App() {
                 <button
                   key={p.id}
                   className={`sidebar-btn ${page === p.id ? 'active' : ''}`}
-                  style={{flex:1, borderRadius:0, height:'100%', margin:0, width:'auto', minWidth:44}}
+                  style={{flex:1, borderRadius:0, height:'100%', margin:0, width:'auto', minWidth:36, maxWidth:'none', flexDirection:'column', gap:3}}
                   onClick={() => setPage(p.id)}
                 >
                   {p.icon}
+                  <span className="sidebar-btn-label">{p.short || p.label}</span>
                   {p.id === 'comms' && hasAlerts && <span className="badge"/>}
                 </button>
               ))}
