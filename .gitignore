@@ -55,5 +55,7 @@ hotspot_config.json
 .claude/
 
 # ── OSRM lib symlink (points to system path, not portable) ───────────────────
-lib
+# Anchored to the repo root so it only ignores the legacy top-level `lib`
+# symlink — NOT the bundled OSRM profile library at osrm-profiles/lib/.
+/lib
 .atlas_installed

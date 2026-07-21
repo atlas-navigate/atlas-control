@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ╔══════════════════════════════════════════════════════════════════════════╗
 # ║              ATLAS CONTROL — MASTER INSTALLATION SCRIPT                 ║
-# ║              Jetson Orin Nano (ARM64) · Ubuntu 22.04                     ║
+# ║              Jetson Orin Nano (ARM64) · Ubuntu 22.04 / 24.04             ║
 # ║                                                                          ║
 # ║  Usage:  sudo ./install.sh             fresh install (or prompts to      ║
 # ║                                        update if Atlas is already here)  ║
@@ -201,92 +201,34 @@ echo ""
 # ════════════════════════════════════════════════════════════════════════════
 # 1.  NVMe DETECTION & STORAGE SETUP
 # ════════════════════════════════════════════════════════════════════════════
-section "NVMe Storage Detection"
+section "Storage"
 
 ATLAS_DATA="/atlas_data"
 
-# Helper — format and mount an NVMe device (defined early; used below)
-_setup_nvme() {
-    local dev="$1"
-    local part="${dev}p1"
+# Atlas data (maps, routing, DBs) lives under /atlas_data. On current Jetson
+# builds the OS and this data share a single NVMe, so /atlas_data is just a
+# directory on the root filesystem — nothing to detect, partition, format, or
+# mount. (Earlier builds put the OS on a microSD card and Atlas data on a
+# SEPARATE NVMe mounted at /atlas_data; those installs keep working unchanged
+# because we honor an existing mount and never reformat anything.)
+RECOMMENDED_FREE_GB=350
 
-    info "Partitioning $dev ..."
-    parted -s "$dev" mklabel gpt mkpart primary ext4 0% 100%
-    partprobe "$dev"
-    sleep 2
-
-    info "Formatting ${part} as ext4 (label: atlas_data) ..."
-    mkfs.ext4 -L atlas_data -F "$part"
-
-    mkdir -p "$ATLAS_DATA"
-    mount "$part" "$ATLAS_DATA"
-
-    local UUID
-    UUID=$(blkid -s UUID -o value "$part")
-    if ! grep -q "$UUID" /etc/fstab; then
-        echo "UUID=$UUID  $ATLAS_DATA  ext4  defaults,nofail  0  2" >> /etc/fstab
-    fi
-
-    log "NVMe mounted at $ATLAS_DATA (UUID: $UUID)"
-}
-
-# Find the root filesystem device (to exclude it)
-ROOT_DEV=$(lsblk -no pkname "$(findmnt -n -o SOURCE /)" 2>/dev/null || echo "none")
-
-# Check if /atlas_data is already mounted
-if [[ "$INSTALL_MODE" == "update" ]]; then
-    # Update mode never touches storage — whatever served the existing
-    # install keeps serving it (mounted NVMe or root filesystem).
-    log "Update mode — keeping existing storage at $ATLAS_DATA"
-    mkdir -p "$ATLAS_DATA"
-elif mountpoint -q "$ATLAS_DATA" 2>/dev/null; then
+if mountpoint -q "$ATLAS_DATA" 2>/dev/null; then
     ATLAS_DEV=$(findmnt -n -o SOURCE "$ATLAS_DATA")
-    log "/atlas_data is already mounted on $ATLAS_DEV — skipping format"
+    log "/atlas_data is a separate mount on $ATLAS_DEV — using it as-is"
 else
-    # Find NVMe devices that are NOT the root device
-    NVME_CANDIDATES=()
-    while IFS= read -r line; do
-        DEV="/dev/$(echo "$line" | awk '{print $1}')"
-        SIZE=$(echo "$line" | awk '{print $2}')
-        # Skip the root device
-        NAME=$(echo "$line" | awk '{print $1}')
-        [[ "$NAME" == "$ROOT_DEV" ]] && continue
-        NVME_CANDIDATES+=("$DEV ($SIZE)")
-    done < <(lsblk -d -n -o NAME,SIZE,TYPE | awk '$3=="disk" && /nvme/{print}')
+    mkdir -p "$ATLAS_DATA"
+    log "Using $ATLAS_DATA on the root filesystem ($(findmnt -n -o SOURCE / 2>/dev/null || echo '/'))"
+fi
 
-    if [[ ${#NVME_CANDIDATES[@]} -eq 0 ]]; then
-        warn "No external NVMe drive detected."
-        warn "Large data (maps, routing) will be stored on the root filesystem at $ATLAS_DATA."
-        warn "~350 GB free recommended (basemap ~126 GB + OSRM ~125 GB + topo/DBs + scratch)."
-        if ! confirm "Continue without NVMe?"; then
-            die "Install cancelled. Connect an NVMe drive and re-run."
-        fi
-        mkdir -p "$ATLAS_DATA"
-    elif [[ ${#NVME_CANDIDATES[@]} -eq 1 ]]; then
-        RAW="${NVME_CANDIDATES[0]}"
-        NVME_DEV="${RAW%% *}"
-        info "Found NVMe drive: $RAW"
-        if confirm "Format $NVME_DEV and mount at $ATLAS_DATA for Atlas data storage?" y; then
-            _setup_nvme "$NVME_DEV"
-        else
-            warn "Skipping NVMe setup — using root filesystem."
-            mkdir -p "$ATLAS_DATA"
-        fi
-    else
-        echo "  Multiple NVMe drives found:"
-        for i in "${!NVME_CANDIDATES[@]}"; do
-            echo "    $((i+1)).  ${NVME_CANDIDATES[$i]}"
-        done
-        echo "    0.  None — use root filesystem"
-        read -rp "  Select drive for Atlas data storage: " CHOICE
-        if [[ "$CHOICE" =~ ^[1-9][0-9]*$ ]] && (( CHOICE <= ${#NVME_CANDIDATES[@]} )); then
-            RAW="${NVME_CANDIDATES[$((CHOICE-1))]}"
-            NVME_DEV="${RAW%% *}"
-            _setup_nvme "$NVME_DEV"
-        else
-            warn "No NVMe selected — using root filesystem."
-            mkdir -p "$ATLAS_DATA"
-        fi
+# Free-space advisory only (never blocks): the full dataset — basemap + all-state
+# OSRM + topo/DBs + scratch — is large, but a partial state selection or a quick
+# update needs far less, so we warn rather than refuse.
+if [[ "$INSTALL_MODE" != "update" ]]; then
+    FREE_GB=$(df -BG --output=avail "$ATLAS_DATA" 2>/dev/null | tail -1 | tr -dc '0-9')
+    if [[ -n "$FREE_GB" && "$FREE_GB" -lt "$RECOMMENDED_FREE_GB" ]]; then
+        warn "Only ${FREE_GB} GB free on $ATLAS_DATA (~${RECOMMENDED_FREE_GB} GB recommended for the full basemap + all 50 states)."
+        warn "You can still proceed — install fewer states when prompted, or free space and re-run."
     fi
 fi
 
@@ -752,12 +694,78 @@ fi
 # ════════════════════════════════════════════════════════════════════════════
 section "OSRM Routing Engine"
 
-if command -v osrm-routed &>/dev/null; then
-    log "osrm-routed already installed: $(osrm-routed --version 2>/dev/null | head -1)"
+# Install order of preference:
+#   1. Already on PATH        → nothing to do
+#   2. Pre-built binaries      → drop them into /usr/local/bin (seconds)
+#   3. Build from source       → setup_native_osrm.sh (20–40 min on Jetson)
+#
+# Pre-built native binaries staged on the data drive (e.g.
+# /atlas_data/osrm-native-bin/osrm-*) let us skip the from-source build
+# entirely. They're dynamically linked against system Boost/TBB, which the
+# System Dependencies section above already installed (libboost-all-dev,
+# libtbb-dev), so a straight copy into PATH is all that's needed.
+#
+# All FOUR tools are required, not just osrm-routed: processing a state needs
+# osrm-extract / osrm-partition / osrm-customize (section 8), and osrm-routed
+# only serves the result. A prebuilt dir that stages just osrm-routed is
+# therefore incomplete — fall through to the source build, which produces the
+# whole toolset.
+OSRM_PREBUILT_DIR="$ATLAS_DATA/osrm-native-bin"
+OSRM_TOOLS=(osrm-routed osrm-extract osrm-partition osrm-customize)
+
+_osrm_tools_on_path() {
+    local t
+    for t in "${OSRM_TOOLS[@]}"; do command -v "$t" &>/dev/null || return 1; done
+}
+_osrm_prebuilt_complete() {
+    local t
+    for t in "${OSRM_TOOLS[@]}"; do [[ -x "$OSRM_PREBUILT_DIR/$t" ]] || return 1; done
+}
+
+if _osrm_tools_on_path; then
+    log "OSRM tools already installed: $(osrm-routed --version 2>/dev/null | head -1)"
+elif _osrm_prebuilt_complete; then
+    info "Installing pre-built OSRM binaries from $OSRM_PREBUILT_DIR ..."
+    # `install -m 755 <src>... <dir>` copies each osrm-* binary into a PATH
+    # directory and sets its mode to rwxr-xr-x (world-executable) in one step.
+    install -m 755 "$OSRM_PREBUILT_DIR"/osrm-* /usr/local/bin/
+    ldconfig 2>/dev/null || true   # refresh linker cache for the new binaries
+    hash -r                        # forget any cached "not found" for osrm-*
+    if _osrm_tools_on_path; then
+        log "OSRM binaries installed from prebuilt: $(osrm-routed --version 2>/dev/null | head -1)"
+    else
+        die "Prebuilt OSRM install failed — one or more of ${OSRM_TOOLS[*]} not on PATH.
+    Check that $OSRM_PREBUILT_DIR/osrm-* are executables for this arch and that
+    their shared-library deps resolve (ldd $OSRM_PREBUILT_DIR/osrm-routed)."
+    fi
 else
+    if compgen -G "$OSRM_PREBUILT_DIR/osrm-*" >/dev/null 2>&1; then
+        warn "Prebuilt OSRM dir incomplete (need all of: ${OSRM_TOOLS[*]}) — building from source"
+    fi
     info "Building OSRM from source (this takes 20–40 minutes on Jetson) ..."
     bash "$APP_DIR/setup_native_osrm.sh" --no-cleanup-prompt
     log "OSRM routing engine built and installed"
+fi
+
+# ── OSRM routing profiles (car.lua + shared lib/) ────────────────────────────
+# Both routing profiles depend on OSRM's shared Lua profile library:
+#   • car.lua is loaded directly from $OSRM_PROFILES_DIR/car.lua (see CAR_LUA,
+#     section 8) and require()s lib/* relative to itself.
+#   • hiking.lua require()s the same lib/* via its package.path (which points at
+#     $OSRM_PROFILES_DIR).
+# A from-source `make install` drops these in place, but the prebuilt-binary
+# path does not — so install the version-matched copy bundled in the repo
+# whenever the system location is missing. Bundling keeps the install
+# self-contained and immune to how the binaries were obtained.
+OSRM_PROFILES_DIR="/usr/local/share/osrm/profiles"
+if [[ ! -f "$OSRM_PROFILES_DIR/car.lua" || ! -d "$OSRM_PROFILES_DIR/lib" ]]; then
+    info "Installing OSRM routing profiles to $OSRM_PROFILES_DIR ..."
+    mkdir -p "$OSRM_PROFILES_DIR/lib"
+    cp "$APP_DIR/osrm-profiles/car.lua"     "$OSRM_PROFILES_DIR/car.lua"
+    cp "$APP_DIR/osrm-profiles/lib/"*.lua   "$OSRM_PROFILES_DIR/lib/"
+    log "OSRM profiles installed (car.lua + shared lib/)"
+else
+    log "OSRM profiles already present ($OSRM_PROFILES_DIR)"
 fi
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -811,14 +819,21 @@ else
 fi
 
 # ── 7b. Noto Sans glyph PBFs (required for map label rendering) ──────────────
-# The font directory contains Unicode range PBF files, not TTF files.
-FONT_PBF_COUNT=$(find "$APP_DIR/static/fonts" -name "*.pbf" 2>/dev/null | wc -l || true)
-if [[ $FONT_PBF_COUNT -lt 255 ]]; then
+# The font directory holds per-weight Unicode-range PBF files, not TTF files.
+# The map style requests the "Noto Sans Regular" stack (templates/index.html),
+# so gate specifically on THAT weight being complete — counting all weights
+# together let a fully-downloaded Bold mask a missing/partial Regular and leave
+# the map with unlabeled features. Regular has 256 ranges; allow one of slack.
+# download_fonts.sh is idempotent (skips ranges already on disk) and re-verifies
+# the primary weight itself before returning success.
+PRIMARY_FONT_DIR="$APP_DIR/static/fonts/Noto Sans Regular"
+PRIMARY_FONT_COUNT=$(find "$PRIMARY_FONT_DIR" -name "*.pbf" 2>/dev/null | wc -l || true)
+if [[ $PRIMARY_FONT_COUNT -lt 255 ]]; then
     info "Downloading map font glyphs (~8 MB) ..."
     sudo -u "$ATLAS_USER" bash "$APP_DIR/download_fonts.sh"
     log "Font glyphs downloaded"
 else
-    log "Font glyphs already present ($FONT_PBF_COUNT ranges)"
+    log "Font glyphs already present (Noto Sans Regular: $PRIMARY_FONT_COUNT ranges)"
 fi
 
 # ── 7c. Topographic overlay ───────────────────────────────────────────────────

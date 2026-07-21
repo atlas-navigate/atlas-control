@@ -25,7 +25,15 @@ set -euo pipefail
 OSRM_VERSION="v5.27.1"   # last stable v5 release
 BUILD_DIR="${HOME}/osrm-build"
 INSTALL_PREFIX="/usr/local"
+# Parallelism is capped by RAM, not just core count. OSRM's Boost.Spirit
+# translation units (parameters_parser.cpp …) can use ~2.5 GB each at -O3, so a
+# full -j$(nproc) OOM-kills the compiler on RAM-limited boards — on the Jetson
+# Orin Nano (8 GB) this shows up as "Killed signal terminated program cc1plus"
+# around 70-90%. Allow ~1 compile job per 3 GB of RAM (min 1).
 JOBS=$(nproc)
+MEM_GB=$(awk '/MemTotal/{printf "%d", $2/1024/1024}' /proc/meminfo)
+MEM_CAP=$(( MEM_GB / 3 )); (( MEM_CAP < 1 )) && MEM_CAP=1
+(( JOBS > MEM_CAP )) && JOBS=$MEM_CAP
 NO_CLEANUP_PROMPT=0
 
 for arg in "$@"; do
@@ -38,6 +46,39 @@ done
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
+
+# ── Temporary build swap (low-RAM boards) ───────────────────────────────────
+# Jetson Orin Nano ships with 8 GB RAM and frequently 0 swap. Even with a
+# capped job count the LTO link and the heaviest Boost.Spirit units spike past
+# available RAM and the OOM-killer aborts the build. Add a temporary swapfile
+# for the duration of the build and remove it on exit (success or failure).
+ATLAS_SWAPFILE=""
+cleanup_build_swap() {
+    if [[ -n "$ATLAS_SWAPFILE" && -e "$ATLAS_SWAPFILE" ]]; then
+        sudo swapoff "$ATLAS_SWAPFILE" 2>/dev/null || true
+        sudo rm -f "$ATLAS_SWAPFILE"
+    fi
+}
+trap cleanup_build_swap EXIT
+ensure_build_swap() {
+    local have_mb want_mb=8192 dir="$1"
+    have_mb=$(awk '/SwapTotal/{print int($2/1024)}' /proc/meminfo)
+    (( have_mb >= 4096 )) && return 0   # enough swap already
+    ATLAS_SWAPFILE="${dir}/.osrm-build-swap"
+    echo -e "${CYAN}→ Only ${have_mb} MB swap detected; adding a temporary ${want_mb} MB build swapfile…${NC}"
+    sudo rm -f "$ATLAS_SWAPFILE"
+    # fallocate can produce a holey file some kernels reject for swap; fall back to dd.
+    if ! sudo fallocate -l "${want_mb}M" "$ATLAS_SWAPFILE" 2>/dev/null; then
+        sudo dd if=/dev/zero of="$ATLAS_SWAPFILE" bs=1M count="$want_mb" status=none
+    fi
+    sudo chmod 600 "$ATLAS_SWAPFILE"
+    if sudo mkswap "$ATLAS_SWAPFILE" >/dev/null 2>&1 && sudo swapon "$ATLAS_SWAPFILE" 2>/dev/null; then
+        echo -e "${GREEN}  ✓ Temporary swap active (removed automatically after the build)${NC}"
+    else
+        echo -e "${YELLOW}  ! Could not enable swapfile — continuing without it (build may OOM)${NC}"
+        sudo rm -f "$ATLAS_SWAPFILE"; ATLAS_SWAPFILE=""
+    fi
+}
 
 # ── Check if already installed ─────────────────────────────────────────────
 if [[ "${1:-}" == "--check" ]]; then
@@ -53,8 +94,17 @@ if [[ "${1:-}" == "--check" ]]; then
     fi
 fi
 
-if command -v osrm-routed &>/dev/null; then
-    echo -e "${GREEN}✓ osrm-routed already installed:${NC} $(which osrm-routed)"
+# Only skip the build when the WHOLE toolset is present. osrm-routed alone is
+# not enough: processing a state needs osrm-extract / osrm-partition /
+# osrm-customize, and install.sh falls back here precisely when those are
+# missing even though osrm-routed happens to be on PATH.
+OSRM_REQUIRED_TOOLS=(osrm-routed osrm-extract osrm-partition osrm-customize)
+_osrm_all_present() {
+    local t
+    for t in "${OSRM_REQUIRED_TOOLS[@]}"; do command -v "$t" &>/dev/null || return 1; done
+}
+if _osrm_all_present; then
+    echo -e "${GREEN}✓ OSRM already installed:${NC} $(which osrm-routed)"
     echo "  routing_node.py will use native OSRM automatically."
     exit 0
 fi
@@ -65,9 +115,12 @@ echo -e "${YELLOW}Jobs:    ${JOBS} parallel${NC}"
 echo ""
 
 # ── Install build dependencies ─────────────────────────────────────────────
+# DPkg::Lock::Timeout=600 makes apt WAIT (up to 10 min) when a background
+# updater (unattended-upgrades / packagekit / aptd) holds the apt/dpkg lock,
+# instead of dying with "Could not get lock /var/lib/apt/lists/lock".
 echo -e "${CYAN}→ Installing build dependencies…${NC}"
-sudo apt-get update -qq
-sudo apt-get install -y \
+sudo apt-get -o DPkg::Lock::Timeout=600 update -qq
+sudo DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 install -y \
     build-essential \
     cmake \
     pkg-config \
@@ -102,6 +155,19 @@ fi
 
 echo -e "${GREEN}  ✓ Source ready${NC}"
 
+# ── Toolchain compatibility patch (GCC 13 / Ubuntu 24.04 / JetPack 7) ────────
+# OSRM v5.27.1 predates GCC 13. cmake/warnings.cmake calls `add_warning(error)`
+# (=> -Werror). Combined with the unused-variable/function warnings GCC emits
+# in OSRM's own code, that turns the build fatal. Disable -Werror so warnings
+# stay warnings on newer toolchains. Idempotent (line is commented after pass 1).
+echo -e "${CYAN}→ Patching out -Werror for GCC/newer-toolchain compatibility…${NC}"
+WERR_PATCHED=0
+while IFS= read -r f; do
+    sed -i -E 's/^([[:space:]]*)add_warning\(error\)/\1# add_warning(error)  # disabled by Atlas: GCC13\/24.04 compat/' "$f"; WERR_PATCHED=1
+done < <(grep -rlE '^[[:space:]]*add_warning\(error\)' --include='*.cmake' --include=CMakeLists.txt . 2>/dev/null || true)
+while IFS= read -r f; do sed -i 's/-Werror//g' "$f"; WERR_PATCHED=1; done < <(grep -rlF -- '-Werror' --include='*.cmake' --include=CMakeLists.txt . 2>/dev/null || true)
+[[ "$WERR_PATCHED" -eq 1 ]] && echo -e "${GREEN}  ✓ -Werror disabled${NC}" || echo -e "${YELLOW}  (no -Werror directive found)${NC}"
+
 # ── Configure ──────────────────────────────────────────────────────────────
 echo -e "${CYAN}→ Configuring build (Release, native optimized)…${NC}"
 mkdir -p build && cd build
@@ -114,14 +180,17 @@ cmake .. \
     -DOSRM_BUILD_ROUTED=ON \
     -DOSRM_BUILD_TOOLS=OFF \
     -DOSRM_BUILD_TESTS=OFF \
-    -DCMAKE_CXX_FLAGS="-march=native -O3" \
+    -DCMAKE_CXX_FLAGS="-march=native -O3 -include cstdint" \
     -DCMAKE_C_FLAGS="-march=native -O3" \
     2>&1 | tail -5
 
 echo -e "${GREEN}  ✓ Configured${NC}"
 
 # ── Build ──────────────────────────────────────────────────────────────────
-echo -e "${CYAN}→ Building with ${JOBS} cores (this takes 20-40 minutes)…${NC}"
+# Add temporary swap on low-RAM boards so the OOM-killer doesn't abort the LTO
+# link / heaviest Boost.Spirit units. Prefer the roomy NVMe volume for it.
+if [[ -d /atlas_data ]]; then ensure_build_swap /atlas_data; else ensure_build_swap "${BUILD_DIR}"; fi
+echo -e "${CYAN}→ Building with ${JOBS} parallel job(s) (this takes 20-40 minutes)…${NC}"
 echo "  Progress: make -j${JOBS}"
 make -j"${JOBS}" osrm-routed osrm-extract osrm-partition osrm-customize
 

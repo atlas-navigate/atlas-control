@@ -18,7 +18,7 @@ Runs 100% offline — no internet required after installation.
 
 ## Hardware
 
-- Jetson Orin Nano (ARM64, Ubuntu 22.04)
+- Jetson Orin Nano (ARM64, Ubuntu 22.04 / JetPack 6 or Ubuntu 24.04 / JetPack 7)
 - NVMe drive (500 GB+ recommended — maps + routing data is large)
 - u-blox GPS receiver
 - Heltec V4 Meshtastic radio
