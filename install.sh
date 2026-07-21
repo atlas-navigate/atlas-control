@@ -1146,6 +1146,30 @@ systemctl daemon-reload
 systemctl enable atlas-control ollama
 log "Services enabled: atlas-control, ollama"
 
+# ── zram-backed swap ─────────────────────────────────────────────────────────
+# The Orin Nano shares 8 GB of RAM between CPU and GPU, so Ollama + OSRM + the
+# app can drive it into the OOM killer under load. A zram device (50% of RAM,
+# zstd-compressed) roughly doubles effective memory headroom without touching
+# the NVMe. The helper is idempotent and installed to a fixed path (mirrors the
+# atlas-update launcher below), so this is safe to re-run on every update —
+# existing boxes pick zram up on --update. Non-fatal: a kernel without the zram
+# module must not abort the install.
+install -m 755 "$APP_DIR/zram-swap.sh" /usr/local/sbin/atlas-zram
+cp "$APP_DIR/zram-swap.service" /etc/systemd/system/zram-swap.service
+cat > /etc/sysctl.d/99-zram.conf <<'SYS'
+# Swap aggressively to (fast, compressed) zram; keep the filesystem cache lean.
+vm.swappiness=100
+vm.vfs_cache_pressure=200
+SYS
+systemctl daemon-reload
+if systemctl enable --now zram-swap.service 2>/dev/null; then
+    sysctl -p /etc/sysctl.d/99-zram.conf >/dev/null 2>&1 || true
+    ZRAM_SIZE=$(swapon --show=NAME,SIZE --noheadings 2>/dev/null | awk '/zram/{print $2; exit}')
+    log "zram swap enabled${ZRAM_SIZE:+ (${ZRAM_SIZE} compressed)}"
+else
+    warn "Could not enable zram swap (kernel lacks the zram module?) — continuing without it"
+fi
+
 # Web-app-triggered updates: install the root-owned launcher the Flask app
 # invokes via sudo.  It starts install.sh --update as a transient systemd
 # unit so the update survives atlas-control restarting itself mid-update.

@@ -1,0 +1,22 @@
+# Installed as-is by install.sh (section 10) — no placeholder substitution.
+#
+# zram-backed compressed swap for the 8 GB shared-RAM Jetson Orin Nano. Ollama
+# (chat + embed models) + OSRM + the Flask app can push the box into the OOM
+# killer under load; zram gives roughly 2x effective memory headroom by holding
+# swapped pages compressed in RAM (zstd) instead of writing them to the NVMe.
+#
+# All the real work lives in /usr/local/sbin/atlas-zram (installed alongside
+# this unit). Keeping the shell out of ExecStart avoids systemd's own $-variable
+# expansion mangling the command before bash ever sees it.
+[Unit]
+Description=zram-backed swap (Atlas / Jetson)
+After=multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/atlas-zram start
+ExecStop=/usr/local/sbin/atlas-zram stop
+
+[Install]
+WantedBy=multi-user.target
