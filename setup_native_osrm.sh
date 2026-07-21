@@ -172,6 +172,26 @@ while IFS= read -r f; do sed -i 's/-Werror//g' "$f"; WERR_PATCHED=1; done < <(gr
 echo -e "${CYAN}→ Configuring build (Release, native optimized)…${NC}"
 mkdir -p build && cd build
 
+# ── GCC 13 / libstdc++ 13 missing-transitive-include shim ────────────────────
+# OSRM v5.27.1 predates GCC 13, which stopped pulling many standard-library
+# headers in transitively. Dozens of OSRM headers use std::vector / std::transform
+# / std::unique_ptr / … without #include-ing the header that defines them (e.g.
+# suffix_table.hpp uses std::vector with no <vector>, which aborts the build with
+# "'vector' in namespace 'std' does not name a template type"). Rather than patch
+# every file, force-include the standard headers OSRM uses bare into every C++
+# translation unit so the whole missing-include class is fixed at once. Each
+# header below was confirmed needed against the v5.27.1 tree; force-including is
+# harmless where a TU already includes it. C sources use CMAKE_C_FLAGS (below)
+# and are intentionally left untouched — C++ headers must not enter C TUs.
+STD_FORCE_INCLUDES=""
+for _h in cstdint cstddef cstring cmath \
+          string vector array map set unordered_map unordered_set \
+          memory utility tuple initializer_list \
+          algorithm numeric iterator functional \
+          limits type_traits ostream sstream stdexcept; do
+    STD_FORCE_INCLUDES+=" -include ${_h}"
+done
+
 cmake .. \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX="${INSTALL_PREFIX}" \
@@ -180,7 +200,7 @@ cmake .. \
     -DOSRM_BUILD_ROUTED=ON \
     -DOSRM_BUILD_TOOLS=OFF \
     -DOSRM_BUILD_TESTS=OFF \
-    -DCMAKE_CXX_FLAGS="-march=native -O3 -include cstdint" \
+    -DCMAKE_CXX_FLAGS="-march=native -O3${STD_FORCE_INCLUDES}" \
     -DCMAKE_C_FLAGS="-march=native -O3" \
     2>&1 | tail -5
 
