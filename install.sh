@@ -309,6 +309,54 @@ elif [[ -d "$SCRIPT_DIR/.git" ]] && command_exists git; then
     else
         warn "Could not update from $ATLAS_REPO_URL (offline, private repo without ATLAS_REPO_TOKEN, or local changes) — installing the local copy as-is"
     fi
+elif [[ ! -d "$SCRIPT_DIR/.git" ]]; then
+    # App files are here but this is NOT a git checkout — the box was provisioned
+    # by copying files in rather than via the curl-standalone or git-clone path.
+    # Without a .git, app.py's update check reports "Not a git checkout" and the
+    # version shows "unknown". Turn the directory into a real checkout tracking
+    # origin/main so in-app updates + version reporting work. This section runs
+    # before the package install (§3), so bootstrap git first if it's missing
+    # (mirrors the standalone bootstrap above).
+    command_exists git || {
+        info "Installing git to enable software updates ..."
+        apt-get update -qq || true
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git > /dev/null 2>&1 || true
+    }
+    if command_exists git; then
+        info "App files present but not a git checkout — linking to $ATLAS_REPO_URL for updates ..."
+        REPO_OWNER="$(stat -c %U "$SCRIPT_DIR" 2>/dev/null || echo "$ATLAS_USER")"
+        _asgit() { sudo -u "$REPO_OWNER" GIT_TERMINAL_PROMPT=0 git -C "$SCRIPT_DIR" "$@"; }
+        # -b needs git >= 2.28; fall back to init + symbolic-ref on older gits.
+        _asgit init -q -b "$ATLAS_REPO_BRANCH" 2>/dev/null || {
+            _asgit init -q
+            _asgit symbolic-ref HEAD "refs/heads/$ATLAS_REPO_BRANCH"
+        }
+        _asgit remote remove origin 2>/dev/null || true
+        _asgit remote add origin "$GIT_FETCH_URL"
+        if _asgit fetch --depth 1 origin "$ATLAS_REPO_BRANCH" 2>/dev/null; then
+            # Detach the credentialed URL from the on-disk clone config.
+            _asgit remote set-url origin "$ATLAS_REPO_URL"
+            # Every per-device file (certs, DBs, hotspot config, osrm-data/, venv/,
+            # tiles/, .secret_key) is gitignored, so syncing tracked app code to
+            # origin/main is safe — it can't touch device state — and it also
+            # brings a stale file-copied box up to the latest published release.
+            _asgit reset --hard "origin/$ATLAS_REPO_BRANCH" 2>/dev/null || true
+            _asgit branch --set-upstream-to="origin/$ATLAS_REPO_BRANCH" "$ATLAS_REPO_BRANCH" 2>/dev/null || true
+            log "Git checkout initialized at $(_asgit rev-parse --short HEAD 2>/dev/null || echo '?') — updates + version reporting enabled"
+            # If the sync brought a newer install.sh, hand off to it so the rest of
+            # the run uses the latest install logic (mirrors the git-pull path).
+            if ! cmp -s "$SCRIPT_DIR/install.sh" "$ATLAS_INSTALL_TMP"; then
+                warn "install.sh itself was updated by the sync — relaunching the new installer ..."
+                rm -f "$ATLAS_INSTALL_TMP"
+                ATLAS_INSTALL_SELF= ATLAS_INSTALL_TMP= exec bash "$SCRIPT_DIR/install.sh" "--$INSTALL_MODE"
+            fi
+        else
+            _asgit remote set-url origin "$ATLAS_REPO_URL" 2>/dev/null || true
+            warn "Could not reach $ATLAS_REPO_URL to initialize updates (offline?) — repo linked; updates enable once online"
+        fi
+    else
+        warn "git unavailable — software-update support not enabled; re-run install.sh to enable it"
+    fi
 fi
 
 if [[ "$SRC_DIR" != "$APP_DIR" ]]; then
@@ -332,10 +380,12 @@ if [[ "$SRC_DIR" != "$APP_DIR" ]]; then
               --exclude='osrm_active.json' \
               "$SRC_DIR/" "$APP_DIR/"
     log "App files copied"
-    # Standalone install: keep the clone's .git in APP_DIR so future re-runs
-    # of $APP_DIR/install.sh can fast-forward to the current version.
-    if [[ "$SRC_DIR" == "${CLONE_DIR:-}" && ! -d "$APP_DIR/.git" ]]; then
-        mv "$CLONE_DIR/.git" "$APP_DIR/.git"
+    # Keep the source checkout's .git in APP_DIR so future re-runs of
+    # $APP_DIR/install.sh can fast-forward to the current version. Covers the
+    # standalone clone AND a file-copied source that the §2 branch above just
+    # turned into a checkout (rsync excludes .git/, so it must be moved here).
+    if [[ -d "$SRC_DIR/.git" && ! -d "$APP_DIR/.git" ]]; then
+        mv "$SRC_DIR/.git" "$APP_DIR/.git"
         log "Install directory linked to $ATLAS_REPO_URL for future updates"
     fi
 else
@@ -554,6 +604,73 @@ systemctl enable --now bluetooth
 log "bluetooth service enabled"
 
 # ════════════════════════════════════════════════════════════════════════════
+# 3b.  SWAP / MEMORY HEADROOM  (zram + persistent disk swap)
+# ════════════════════════════════════════════════════════════════════════════
+# The Orin Nano shares 8 GB of RAM between CPU and GPU. The heaviest steps —
+# osrm-extract/partition/customize on the big states (CA/TX/FL) and the places
+# index — plus long-range routing at runtime drive it into the OOM killer.
+# zram (compressed RAM) helps but is NOT extra capacity, so we set up BOTH a
+# zram device AND a real disk swapfile HERE, before any heavy provisioning
+# (OSRM build in §6, state processing in §8). Runs in update mode too, so
+# existing boxes gain the persistent runtime swap on --update.
+section "Swap / Memory Headroom"
+
+# ── zram (compressed RAM, high priority) ─────────────────────────────────────
+# The helper is idempotent and installed to a fixed path, so this is safe to
+# re-run on every install/update. Non-fatal: a kernel without the zram module
+# must not abort the install.
+install -m 755 "$APP_DIR/zram-swap.sh" /usr/local/sbin/atlas-zram
+cp "$APP_DIR/zram-swap.service" /etc/systemd/system/zram-swap.service
+cat > /etc/sysctl.d/99-zram.conf <<'SYS'
+# Swap aggressively to (fast, compressed) zram; keep the filesystem cache lean.
+vm.swappiness=100
+vm.vfs_cache_pressure=200
+SYS
+systemctl daemon-reload
+if systemctl enable --now zram-swap.service 2>/dev/null; then
+    sysctl -p /etc/sysctl.d/99-zram.conf >/dev/null 2>&1 || true
+    ZRAM_SIZE=$(swapon --show=NAME,SIZE --noheadings 2>/dev/null | awk '/zram/{print $2; exit}')
+    log "zram swap enabled${ZRAM_SIZE:+ (${ZRAM_SIZE} compressed)}"
+else
+    warn "Could not enable zram swap (kernel lacks the zram module?) — continuing without it"
+fi
+
+# ── Persistent disk swapfile (real capacity, low priority) ───────────────────
+# zram fills first (priority 100); this NVMe-backed swapfile (priority 10) is
+# spillover for genuine overflow — the headroom the big-state OSRM builds and
+# long-range routing need. dd, not fallocate: swapon rejects sparse/holey files.
+ATLAS_DISK_SWAP_GB=32
+ATLAS_SWAPFILE="$ATLAS_DATA/atlas-swap.swap"
+if swapon --show=NAME --noheadings 2>/dev/null | grep -qx "$ATLAS_SWAPFILE"; then
+    log "Persistent disk swap already active ($ATLAS_SWAPFILE)"
+else
+    NEED_KB=$(( ATLAS_DISK_SWAP_GB * 1024 * 1024 ))
+    FREE_KB=$(df -P "$ATLAS_DATA" 2>/dev/null | awk 'NR==2{print $4}')
+    if [[ -f "$ATLAS_SWAPFILE" || "${FREE_KB:-0}" -gt $(( NEED_KB + 5 * 1024 * 1024 )) ]]; then
+        info "Adding ${ATLAS_DISK_SWAP_GB} GB persistent disk swap at $ATLAS_SWAPFILE ..."
+        # Chain create → format → enable in one if-condition so a failure at any
+        # step (e.g. dd hitting ENOSPC) degrades to the else branch instead of
+        # tripping set -e and aborting the install.
+        if { [[ -f "$ATLAS_SWAPFILE" ]] || dd if=/dev/zero of="$ATLAS_SWAPFILE" bs=1M count=$(( ATLAS_DISK_SWAP_GB * 1024 )) status=none 2>/dev/null; } \
+             && chmod 600 "$ATLAS_SWAPFILE" \
+             && mkswap "$ATLAS_SWAPFILE" >/dev/null 2>&1 \
+             && swapon --priority 10 "$ATLAS_SWAPFILE" 2>/dev/null; then
+            # Persist across reboots at low priority (below zram). Idempotent.
+            if ! grep -qF "$ATLAS_SWAPFILE" /etc/fstab 2>/dev/null; then
+                printf '%s none swap sw,pri=10 0 0\n' "$ATLAS_SWAPFILE" >> /etc/fstab
+            fi
+            log "Persistent disk swap active + in /etc/fstab (${ATLAS_DISK_SWAP_GB} GB, priority 10)"
+        else
+            warn "Could not set up disk swapfile at $ATLAS_SWAPFILE — continuing (big-state OSRM may OOM)"
+            swapoff "$ATLAS_SWAPFILE" 2>/dev/null || true
+            rm -f "$ATLAS_SWAPFILE"
+        fi
+    else
+        warn "Not enough free space on $ATLAS_DATA for a ${ATLAS_DISK_SWAP_GB} GB swapfile (need ~$(( ATLAS_DISK_SWAP_GB + 5 )) GB) — skipping disk swap"
+    fi
+fi
+
+# ════════════════════════════════════════════════════════════════════════════
 # 4.  PYTHON VIRTUAL ENVIRONMENT
 # ════════════════════════════════════════════════════════════════════════════
 section "Python Environment"
@@ -635,6 +752,12 @@ log "Python environment ready"
 # changes, but compiling it now means the bundle is warm before the first
 # mobile client connects.  Mirrors app.py._precompile_jsx exactly.  Non-fatal:
 # if node/compile fails, the runtime rebuild path still covers it.
+# Some apt nodejs packages ship only `nodejs` (no `node`); compile_jsx.js calls
+# `node`. Alias it so the bundle precompiles here instead of deferring to runtime.
+if ! command_exists node && command_exists nodejs; then
+    ln -sf "$(command -v nodejs)" /usr/local/bin/node
+    hash -r
+fi
 if command_exists node && [[ -f "$APP_DIR/compile_jsx.js" ]]; then
     info "Pre-compiling mobile JSX bundle ..."
     if sudo -u "$ATLAS_USER" "$VENV/bin/python3" - "$APP_DIR" <<'PYEOF'
@@ -1086,6 +1209,32 @@ else
     done
 fi
 
+# ════════════════════════════════════════════════════════════════════════════
+# 8b.  OFFLINE PLACES / GEOCODING INDEX  (address + POI search)
+# ════════════════════════════════════════════════════════════════════════════
+# Build static/data/places.db from the state .osm.pbf extracts just downloaded,
+# so users can type a store / street address / POI name and route to it
+# (Google-Maps-style). build_places_index.py reads osrm-data/*.osm.pbf — the same
+# files OSRM routes on; _process_state keeps the originals. build_places_safe.sh
+# makes the heavy build safe on 8 GB: it adds swap, pauses Ray (ollama), and
+# memory-caps the build so it can't freeze the box. Idempotent + non-fatal, so a
+# long or interrupted build never aborts the install.
+section "Offline Places / Geocoding Index"
+
+PLACES_DB="$APP_DIR/static/data/places.db"
+if [[ -s "$PLACES_DB" ]]; then
+    log "Places index already present ($(du -sh "$PLACES_DB" | cut -f1)) — skipping"
+elif ! compgen -G "$OSRM_DIR/*.osm.pbf" >/dev/null 2>&1; then
+    warn "No state .pbf files present — skipping places index (install states first)"
+else
+    info "Building offline address/POI search index (memory-safe; this can take a while) ..."
+    if bash "$APP_DIR/build_places_safe.sh"; then
+        log "Places index built ($(du -sh "$PLACES_DB" 2>/dev/null | cut -f1)) — 'type a place/address' search enabled"
+    else
+        warn "Places index build did not finish — resume later: sudo bash $APP_DIR/build_places_safe.sh --resume"
+    fi
+fi
+
 fi  # end full-install-only provisioning (sections 5–8)
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1146,29 +1295,10 @@ systemctl daemon-reload
 systemctl enable atlas-control ollama
 log "Services enabled: atlas-control, ollama"
 
-# ── zram-backed swap ─────────────────────────────────────────────────────────
-# The Orin Nano shares 8 GB of RAM between CPU and GPU, so Ollama + OSRM + the
-# app can drive it into the OOM killer under load. A zram device (50% of RAM,
-# zstd-compressed) roughly doubles effective memory headroom without touching
-# the NVMe. The helper is idempotent and installed to a fixed path (mirrors the
-# atlas-update launcher below), so this is safe to re-run on every update —
-# existing boxes pick zram up on --update. Non-fatal: a kernel without the zram
-# module must not abort the install.
-install -m 755 "$APP_DIR/zram-swap.sh" /usr/local/sbin/atlas-zram
-cp "$APP_DIR/zram-swap.service" /etc/systemd/system/zram-swap.service
-cat > /etc/sysctl.d/99-zram.conf <<'SYS'
-# Swap aggressively to (fast, compressed) zram; keep the filesystem cache lean.
-vm.swappiness=100
-vm.vfs_cache_pressure=200
-SYS
-systemctl daemon-reload
-if systemctl enable --now zram-swap.service 2>/dev/null; then
-    sysctl -p /etc/sysctl.d/99-zram.conf >/dev/null 2>&1 || true
-    ZRAM_SIZE=$(swapon --show=NAME,SIZE --noheadings 2>/dev/null | awk '/zram/{print $2; exit}')
-    log "zram swap enabled${ZRAM_SIZE:+ (${ZRAM_SIZE} compressed)}"
-else
-    warn "Could not enable zram swap (kernel lacks the zram module?) — continuing without it"
-fi
+# ── Swap ─────────────────────────────────────────────────────────────────────
+# zram + the persistent disk swapfile are configured earlier in §3b so they are
+# live before the heavy OSRM/places provisioning (and on --update too). Nothing
+# to do here.
 
 # Web-app-triggered updates: install the root-owned launcher the Flask app
 # invokes via sudo.  It starts install.sh --update as a transient systemd
