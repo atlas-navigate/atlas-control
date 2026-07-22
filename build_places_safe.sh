@@ -48,7 +48,13 @@ cleanup() {
     # ollama stopped and the swapfile mounted; a plain rerun must still restore
     # them. Starting an already-running service is a harmless no-op.
     echo "── restoring Ray + releasing temp swap ─────────────────────────"
-    systemctl start ollama.service && echo "ollama running"
+    # Start Ray back up. During a fresh install.sh run this may fire before the
+    # ollama unit is written (install.sh §10), so tolerate a missing unit quietly.
+    if systemctl start ollama.service 2>/dev/null; then
+        echo "ollama running"
+    else
+        echo "ollama not restarted (unit not installed yet — normal during first install)"
+    fi
     if swapon --show=NAME --noheadings 2>/dev/null | grep -qx "$SWAPFILE"; then
         swapoff "$SWAPFILE" 2>/dev/null && echo "swapped off temp file"
     fi
@@ -59,7 +65,13 @@ trap cleanup EXIT INT TERM
 echo "=== places build $(date) ==="
 
 # 1) Temporary swapfile (dd, not fallocate — swapon rejects sparse/holey files).
-if ! swapon --show=NAME --noheadings 2>/dev/null | grep -qx "$SWAPFILE"; then
+#    Skip it when the box already has ample swap — e.g. install.sh's 32 GB
+#    persistent disk swap makes a second temp file pointless. cleanup() only
+#    touches $SWAPFILE if it exists, so skipping creation stays safe.
+SWAP_HAVE_MB=$(awk '/^SwapTotal:/{print int($2/1024)}' /proc/meminfo)
+if (( SWAP_HAVE_MB >= 20480 )); then
+    echo "ample swap already present (${SWAP_HAVE_MB} MB) — not adding a temp swapfile"
+elif ! swapon --show=NAME --noheadings 2>/dev/null | grep -qx "$SWAPFILE"; then
     echo "creating ${SWAP_GB}G temp swapfile at $SWAPFILE …"
     dd if=/dev/zero of="$SWAPFILE" bs=1M count=$((SWAP_GB * 1024)) status=none
     chmod 600 "$SWAPFILE"
