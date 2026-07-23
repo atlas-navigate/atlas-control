@@ -1038,6 +1038,7 @@ function apiTimeoutFor(url, method = 'GET', explicitMs) {
   if (path === '/api/hotspot/start') return 30000;
   if (path.startsWith('/api/device/config/')) return 15000;
   if (path === '/api/device/owner') return 15000;
+  if (path.startsWith('/api/nav/route')) return 600000; // multi-hop routes can cold-start several OSRM regions in series
   if (path === '/api/factory-reset') return 20000;
   if (path === '/api/factory-defaults/capture') return 20000;
   return DEFAULT_API_TIMEOUT_MS;
@@ -2775,6 +2776,7 @@ function MessagesPage({
   const [text, setText] = useState('');
   const [channels, setChannels] = useState([]);
   const [dmDiagnostics, setDmDiagnostics] = useState(null);
+  const [dmDiagnosticsOpen, setDmDiagnosticsOpen] = useState(false);
   const [contactsOpen, setContactsOpen] = useState(() => !isSmallScreen());
   const [renameTarget, setRenameTarget] = useState(null); // node for contact rename
   const [channelModal, setChannelModal] = useState(null); // null | 'new' | channel obj
@@ -2947,6 +2949,9 @@ function MessagesPage({
       cancelled = true;
     };
   }, [selection, messages, nodes]);
+  useEffect(() => {
+    setDmDiagnosticsOpen(false);
+  }, [selection.type, selection.nodeId]);
   const send = async () => {
     if (!text.trim()) return;
     setSending(true);
@@ -3228,7 +3233,24 @@ function MessagesPage({
       width: 28,
       height: 28
     }
-  }, "@"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, "@"), /*#__PURE__*/React.createElement("div", null, dmDiagnostics ? /*#__PURE__*/React.createElement("button", {
+    className: "chat-header-name",
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 6,
+      background: 'none',
+      border: 'none',
+      padding: 0,
+      cursor: 'pointer',
+      color: 'inherit',
+      font: 'inherit'
+    },
+    onClick: () => setDmDiagnosticsOpen(o => !o),
+    title: dmDiagnosticsOpen ? 'Hide DM diagnostics' : 'Show DM diagnostics'
+  }, selNodeObj ? resolveName(selNodeObj.node_id) : selection.nodeId, /*#__PURE__*/React.createElement(ChevronIcon, {
+    open: dmDiagnosticsOpen
+  })) : /*#__PURE__*/React.createElement("div", {
     className: "chat-header-name"
   }, selNodeObj ? resolveName(selNodeObj.node_id) : selection.nodeId), /*#__PURE__*/React.createElement("div", {
     className: "chat-header-sub"
@@ -3259,7 +3281,7 @@ function MessagesPage({
   }, "Edit"), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-sm",
     onClick: () => selChannelObj && setChannelShare(selChannelObj)
-  }, "Invite Nodes"))), selection.type === 'node' && dmDiagnostics && /*#__PURE__*/React.createElement("div", {
+  }, "Invite Nodes"))), selection.type === 'node' && dmDiagnostics && dmDiagnosticsOpen && /*#__PURE__*/React.createElement("div", {
     style: {
       margin: '10px 14px 0',
       padding: '10px 12px',

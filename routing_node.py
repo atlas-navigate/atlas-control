@@ -448,7 +448,7 @@ class RoutingNode:
         if not proc:
             return None
 
-        if not _port_ready(port, timeout=35.0):
+        if not _port_ready(port, timeout=120.0):
             logger.error(f"OSRM {state}/{profile} port {port} never became ready")
             self._stop_process(proc, (state, profile))
             return None

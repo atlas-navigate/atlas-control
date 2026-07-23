@@ -1055,20 +1055,6 @@ else
     log "US cities database present ($(du -sh "$DATA_DIR/us_cities.db" | cut -f1))"
 fi
 
-# app.py geocoder checks nps_trails.db first, then falls back to trailheads.db
-if [[ ! -s "$DATA_DIR/nps_trails.db" ]]; then
-    info "Downloading NPS trails database ..."
-    if sudo -u "$ATLAS_USER" "$VENV/bin/python3" "$APP_DIR/download_nps_trails.py"; then
-        log "NPS trails database ready"
-    elif sudo -u "$ATLAS_USER" "$VENV/bin/python3" "$APP_DIR/download_trailheads.py"; then
-        log "Legacy trailheads database ready"
-    else
-        die "Failed to build trail database"
-    fi
-else
-    log "NPS trails database present ($(du -sh "$DATA_DIR/nps_trails.db" | cut -f1))"
-fi
-
 # ════════════════════════════════════════════════════════════════════════════
 # 8.  OSRM STATE ROUTING DATA
 # ════════════════════════════════════════════════════════════════════════════
@@ -1207,6 +1193,36 @@ else
             warn "Unknown state: $abbr — skipping"
         fi
     done
+fi
+
+# ════════════════════════════════════════════════════════════════════════════
+# 8a.  NPS TRAILS / TRAILHEADS DATABASE
+# ════════════════════════════════════════════════════════════════════════════
+# Must run AFTER the state .osm.pbf downloads above — download_nps_trails.py's
+# OSM extraction (build_from_osm) globs osrm-data/*.osm.pbf for trail/trailhead
+# geometry. Running it earlier (as this used to, back in §7 Map Data) finds no
+# PBFs yet on a fresh install, so it silently skips OSM extraction and leaves
+# the trails/trailheads tables empty forever — nps_units/park_boundaries still
+# populate fine since those come from a live NPS API call, so the DB file looks
+# non-empty and the "already present" guard below then permanently hides the
+# gap. Park metadata itself doesn't depend on state selection, so this still
+# runs even when STATE_INPUT was "none" (OSM extraction then finds nothing to
+# extract and app.py geocoder falls back to trailheads.db as before).
+section "NPS Trails / Trailheads Database"
+
+DATA_DIR="$APP_DIR/static/data"
+mkdir -p "$DATA_DIR"
+if [[ ! -s "$DATA_DIR/nps_trails.db" ]]; then
+    info "Downloading NPS trails database ..."
+    if sudo -u "$ATLAS_USER" "$VENV/bin/python3" "$APP_DIR/download_nps_trails.py"; then
+        log "NPS trails database ready"
+    elif sudo -u "$ATLAS_USER" "$VENV/bin/python3" "$APP_DIR/download_trailheads.py"; then
+        log "Legacy trailheads database ready"
+    else
+        die "Failed to build trail database"
+    fi
+else
+    log "NPS trails database present ($(du -sh "$DATA_DIR/nps_trails.db" | cut -f1))"
 fi
 
 # ════════════════════════════════════════════════════════════════════════════
