@@ -103,6 +103,13 @@ _STATE_ALIAS = {
 _MAX_CAR   = 4   # ~500 MB each
 _MAX_OTHER = 3   # hiking ~200 MB each
 
+# How long a concurrent caller will wait for another in-flight start of the
+# *same* (state, profile) to finish before giving up. Must stay comfortably
+# above the _port_ready(..., timeout=120.0) readiness wait below (plus
+# Popen/docker-run launch overhead) so a waiter never times out before the
+# owner's own attempt would have.
+_START_WAIT_TIMEOUT_S = 130.0
+
 # Snap radius: unlimited for hiking so trailheads far from paved roads are reachable
 _SNAP = {
     "car":     "25;25",
@@ -210,6 +217,17 @@ class RoutingNode:
         self._pool: Dict[Tuple[str, str], Tuple[object, int]] = {}
         self._lru: Dict[Tuple[str, str], float] = {}
         self._lock = threading.Lock()
+
+        # (state, profile) → (reserved_port, done_event) while a start for
+        # that key is in flight (port chosen / process launching, but not
+        # yet confirmed ready and committed into self._pool). Guarded by
+        # self._lock. Lets a second concurrent caller for the *same* key
+        # (e.g. a foreground route request racing prewarm_for_position's
+        # background thread) wait for and reuse the first caller's result
+        # instead of launching a duplicate osrm-routed, and lets concurrent
+        # callers for *different* keys avoid ever picking an in-flight,
+        # not-yet-pooled port as "free".
+        self._starting: Dict[Tuple[str, str], Tuple[int, threading.Event]] = {}
 
         logger.info(f"RoutingNode init: native={self.use_native} states={states_dir}")
 
@@ -357,6 +375,28 @@ class RoutingNode:
 
     # ── Process lifecycle ────────────────────────────────────────────────────
 
+    def _wait_for_start(self, event: threading.Event, timeout: float) -> bool:
+        """Wait for a concurrent in-flight _ensure_running() start (same key)
+        to finish, without blocking the gevent event loop when called from
+        the main request-handling thread.
+
+        event is a plain threading.Event (real, not gevent-patched — monkey
+        patching runs with thread=False). A blocking .wait() from a greenlet
+        running in the main OS thread would freeze the whole event loop,
+        including the greenlet that's supposed to set the event — so poll
+        cooperatively there instead. Real background threads (prewarm, the
+        nav reroute loop) can block normally. Mirrors AIManager._ollama_slot.
+        """
+        if threading.current_thread() is threading.main_thread():
+            import gevent
+            deadline = time.monotonic() + timeout
+            while not event.is_set():
+                if time.monotonic() >= deadline:
+                    return False
+                gevent.sleep(0.2)
+            return True
+        return event.wait(timeout=timeout)
+
     def _ensure_running(self, state: str, profile: str) -> Optional[int]:
         """Start OSRM for (state, profile) if not running. Return port or None."""
         profile_dir = os.path.join(self.states_dir, state, profile)
@@ -411,56 +451,103 @@ class RoutingNode:
             except Exception as e:
                 logger.debug(f"adopt-external OSRM check: {e}")
 
-        # 3. Launch a new managed instance
+        # 3. Launch a new managed instance — or reuse/wait-for a concurrent
+        #    in-flight start of this exact key instead of racing/duplicating.
         with self._lock:
-            # Enforce pool cap
-            is_car = profile == "car"
-            cap    = _MAX_CAR if is_car else _MAX_OTHER
-            same_profile = [(k, v) for k, v in self._pool.items() if k[1] == profile]
-            if len(same_profile) >= cap:
-                evict_key = min(same_profile, key=lambda kv: self._lru.get(kv[0], 0.0))[0]
-                evict_proc, _ = self._pool[evict_key]
-                self._stop_process(evict_proc, evict_key)
-                del self._pool[evict_key]
-                self._lru.pop(evict_key, None)
-                logger.info(f"OSRM LRU evict: {evict_key[0]}/{evict_key[1]}")
+            if key in self._pool:                 # may have just landed while
+                proc, port = self._pool[key]       # we were doing steps 1-2
+                self._lru[key] = time.time()
+                return port
 
-            # Find free port — also skip ports already bound by external processes
-            used = {p for _, p in self._pool.values()}
-            port = 5001
-            while port in used:
-                port += 1
-        # Outside lock: verify the candidate port isn't claimed by something we
-        # don't manage (e.g. a manually-started osrm-routed from start_routing.sh).
-        while _port_ready(port, timeout=0.1):
-            logger.debug(f"Port {port} already in use externally, trying {port + 1}")
-            port += 1
-            with self._lock:
+            inflight = self._starting.get(key)
+            if inflight is None:
+                # We are now the owner of this key's start attempt. Reserve a
+                # port for it *before* releasing the lock, so no concurrent
+                # caller — same key or a different one — can ever pick this
+                # port as "free".
+                is_car = profile == "car"
+                cap    = _MAX_CAR if is_car else _MAX_OTHER
+                same_profile = [(k, v) for k, v in self._pool.items() if k[1] == profile]
+                if len(same_profile) >= cap:
+                    evict_key = min(same_profile, key=lambda kv: self._lru.get(kv[0], 0.0))[0]
+                    evict_proc, _ = self._pool[evict_key]
+                    self._stop_process(evict_proc, evict_key)
+                    del self._pool[evict_key]
+                    self._lru.pop(evict_key, None)
+                    logger.info(f"OSRM LRU evict: {evict_key[0]}/{evict_key[1]}")
+
+                # Free port — excludes ports already claimed by other
+                # in-flight (not-yet-pooled) starts, not just pooled ones.
                 used = {p for _, p in self._pool.values()}
+                used |= {p for p, _ in self._starting.values()}
+                port = 5001
                 while port in used:
                     port += 1
+                done_event = threading.Event()
+                self._starting[key] = (port, done_event)
 
-        # Start outside lock to avoid blocking other threads during ~15 s startup
-        proc = (self._start_native(osrm_file, port)
-                if self.use_native
-                else self._start_docker(state, profile, port))
-
-        if not proc:
+        if inflight is not None:
+            # Someone else is already starting this exact (state, profile) —
+            # e.g. a foreground route request racing a prewarm thread for the
+            # same key. Wait for it and reuse its result instead of racing on
+            # port choice or launching a second osrm-routed for the same state.
+            port, done_event = inflight
+            if not self._wait_for_start(done_event, timeout=_START_WAIT_TIMEOUT_S):
+                logger.error(f"OSRM {state}/{profile}: timed out waiting on "
+                             f"concurrent start (port {port})")
+                return None
+            with self._lock:
+                if key in self._pool:
+                    proc, port = self._pool[key]
+                    self._lru[key] = time.time()
+                    return port
+            # The owner's attempt finished but failed (nothing committed to
+            # self._pool) — share its outcome rather than piling a retry on
+            # top of an already-failed key.
+            logger.debug(f"OSRM {state}/{profile}: concurrent start attempt "
+                         f"by another caller failed")
             return None
 
-        if not _port_ready(port, timeout=120.0):
-            logger.error(f"OSRM {state}/{profile} port {port} never became ready")
-            self._stop_process(proc, (state, profile))
-            return None
+        # We own this key's start attempt.
+        try:
+            # Outside lock: verify the candidate port isn't claimed by
+            # something we don't manage (e.g. a manually-started osrm-routed
+            # from start_routing.sh).
+            while _port_ready(port, timeout=0.1):
+                logger.debug(f"Port {port} already in use externally, trying {port + 1}")
+                port += 1
+                with self._lock:
+                    used = {p for _, p in self._pool.values()}
+                    used |= {p for k2, (p, _) in self._starting.items() if k2 != key}
+                    while port in used:
+                        port += 1
+                    self._starting[key] = (port, done_event)
 
-        with self._lock:
-            self._pool[(state, profile)] = (proc, port)
-            self._lru[(state, profile)]  = time.time()
+            # Start outside lock to avoid blocking other threads during ~15-120s startup
+            proc = (self._start_native(osrm_file, port)
+                    if self.use_native
+                    else self._start_docker(state, profile, port))
 
-        self._write_active_json()
-        logger.info(f"OSRM {state}/{profile} ready on port {port} "
-                    f"({'native' if self.use_native else 'docker'})")
-        return port
+            if not proc:
+                return None
+
+            if not _port_ready(port, timeout=120.0):
+                logger.error(f"OSRM {state}/{profile} port {port} never became ready")
+                self._stop_process(proc, (state, profile))
+                return None
+
+            with self._lock:
+                self._pool[(state, profile)] = (proc, port)
+                self._lru[(state, profile)]  = time.time()
+
+            self._write_active_json()
+            logger.info(f"OSRM {state}/{profile} ready on port {port} "
+                        f"({'native' if self.use_native else 'docker'})")
+            return port
+        finally:
+            with self._lock:
+                self._starting.pop(key, None)
+            done_event.set()
 
     def _start_native(self, osrm_file: str, port: int):
         """Launch native osrm-routed subprocess."""
