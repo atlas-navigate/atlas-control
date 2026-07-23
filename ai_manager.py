@@ -4890,6 +4890,20 @@ class AIManager:
         except Exception as e:
             logger.warning(f"AI model unload failed (Ollama may not be running): {e}")
 
+    def unload_all(self):
+        """Unload both the chat and embedding models from VRAM (each via
+        keep_alive=0). _warmup() loads both; a bare unload() only unloads
+        the chat model, leaving the embed model resident. Used to free Ray's
+        full RAM footprint during active turn-by-turn navigation.
+        """
+        import database as db
+        settings    = db.ai_get_settings()
+        model       = settings.get("model", DEFAULT_SETTINGS["model"])
+        embed_model = settings.get("embed_model", DEFAULT_SETTINGS["embed_model"])
+        self.unload(model=model)
+        if embed_model and embed_model != model:
+            self.unload(model=embed_model)
+
     # ------------------------------------------------------------------
     def _embed_unembedded_docs(self):
         """Embed any documents that don't yet have embeddings (chunked format v3)."""

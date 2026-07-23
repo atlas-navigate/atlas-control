@@ -2296,6 +2296,16 @@ def api_nav_start():
     if not nav_node:
         return jsonify({"error": "Navigation engine not initialized"}), 503
 
+    # Free Ray's resident model RAM *before* the (possibly multi-state, up to
+    # ~120s-per-state) OSRM cold start below, so the first route of the trip —
+    # the most RAM-starved moment — actually benefits. Best-effort: a Ray/
+    # Ollama hiccup must never block navigation from starting.
+    if ai_manager:
+        try:
+            ai_manager.unload_all()
+        except Exception as e:
+            logger.warning(f"Ray unload before navigation start failed: {e}")
+
     result = nav_node.start_navigation(
         from_lat, from_lon, to_lat, to_lon,
         profile=profile, destination_name=dest_name, waypoints=waypoints)
@@ -2306,6 +2316,12 @@ def api_nav_start():
             target=routing_node.prewarm_for_position,
             args=(to_lat, to_lon), daemon=True).start()
 
+    if not result.get("ok") and ai_manager:
+        # Navigation never actually started, so cancel_navigation() (the only
+        # other place that reloads Ray) will never fire for this session —
+        # reload now instead of leaving Ray unloaded indefinitely.
+        threading.Thread(target=ai_manager._warmup, daemon=True).start()
+
     status = 200 if result.get("ok") else 400
     return jsonify(result), status
 
@@ -2315,6 +2331,9 @@ def api_nav_cancel():
     """Cancel active navigation."""
     if nav_node:
         nav_node.cancel_navigation()
+    # Reload Ray now that turn-by-turn navigation has ended.
+    if ai_manager:
+        threading.Thread(target=ai_manager._warmup, daemon=True).start()
     return jsonify({"ok": True})
 
 
@@ -2602,7 +2621,7 @@ def api_power_ai():
             threading.Thread(target=ai_manager._warmup, daemon=True).start()
     else:
         if ai_manager:
-            threading.Thread(target=ai_manager.unload, daemon=True).start()
+            threading.Thread(target=ai_manager.unload_all, daemon=True).start()
     return jsonify({"ok": True, "ai_enabled": enabled})
 
 @app.route("/api/power/comms", methods=["POST"])
