@@ -1219,6 +1219,10 @@ const DEFAULT_DASH_WIDGETS = [{
   label: 'Active Alerts',
   enabled: true
 }];
+
+// Shown up top, always expanded, on phones — "is my gear working right now."
+// Everything else collapses into the Network Details accordion on mobile.
+const DASH_HERO_WIDGET_IDS = ['stat_atlas_status', 'stat_atlas_battery'];
 function useDashWidgets() {
   const migrateWidgets = stored => {
     if (!Array.isArray(stored)) return null;
@@ -1314,6 +1318,8 @@ function DashboardPage({
   const enabledWidgets = widgets.filter(w => w.enabled);
   const statWidgets = enabledWidgets.filter(w => w.id.startsWith('stat_'));
   const contentWidgets = enabledWidgets.filter(w => !w.id.startsWith('stat_'));
+  const compact = isSmallScreen();
+  const [detailsOpen, setDetailsOpen] = React.useState(() => !isSmallScreen());
   const recentAlerts = alerts.filter(a => !a.acknowledged).slice(0, 5);
   const recentMsgs = messages.slice(0, 5);
   const myNodeId = device && device.my_node_id ? device.my_node_id : null;
@@ -2218,15 +2224,7 @@ function DashboardPage({
         opacity: widgets.findIndex(x => x.id === w.id) === widgets.length - 1 ? 0.25 : 1
       }
     }, "\u2193"))));
-  })()))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 16
-    }
-  }, statWidgets.length > 0 && /*#__PURE__*/React.createElement("div", {
-    className: "dash-grid"
-  }, statWidgets.map(w => renderStatWidget(w.id))), enabledWidgets.length > 0 ? contentWidgets.map(w => renderWidget(w.id)) : /*#__PURE__*/React.createElement("div", {
+  })()))), enabledWidgets.length === 0 ? /*#__PURE__*/React.createElement("div", {
     className: "card",
     style: {
       padding: 20
@@ -2256,7 +2254,84 @@ function DashboardPage({
   }, "Reset Dashboard"), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-sm",
     onClick: () => setCustomizing(true)
-  }, "Customize Widgets")))));
+  }, "Customize Widgets"))) : compact ? (() => {
+    /* ── Phone: hero status up top (is my gear working?), everything else collapsed below ── */
+    const heroStats = statWidgets.filter(w => DASH_HERO_WIDGET_IDS.includes(w.id));
+    const restStats = statWidgets.filter(w => !DASH_HERO_WIDGET_IDS.includes(w.id));
+    const activeAlertsWidget = contentWidgets.find(w => w.id === 'active_alerts');
+    const restContent = contentWidgets.filter(w => w.id !== 'active_alerts');
+    return /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 16
+      }
+    }, heroStats.length > 0 && /*#__PURE__*/React.createElement("div", {
+      className: "dash-grid"
+    }, heroStats.map(w => renderStatWidget(w.id))), activeAlertsWidget && renderWidget('active_alerts'), (restStats.length > 0 || restContent.length > 0) && /*#__PURE__*/React.createElement("div", {
+      className: "card",
+      style: {
+        padding: 0,
+        overflow: 'hidden'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      onClick: () => setDetailsOpen(o => !o),
+      style: {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '14px 16px',
+        cursor: 'pointer'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 13,
+        fontWeight: 600,
+        color: 'var(--text-primary)'
+      }
+    }, "Network Details"), /*#__PURE__*/React.createElement("svg", {
+      width: "14",
+      height: "14",
+      viewBox: "0 0 24 24",
+      fill: "none",
+      stroke: "currentColor",
+      strokeWidth: "2.5",
+      style: {
+        color: 'var(--text-muted)',
+        transition: 'transform 200ms',
+        transform: detailsOpen ? 'rotate(180deg)' : 'none'
+      }
+    }, /*#__PURE__*/React.createElement("polyline", {
+      points: "6 9 12 15 18 9"
+    }))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        maxHeight: detailsOpen ? '4000px' : '0px',
+        opacity: detailsOpen ? 1 : 0,
+        transition: 'max-height 300ms ease, opacity 200ms ease',
+        overflow: 'hidden'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 16,
+        padding: '0 16px 16px'
+      }
+    }, restStats.length > 0 && /*#__PURE__*/React.createElement("div", {
+      className: "dash-grid"
+    }, restStats.map(w => renderStatWidget(w.id))), restContent.map(w => renderWidget(w.id))))));
+  })() :
+  /*#__PURE__*/
+  /* ── Desktop: unchanged ── */
+  React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 16
+    }
+  }, statWidgets.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "dash-grid"
+  }, statWidgets.map(w => renderStatWidget(w.id))), contentWidgets.map(w => renderWidget(w.id))));
 }
 
 // ═══════════════════════════════════════════════
@@ -2442,7 +2517,7 @@ function ChannelModal({
     }, /*#__PURE__*/React.createElement("div", {
       className: "rename-modal",
       style: {
-        width: 400
+        width: 'min(400px, calc(100vw - 32px))'
       }
     }, /*#__PURE__*/React.createElement("h3", null, "Channel Ready"), /*#__PURE__*/React.createElement("p", {
       style: {
@@ -2521,7 +2596,7 @@ function ChannelModal({
   }, /*#__PURE__*/React.createElement("div", {
     className: "rename-modal",
     style: {
-      width: 400
+      width: 'min(400px, calc(100vw - 32px))'
     }
   }, /*#__PURE__*/React.createElement("h3", null, title), /*#__PURE__*/React.createElement("p", {
     style: {
@@ -2676,7 +2751,7 @@ function ChannelShareModal({
   }, /*#__PURE__*/React.createElement("div", {
     className: "rename-modal",
     style: {
-      width: 380
+      width: 'min(380px, calc(100vw - 32px))'
     }
   }, /*#__PURE__*/React.createElement("h3", null, "Invite Nodes"), /*#__PURE__*/React.createElement("p", {
     style: {
@@ -2769,6 +2844,7 @@ function MessagesPage({
   refresh
 }) {
   var _dmDiagnostics$prefer;
+  const compact = isSmallScreen();
   const [selection, setSelection] = useState({
     type: 'channel',
     num: 0
@@ -2778,11 +2854,12 @@ function MessagesPage({
   const [dmDiagnostics, setDmDiagnostics] = useState(null);
   const [dmDiagnosticsOpen, setDmDiagnosticsOpen] = useState(false);
   const [contactsOpen, setContactsOpen] = useState(() => !isSmallScreen());
+  const [mobileView, setMobileView] = useState('list'); // 'list' | 'chat' — mobile-only single-pane swap
   const [renameTarget, setRenameTarget] = useState(null); // node for contact rename
   const [channelModal, setChannelModal] = useState(null); // null | 'new' | channel obj
   const [channelShare, setChannelShare] = useState(null); // null | channel obj
+  const [confirmDeleteNum, setConfirmDeleteNum] = useState(null); // channel num armed for delete confirm
   const [aliases, setAliases] = useState({});
-  const [sendError, setSendError] = useState(null);
   const [sendStatus, setSendStatus] = useState(null);
   const [sending, setSending] = useState(false);
   const [dmLastRead, setDmLastRead] = useState(() => {
@@ -2904,6 +2981,11 @@ function MessagesPage({
     return () => clearTimeout(timer);
   }, [sendStatus]);
   useEffect(() => {
+    if (!confirmDeleteNum) return undefined;
+    const timer = setTimeout(() => setConfirmDeleteNum(null), 3000);
+    return () => clearTimeout(timer);
+  }, [confirmDeleteNum]);
+  useEffect(() => {
     if (selection.type !== 'node' || !selection.nodeId) return;
     const latestIncomingTs = conversation.reduce((latest, m) => {
       if (m.is_direct && m.from_id === selection.nodeId) return Math.max(latest, Number(m.rx_time || 0));
@@ -2955,7 +3037,6 @@ function MessagesPage({
   const send = async () => {
     if (!text.trim()) return;
     setSending(true);
-    setSendError(null);
     setSendStatus(null);
     const payload = selection.type === 'node' ? {
       text: text.trim(),
@@ -2977,7 +3058,6 @@ function MessagesPage({
       refresh();
     } catch (err) {
       const message = (err === null || err === void 0 ? void 0 : err.message) || 'Message send failed';
-      setSendError(message);
       setSendStatus({
         kind: 'error',
         text: `Send failed: ${message}`
@@ -3022,6 +3102,18 @@ function MessagesPage({
   }), /*#__PURE__*/React.createElement("path", {
     d: "M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"
   }));
+  const BackIcon = () => /*#__PURE__*/React.createElement("svg", {
+    width: "18",
+    height: "18",
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "2.5",
+    strokeLinecap: "round",
+    strokeLinejoin: "round"
+  }, /*#__PURE__*/React.createElement("polyline", {
+    points: "15 18 9 12 15 6"
+  }));
   return /*#__PURE__*/React.createElement("div", {
     className: "page messages-page-wrap"
   }, renameTarget && /*#__PURE__*/React.createElement(RenameModal, {
@@ -3039,9 +3131,9 @@ function MessagesPage({
     onClose: () => setChannelShare(null)
   }), /*#__PURE__*/React.createElement("div", {
     className: "messages-layout"
-  }, /*#__PURE__*/React.createElement("div", {
+  }, (!compact || mobileView === 'list') && /*#__PURE__*/React.createElement("div", {
     className: "contacts-panel"
-  }, /*#__PURE__*/React.createElement("div", {
+  }, !compact && /*#__PURE__*/React.createElement("div", {
     className: `contacts-panel-toggle ${contactsOpen ? 'open' : ''}`,
     onClick: () => setContactsOpen(o => !o)
   }, /*#__PURE__*/React.createElement("span", {
@@ -3056,7 +3148,7 @@ function MessagesPage({
   }, /*#__PURE__*/React.createElement("polyline", {
     points: "6 9 12 15 18 9"
   }))), /*#__PURE__*/React.createElement("div", {
-    className: `contacts-panel-body ${contactsOpen ? '' : 'closed'}`
+    className: compact ? 'contacts-panel-body' : `contacts-panel-body ${contactsOpen ? '' : 'closed'}`
   }, /*#__PURE__*/React.createElement("div", {
     className: "contacts-section-label"
   }, /*#__PURE__*/React.createElement("span", null, "Channels"), /*#__PURE__*/React.createElement("button", {
@@ -3095,10 +3187,13 @@ function MessagesPage({
     return /*#__PURE__*/React.createElement("div", {
       key: ch.channel_num,
       className: `contact-item ${isSel ? 'active' : ''}`,
-      onClick: () => setSelection({
-        type: 'channel',
-        num: ch.channel_num
-      })
+      onClick: () => {
+        setSelection({
+          type: 'channel',
+          num: ch.channel_num
+        });
+        if (compact) setMobileView('chat');
+      }
     }, /*#__PURE__*/React.createElement("div", {
       className: "channel-icon",
       style: {
@@ -3136,14 +3231,19 @@ function MessagesPage({
     }), /*#__PURE__*/React.createElement("path", {
       d: "M14 11a5 5 0 0 0-7.07 0L4.1 13.83a5 5 0 0 0 7.07 7.07L13 19"
     }))), ch.channel_num !== 0 && /*#__PURE__*/React.createElement("button", {
-      className: "contact-rename-btn",
-      title: "Remove",
+      className: `contact-rename-btn ${confirmDeleteNum === ch.channel_num ? 'confirm-delete' : ''}`,
+      title: confirmDeleteNum === ch.channel_num ? 'Tap again to delete' : 'Remove',
       style: {
         marginLeft: 0
       },
       onClick: e => {
         e.stopPropagation();
-        deleteChannel(ch.channel_num);
+        if (confirmDeleteNum === ch.channel_num) {
+          setConfirmDeleteNum(null);
+          deleteChannel(ch.channel_num);
+        } else {
+          setConfirmDeleteNum(ch.channel_num);
+        }
       }
     }, /*#__PURE__*/React.createElement("svg", {
       width: "12",
@@ -3185,10 +3285,13 @@ function MessagesPage({
     return /*#__PURE__*/React.createElement("div", {
       key: node.node_id,
       className: `contact-item ${isSel ? 'active' : ''}`,
-      onClick: () => setSelection({
-        type: 'node',
-        nodeId: node.node_id
-      })
+      onClick: () => {
+        setSelection({
+          type: 'node',
+          nodeId: node.node_id
+        });
+        if (compact) setMobileView('chat');
+      }
     }, /*#__PURE__*/React.createElement("div", {
       className: "channel-icon",
       style: {
@@ -3221,11 +3324,17 @@ function MessagesPage({
         color: 'var(--bg-primary)'
       }
     }, unreadCount > 99 ? '99+' : unreadCount));
-  }))), /*#__PURE__*/React.createElement("div", {
+  }))), (!compact || mobileView === 'chat') && /*#__PURE__*/React.createElement("div", {
     className: "chat-panel"
   }, /*#__PURE__*/React.createElement("div", {
     className: "chat-header"
-  }, selection.type === 'node' ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  }, compact && /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "chat-back-btn",
+    onClick: () => setMobileView('list'),
+    "aria-label": "Back to conversations",
+    title: "Back to conversations"
+  }, /*#__PURE__*/React.createElement(BackIcon, null)), selection.type === 'node' ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "channel-icon",
     style: {
       background: 'var(--accent-blue-dim)',
@@ -3233,7 +3342,9 @@ function MessagesPage({
       width: 28,
       height: 28
     }
-  }, "@"), /*#__PURE__*/React.createElement("div", null, dmDiagnostics ? /*#__PURE__*/React.createElement("button", {
+  }, "@"), /*#__PURE__*/React.createElement("div", {
+    className: "chat-header-title-wrap"
+  }, dmDiagnostics ? /*#__PURE__*/React.createElement("button", {
     className: "chat-header-name",
     style: {
       display: 'flex',
@@ -3268,7 +3379,9 @@ function MessagesPage({
       width: 28,
       height: 28
     }
-  }, selection.num), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, selection.num), /*#__PURE__*/React.createElement("div", {
+    className: "chat-header-title-wrap"
+  }, /*#__PURE__*/React.createElement("div", {
     className: "chat-header-name"
   }, channelName(selection.num)), /*#__PURE__*/React.createElement("div", {
     className: "chat-header-sub"
@@ -3382,20 +3495,16 @@ function MessagesPage({
   }), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-primary",
     onClick: send,
-    disabled: sending
+    disabled: sending,
+    "aria-label": "Send message",
+    title: "Send message"
   }, Icons.send)), sendStatus && /*#__PURE__*/React.createElement("div", {
     style: {
       padding: '0 14px 8px',
       fontSize: 12,
       color: sendStatus.kind === 'success' ? 'var(--accent-green)' : 'var(--accent-red)'
     }
-  }, sendStatus.text), sendError && /*#__PURE__*/React.createElement("div", {
-    style: {
-      padding: '0 14px 12px',
-      fontSize: 12,
-      color: 'var(--accent-red)'
-    }
-  }, sendError))));
+  }, sendStatus.text))));
 }
 
 // ═══════════════════════════════════════════════
@@ -3478,6 +3587,7 @@ function NodesPage({
   useEffect(() => {
     if (!selected || !telemetry.length || !canvasRef.current) return;
     drawChart(canvasRef.current, telemetry);
+    return watchCanvasResize(canvasRef.current, () => canvasRef.current && drawChart(canvasRef.current, telemetry));
   }, [telemetry, selected]);
   return /*#__PURE__*/React.createElement("div", {
     className: "page"
@@ -3733,7 +3843,13 @@ function TopologyPage({
     const raf = requestAnimationFrame(() => {
       if (canvasRef.current) drawTopology(canvasRef.current, mergedTopo);
     });
-    return () => cancelAnimationFrame(raf);
+    const stopWatching = watchCanvasResize(canvasRef.current, () => {
+      if (canvasRef.current) drawTopology(canvasRef.current, mergedTopo);
+    });
+    return () => {
+      cancelAnimationFrame(raf);
+      stopWatching();
+    };
   }, [mergedTopo, visible]);
   return /*#__PURE__*/React.createElement("div", {
     className: "page"
@@ -4663,9 +4779,14 @@ function PowerPage({
   }, [selectedNode, nodes, hours]);
   useEffect(() => {
     if (!telemetry.length) return;
-    if (batCanvasRef.current) drawSingleChart(batCanvasRef.current, telemetry, 'battery_level', 'Battery %', 'var(--accent-green)', 0, 100);
-    if (voltCanvasRef.current) drawSingleChart(voltCanvasRef.current, telemetry, 'voltage', 'Voltage (V)', 'var(--accent-amber)', 2.5, 4.5);
-    if (utilCanvasRef.current) drawSingleChart(utilCanvasRef.current, telemetry, 'channel_util', 'Ch Util %', 'var(--accent-cyan)', 0, 50);
+    const redraw = () => {
+      if (batCanvasRef.current) drawSingleChart(batCanvasRef.current, telemetry, 'battery_level', 'Battery %', 'var(--accent-green)', 0, 100);
+      if (voltCanvasRef.current) drawSingleChart(voltCanvasRef.current, telemetry, 'voltage', 'Voltage (V)', 'var(--accent-amber)', 2.5, 4.5);
+      if (utilCanvasRef.current) drawSingleChart(utilCanvasRef.current, telemetry, 'channel_util', 'Ch Util %', 'var(--accent-cyan)', 0, 50);
+    };
+    redraw();
+    const stops = [batCanvasRef.current, voltCanvasRef.current, utilCanvasRef.current].filter(Boolean).map(c => watchCanvasResize(c, redraw));
+    return () => stops.forEach(stop => stop());
   }, [telemetry]);
   const nodesSorted = useMemo(() => [...nodes].sort((a, b) => (a.battery_level || 999) - (b.battery_level || 999)), [nodes]);
   return /*#__PURE__*/React.createElement("div", {
@@ -4681,7 +4802,11 @@ function PowerPage({
     className: "card-title"
   }, "Battery Overview")), /*#__PURE__*/React.createElement("div", {
     className: "table-wrap"
-  }, /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Node"), /*#__PURE__*/React.createElement("th", null, "Battery"), /*#__PURE__*/React.createElement("th", null, "Voltage"), /*#__PURE__*/React.createElement("th", null, "Uptime"), /*#__PURE__*/React.createElement("th", null, "Status"))), /*#__PURE__*/React.createElement("tbody", null, nodesSorted.map(n => /*#__PURE__*/React.createElement("tr", {
+  }, /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Node"), /*#__PURE__*/React.createElement("th", null, "Battery"), /*#__PURE__*/React.createElement("th", {
+    className: "power-col-voltage"
+  }, "Voltage"), /*#__PURE__*/React.createElement("th", {
+    className: "power-col-uptime"
+  }, "Uptime"), /*#__PURE__*/React.createElement("th", null, "Status"))), /*#__PURE__*/React.createElement("tbody", null, nodesSorted.map(n => /*#__PURE__*/React.createElement("tr", {
     key: n.node_id
   }, /*#__PURE__*/React.createElement("td", {
     style: {
@@ -4716,9 +4841,9 @@ function PowerPage({
       color: batColor(n.battery_level)
     }
   }, n.battery_level, "%")) : '—'), /*#__PURE__*/React.createElement("td", {
-    className: "mono"
+    className: "mono power-col-voltage"
   }, n.voltage ? `${n.voltage}V` : '—'), /*#__PURE__*/React.createElement("td", {
-    className: "mono",
+    className: "mono power-col-uptime",
     style: {
       fontSize: 12
     }
@@ -4736,7 +4861,8 @@ function PowerPage({
     style: {
       display: 'flex',
       gap: 8,
-      alignItems: 'center'
+      alignItems: 'center',
+      flexWrap: 'wrap'
     }
   }, /*#__PURE__*/React.createElement("select", {
     value: selectedNode || '',
@@ -4887,7 +5013,8 @@ function AlertsPage({
     style: {
       display: 'flex',
       gap: 8,
-      alignItems: 'center'
+      alignItems: 'center',
+      flexWrap: 'wrap'
     }
   }, unackedCount > 0 && /*#__PURE__*/React.createElement("button", {
     className: "btn btn-sm",
@@ -4920,6 +5047,17 @@ function AlertsPage({
 // ═══════════════════════════════════════════════
 // Canvas drawing helpers (no chart library needed)
 // ═══════════════════════════════════════════════
+// draw*() below size themselves once from canvas.parentElement's
+// getBoundingClientRect() at call time — with no resize awareness, rotating
+// the phone (or resizing a desktop window) leaves the canvas stale/clipped
+// at its old size until something else happens to trigger a redraw. This
+// keeps it in sync; a no-op if the container never resizes.
+function watchCanvasResize(canvas, redraw) {
+  if (!canvas || !canvas.parentElement || typeof ResizeObserver === 'undefined') return () => {};
+  const ro = new ResizeObserver(() => redraw());
+  ro.observe(canvas.parentElement);
+  return () => ro.disconnect();
+}
 function drawChart(canvas, telemetry) {
   const ctx = canvas.getContext('2d');
   const rect = canvas.parentElement.getBoundingClientRect();
@@ -5393,7 +5531,7 @@ function KnowledgeMap() {
       color: 'var(--text-muted)',
       marginBottom: 12
     }
-  }, data.nodes.length, " docs \xB7 ", data.edges.length, " connections \xB7 Drag to reposition \xB7 Click to explore"), /*#__PURE__*/React.createElement("div", {
+  }, data.nodes.length, " docs \xB7 ", data.edges.length, " connections \xB7 ", isSmallScreen() ? 'Tap to explore' : 'Drag to reposition · Click to explore'), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       gap: 16,
@@ -5404,6 +5542,8 @@ function KnowledgeMap() {
     ref: svgRef,
     width: W,
     height: H,
+    viewBox: `0 0 ${W} ${H}`,
+    className: "knowledge-map-svg",
     style: {
       background: 'var(--bg-card, #1a1f2e)',
       borderRadius: 8,
@@ -5484,7 +5624,12 @@ function KnowledgeMap() {
       onMouseDown: ev => onNodeMouseDown(ev, n.id),
       onMouseEnter: () => setHoveredNode(n.id),
       onMouseLeave: () => setHoveredNode(null)
-    }, isSel && /*#__PURE__*/React.createElement("circle", {
+    }, /*#__PURE__*/React.createElement("circle", {
+      cx: pos.x,
+      cy: pos.y,
+      r: 14,
+      fill: "transparent"
+    }), isSel && /*#__PURE__*/React.createElement("circle", {
       cx: pos.x,
       cy: pos.y,
       r: 13,
@@ -5755,6 +5900,10 @@ function AIPage() {
   const [warmingUp, setWarmingUp] = useState(false);
   const [deletingChatId, setDeletingChatId] = useState(null);
   const [creatingChat, setCreatingChat] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [addDocOpen, setAddDocOpen] = useState(!isSmallScreen());
+  const compact = isSmallScreen();
+  const [mobileView, setMobileView] = useState('list'); // 'list' | 'chat' — mobile-only single-pane swap
   const chatEndRef = useRef(null);
   const aiReady = !!(status !== null && status !== void 0 && status.running && status !== null && status !== void 0 && status.ai_ready);
 
@@ -5767,7 +5916,10 @@ function AIPage() {
     });
   }
   function loadChats() {
-    return api.get('/api/ai/chats').then(setChats);
+    return api.get('/api/ai/chats').then(list => {
+      setChats(list);
+      return list;
+    });
   }
   function loadDocs() {
     return api.get('/api/ai/documents').then(setDocuments);
@@ -5835,6 +5987,8 @@ function AIPage() {
       setChats(prev => [chat, ...prev]);
       setActiveChatId(chat.id);
       setMessages([]);
+      setTab('chat');
+      if (compact) setMobileView('chat');
     } finally {
       setCreatingChat(false);
     }
@@ -6044,19 +6198,17 @@ function AIPage() {
       timeZone: tz
     });
   }
+  function fmtMsgTime(ts) {
+    if (!ts) return '';
+    const tz = resolveTz(tzSetting);
+    return new Date(ts * 1000).toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: tz
+    });
+  }
 
   // ── Render ─────────────────────────────────────
-  const tabBtnStyle = active => ({
-    padding: '6px 14px',
-    borderRadius: 'var(--radius)',
-    border: 'none',
-    cursor: 'pointer',
-    fontSize: 13,
-    fontWeight: 500,
-    background: active ? 'var(--accent-green-dim)' : 'transparent',
-    color: active ? 'var(--accent-green)' : 'var(--text-muted)',
-    transition: 'all 200ms'
-  });
   const inputStyle = {
     background: 'var(--bg-input)',
     border: '1px solid var(--border)',
@@ -6072,9 +6224,21 @@ function AIPage() {
     marginBottom: 4,
     display: 'block'
   };
+  const bubbleMaxWidth = isSmallScreen() ? '88%' : '78%';
+  // On mobile, tab panels shed the boxed "card" look (border/shadow/radius/
+  // distinct background) so the header and content read as one continuous
+  // screen instead of stacked boxes.
+  const mobileFlatCard = compact ? {
+    border: 'none',
+    borderRadius: 0,
+    boxShadow: 'none',
+    backdropFilter: 'none',
+    WebkitBackdropFilter: 'none',
+    background: 'transparent'
+  } : {};
   return /*#__PURE__*/React.createElement("div", {
     className: "page ai-layout"
-  }, /*#__PURE__*/React.createElement("div", {
+  }, (!compact || mobileView === 'list') && /*#__PURE__*/React.createElement("div", {
     className: "ai-sidebar"
   }, /*#__PURE__*/React.createElement("div", {
     className: "ai-sidebar-header"
@@ -6133,6 +6297,7 @@ function AIPage() {
     onClick: () => {
       setActiveChatId(chat.id);
       setTab('chat');
+      if (compact) setMobileView('chat');
     },
     style: {
       background: activeChatId === chat.id ? 'var(--bg-input)' : 'transparent',
@@ -6231,25 +6396,49 @@ function AIPage() {
       fontSize: 11,
       color: 'var(--text-muted)'
     }
-  }, status === null ? 'Checking…' : status.running ? `Ollama · ${status.doc_count || 0} docs` : 'Ollama offline')))), /*#__PURE__*/React.createElement("div", {
+  }, status === null ? 'Checking…' : status.running ? `Ollama · ${status.doc_count || 0} docs` : 'Ollama offline')))), (!compact || mobileView === 'chat') && /*#__PURE__*/React.createElement("div", {
     style: {
       flex: 1,
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
-      padding: '16px'
+      padding: compact ? 0 : '16px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      flexShrink: 0,
+      gap: compact ? 8 : 0,
+      marginBottom: compact ? 8 : 14,
+      padding: compact ? '10px 16px 0' : 0
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       alignItems: 'center',
       gap: 10,
-      marginBottom: 14,
-      flexShrink: 0
+      flexWrap: compact ? 'nowrap' : 'wrap'
     }
-  }, /*#__PURE__*/React.createElement("div", {
+  }, compact && /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "chat-back-btn",
+    onClick: () => setMobileView('list'),
+    "aria-label": "Back to conversations",
+    title: "Back to conversations"
+  }, /*#__PURE__*/React.createElement("svg", {
+    width: "20",
+    height: "20",
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "2"
+  }, /*#__PURE__*/React.createElement("polyline", {
+    points: "15 18 9 12 15 6"
+  }))), /*#__PURE__*/React.createElement("div", {
     style: {
-      flex: 1
+      flex: 1,
+      minWidth: 0
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -6262,16 +6451,31 @@ function AIPage() {
     style: {
       fontSize: 11,
       color: 'var(--text-muted)',
-      marginTop: 1
+      marginTop: 1,
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap'
     }
-  }, warmingUp ? `Loading ${settings.model || 'qwen2.5:3b'}…` : aiReady ? `${settings.model || 'qwen2.5:3b'} · RAG ${settings.rag_enabled === 'true' ? 'on' : 'off'} · ${(status === null || status === void 0 ? void 0 : status.doc_count) || 0} docs` : status !== null && status !== void 0 && status.running ? `Starting Ray… ${(status === null || status === void 0 ? void 0 : status.startup_phase) || 'warming_up'}` : 'Ollama not reachable')), /*#__PURE__*/React.createElement("div", {
+  }, warmingUp ? `Loading ${settings.model || 'qwen2.5:3b'}…` : aiReady ? `${settings.model || 'qwen2.5:3b'} · RAG ${settings.rag_enabled === 'true' ? 'on' : 'off'} · ${(status === null || status === void 0 ? void 0 : status.doc_count) || 0} docs` : status !== null && status !== void 0 && status.running ? `Starting Ray… ${(status === null || status === void 0 ? void 0 : status.startup_phase) || 'warming_up'}` : 'Ollama not reachable')), !compact && /*#__PURE__*/React.createElement("div", {
+    className: "page-tab-bar"
+  }, ['chat', 'kb', 'settings'].map(t => /*#__PURE__*/React.createElement("button", {
+    key: t,
+    className: `page-tab-btn${tab === t ? ' active' : ''}`,
+    onClick: () => setTab(t)
+  }, t === 'chat' ? 'Chat' : t === 'kb' ? 'Knowledge Base' : 'Settings')))), compact && /*#__PURE__*/React.createElement("div", {
+    className: "page-tab-bar",
     style: {
-      display: 'flex',
-      gap: 4
+      background: 'transparent',
+      backdropFilter: 'none',
+      WebkitBackdropFilter: 'none',
+      border: 'none',
+      borderBottom: '1px solid var(--border)',
+      padding: 0,
+      margin: '0 -16px'
     }
   }, ['chat', 'kb', 'settings'].map(t => /*#__PURE__*/React.createElement("button", {
     key: t,
-    style: tabBtnStyle(tab === t),
+    className: `page-tab-btn${tab === t ? ' active' : ''}`,
     onClick: () => setTab(t)
   }, t === 'chat' ? 'Chat' : t === 'kb' ? 'Knowledge Base' : 'Settings')))), tab === 'chat' && /*#__PURE__*/React.createElement("div", {
     className: "card",
@@ -6279,7 +6483,8 @@ function AIPage() {
       flex: 1,
       display: 'flex',
       flexDirection: 'column',
-      minHeight: 0
+      minHeight: 0,
+      ...mobileFlatCard
     }
   }, !activeChatId ? /*#__PURE__*/React.createElement("div", {
     style: {
@@ -6328,17 +6533,16 @@ function AIPage() {
         gap: 3
       }
     }, m.role === 'assistant' ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
-      className: "card",
       style: {
-        maxWidth: '78%',
+        maxWidth: bubbleMaxWidth,
         padding: '10px 14px',
         background: 'var(--bg-input)',
-        border: '1px solid var(--border)',
         borderRadius: '4px 12px 12px 12px',
         fontSize: 14,
         lineHeight: 1.65,
         wordBreak: 'break-word',
-        color: 'var(--text-primary)'
+        color: 'var(--text-primary)',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.18)'
       }
     }, /*#__PURE__*/React.createElement(MarkdownMessage, {
       text: msgBody
@@ -6356,7 +6560,7 @@ function AIPage() {
       style: {
         display: 'flex',
         alignItems: 'center',
-        gap: 8,
+        gap: 10,
         paddingLeft: 4
       }
     }, /*#__PURE__*/React.createElement("span", {
@@ -6384,7 +6588,8 @@ function AIPage() {
         color: 'var(--text-muted)',
         fontSize: 10,
         fontFamily: 'monospace',
-        padding: '1px 7px',
+        padding: '4px 10px',
+        minHeight: 28,
         cursor: !aiReady || loading ? 'default' : 'pointer',
         opacity: !aiReady || loading ? 0.5 : 1
       },
@@ -6406,24 +6611,35 @@ function AIPage() {
         paddingLeft: 18,
         fontStyle: 'italic'
       }
-    }, "AI answers can be incorrect \u2014 verify important details."), !!(m.tokens || m.duration_ms) && /*#__PURE__*/React.createElement("div", {
+    }, "AI answers can be incorrect \u2014 verify important details."), (m.created_at || !!(m.tokens || m.duration_ms)) && /*#__PURE__*/React.createElement("div", {
       className: "mono",
       style: {
         fontSize: 10,
         color: 'var(--text-muted)',
         paddingLeft: 4
       }
-    }, m.tokens && m.duration_ms ? `${(m.tokens / (m.duration_ms / 1000)).toFixed(1)} tok/s · ` : '', m.duration_ms ? `${(m.duration_ms / 1000).toFixed(1)}s` : '')) : /*#__PURE__*/React.createElement("div", {
+    }, m.tokens && m.duration_ms ? `${(m.tokens / (m.duration_ms / 1000)).toFixed(1)} tok/s · ` : '', m.duration_ms ? `${(m.duration_ms / 1000).toFixed(1)}s · ` : '', fmtMsgTime(m.created_at))) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
       style: {
-        maxWidth: '78%',
-        padding: '8px 12px',
+        maxWidth: bubbleMaxWidth,
+        padding: '10px 14px',
+        background: 'linear-gradient(135deg, var(--accent-green), #89ffd8 55%, var(--accent-blue))',
+        color: '#06111d',
+        borderRadius: '12px 4px 12px 12px',
         fontSize: 14,
         lineHeight: 1.65,
+        fontWeight: 500,
         whiteSpace: 'pre-wrap',
         wordBreak: 'break-word',
-        color: 'var(--text-primary)'
+        boxShadow: '0 6px 16px rgba(94,242,194,0.2)'
       }
-    }, m.content));
+    }, m.content), m.created_at && /*#__PURE__*/React.createElement("div", {
+      className: "mono",
+      style: {
+        fontSize: 10,
+        color: 'var(--text-muted)',
+        paddingRight: 4
+      }
+    }, fmtMsgTime(m.created_at))));
   }), loading && !messages.some(m => m.streaming) && /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
@@ -6434,17 +6650,17 @@ function AIPage() {
       padding: '10px 16px',
       borderRadius: '4px 12px 12px 12px',
       background: 'var(--bg-input)',
-      border: '1px solid var(--border)',
       color: 'var(--text-muted)',
       fontSize: 14,
-      fontStyle: 'italic'
+      fontStyle: 'italic',
+      boxShadow: '0 2px 8px rgba(0,0,0,0.18)'
     }
   }, "Thinking\u2026")), /*#__PURE__*/React.createElement("div", {
     ref: chatEndRef
   })), /*#__PURE__*/React.createElement("div", {
+    className: "ai-chat-input-row",
     style: {
       borderTop: '1px solid var(--border)',
-      padding: '10px 14px',
       display: 'flex',
       gap: 8,
       alignItems: 'center',
@@ -6485,7 +6701,8 @@ function AIPage() {
     className: "card",
     style: {
       padding: 0,
-      overflow: 'hidden'
+      overflow: 'hidden',
+      ...mobileFlatCard
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -6561,27 +6778,46 @@ function AIPage() {
       fontSize: 10
     }
   }, doc.is_seed ? 'Seed' : 'Custom'), /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-sm",
+    className: "btn btn-sm kb-doc-delete-btn",
     style: {
       color: 'var(--accent-red)',
       border: '1px solid var(--accent-red)',
-      background: 'transparent',
-      padding: '2px 8px'
+      background: 'transparent'
     },
     onClick: () => deleteDocument(doc.id)
   }, "Delete")))))), /*#__PURE__*/React.createElement("div", {
     className: "card",
     style: {
-      padding: 16
+      padding: 16,
+      ...mobileFlatCard
     }
   }, /*#__PURE__*/React.createElement("div", {
+    className: "settings-disclosure-toggle",
+    onClick: () => setAddDocOpen(o => !o),
+    role: "button",
+    tabIndex: 0,
+    onKeyDown: e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        setAddDocOpen(o => !o);
+      }
+    },
+    style: {
+      marginBottom: addDocOpen ? 12 : 0
+    }
+  }, /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 13,
       fontWeight: 600,
-      color: 'var(--text-primary)',
-      marginBottom: 12
+      color: 'var(--text-primary)'
     }
-  }, "Add Knowledge"), /*#__PURE__*/React.createElement("div", {
+  }, "Add Knowledge"), /*#__PURE__*/React.createElement("span", {
+    className: "mono",
+    style: {
+      fontSize: 12,
+      color: 'var(--text-muted)'
+    }
+  }, addDocOpen ? '▲' : '▼')), addDocOpen && /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       flexDirection: 'column',
@@ -6633,6 +6869,13 @@ function AIPage() {
   }, "Add Document")))), tab === 'settings' && /*#__PURE__*/React.createElement("div", {
     style: {
       flex: 1,
+      display: 'flex',
+      flexDirection: 'column',
+      minHeight: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
       overflowY: 'auto'
     }
   }, /*#__PURE__*/React.createElement("div", {
@@ -6641,7 +6884,8 @@ function AIPage() {
       padding: 20,
       display: 'flex',
       flexDirection: 'column',
-      gap: 20
+      gap: 20,
+      ...mobileFlatCard
     }
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -6816,26 +7060,21 @@ function AIPage() {
       ...p,
       system_prompt: e.target.value
     }))
-  })), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: 10
-    }
+  })), /*#__PURE__*/React.createElement("label", {
+    className: "power-toggle"
   }, /*#__PURE__*/React.createElement("input", {
     type: "checkbox",
-    id: "warmup",
     checked: settings.warmup_on_start === 'true',
     onChange: e => setSettings(p => ({
       ...p,
       warmup_on_start: e.target.checked ? 'true' : 'false'
     }))
-  }), /*#__PURE__*/React.createElement("label", {
-    htmlFor: "warmup",
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "power-toggle-track"
+  }), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 13,
-      color: 'var(--text-primary)',
-      cursor: 'pointer'
+      color: 'var(--text-primary)'
     }
   }, "Warmup model on startup")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     style: labelStyle
@@ -6867,26 +7106,21 @@ function AIPage() {
       flexDirection: 'column',
       gap: 10
     }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: 10
-    }
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "power-toggle"
   }, /*#__PURE__*/React.createElement("input", {
     type: "checkbox",
-    id: "rag_enabled",
     checked: settings.rag_enabled === 'true',
     onChange: e => setSettings(p => ({
       ...p,
       rag_enabled: e.target.checked ? 'true' : 'false'
     }))
-  }), /*#__PURE__*/React.createElement("label", {
-    htmlFor: "rag_enabled",
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "power-toggle-track"
+  }), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 13,
-      color: 'var(--text-primary)',
-      cursor: 'pointer'
+      color: 'var(--text-primary)'
     }
   }, "Enable RAG (inject relevant docs into context)")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     style: labelStyle
@@ -6903,26 +7137,21 @@ function AIPage() {
       ...p,
       rag_top_k: e.target.value
     }))
-  })), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: 10
-    }
+  })), /*#__PURE__*/React.createElement("label", {
+    className: "power-toggle"
   }, /*#__PURE__*/React.createElement("input", {
     type: "checkbox",
-    id: "mesh_ctx",
     checked: settings.inject_mesh_context === 'true',
     onChange: e => setSettings(p => ({
       ...p,
       inject_mesh_context: e.target.checked ? 'true' : 'false'
     }))
-  }), /*#__PURE__*/React.createElement("label", {
-    htmlFor: "mesh_ctx",
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "power-toggle-track"
+  }), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 13,
-      color: 'var(--text-primary)',
-      cursor: 'pointer'
+      color: 'var(--text-primary)'
     }
   }, "Inject mesh network context (nodes + recent messages)")))), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -6930,26 +7159,39 @@ function AIPage() {
       paddingTop: 16
     }
   }, /*#__PURE__*/React.createElement(KnowledgeMap, null)), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "settings-disclosure-toggle",
+    onClick: () => setAdvancedOpen(o => !o),
+    role: "button",
+    tabIndex: 0,
+    onKeyDown: e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        setAdvancedOpen(o => !o);
+      }
+    }
+  }, /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 11,
       fontWeight: 700,
       color: 'var(--text-muted)',
       letterSpacing: '0.08em',
-      textTransform: 'uppercase',
-      marginBottom: 12
+      textTransform: 'uppercase'
     }
-  }, "Inference"), /*#__PURE__*/React.createElement("div", {
+  }, "Advanced (Inference)"), /*#__PURE__*/React.createElement("span", {
+    className: "mono",
+    style: {
+      fontSize: 12,
+      color: 'var(--text-muted)'
+    }
+  }, advancedOpen ? '▲' : '▼')), advancedOpen && /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       flexDirection: 'column',
-      gap: 10
+      gap: 10,
+      marginTop: 12
     }
   }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'grid',
-      gridTemplateColumns: '1fr 1fr',
-      gap: 10
-    }
+    className: "settings-grid-2"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     style: labelStyle
   }, "Temperature (0\u20132)"), /*#__PURE__*/React.createElement("input", {
@@ -7038,11 +7280,7 @@ function AIPage() {
       marginTop: 3
     }
   }, "Max tokens generated per reply"))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'grid',
-      gridTemplateColumns: '1fr 1fr',
-      gap: 10
-    }
+    className: "settings-grid-2"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     style: labelStyle
   }, "Context Window (num_ctx)"), /*#__PURE__*/React.createElement("input", {
@@ -7087,11 +7325,7 @@ function AIPage() {
       marginTop: 3
     }
   }, "99 = all layers on GPU"))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'grid',
-      gridTemplateColumns: '1fr 1fr',
-      gap: 10
-    }
+    className: "settings-grid-2"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     style: labelStyle
   }, "CPU Threads (num_thread)"), /*#__PURE__*/React.createElement("input", {
@@ -7135,12 +7369,8 @@ function AIPage() {
       color: 'var(--text-muted)',
       marginTop: 3
     }
-  }, "Prompt processing batch size"))))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: 12
-    }
+  }, "Prompt processing batch size"))))))), /*#__PURE__*/React.createElement("div", {
+    className: "ai-settings-save-bar"
   }, /*#__PURE__*/React.createElement("button", {
     className: "btn btn-primary",
     onClick: saveSettings,
@@ -7163,7 +7393,7 @@ function AIPage() {
       fontSize: 13,
       fontWeight: 500
     }
-  }, "Error: ", saveError))))));
+  }, "Error: ", saveError)))));
 }
 
 // ═══════════════════════════════════════════════
@@ -7535,10 +7765,8 @@ function SystemPage() {
   }, stats.nvme_used_gb, " / ", stats.nvme_total_gb, " GB")), /*#__PURE__*/React.createElement(Bar, {
     pct: stats.nvme_pct
   })), (stats.disk_read_mbps != null || stats.disk_write_mbps != null) && /*#__PURE__*/React.createElement("div", {
+    className: "settings-grid-2",
     style: {
-      display: 'grid',
-      gridTemplateColumns: '1fr 1fr',
-      gap: 8,
       marginTop: 2
     }
   }, /*#__PURE__*/React.createElement("div", {
@@ -7693,11 +7921,7 @@ function SystemPage() {
       color: 'var(--text-primary)'
     }
   }, "Power Consumption"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'grid',
-      gridTemplateColumns: 'repeat(3,1fr)',
-      gap: 10
-    }
+    className: "settings-grid-3"
   }, [['Total Input', stats.power_in_mw], ['CPU + GPU + CV', stats.power_cpu_gpu_mw], ['SOC', stats.power_soc_mw]].map(([label, mw]) => mw != null && /*#__PURE__*/React.createElement("div", {
     key: label,
     style: {
@@ -8113,7 +8337,8 @@ function GpsShareSection({
     style: {
       display: 'flex',
       alignItems: 'center',
-      gap: 10
+      gap: 10,
+      flexWrap: 'wrap'
     }
   }, /*#__PURE__*/React.createElement("button", {
     className: "btn btn-primary",
@@ -8208,6 +8433,8 @@ function SettingsPage({
   onHiddenPagesChange,
   onResetSidebarOrder,
   defaultPages,
+  sidebarFullOrder,
+  onMoveSidebarPage,
   nodes
 }) {
   const [settings, setSettings] = useState(null);
@@ -8555,17 +8782,72 @@ function SettingsPage({
     style: {
       display: 'flex',
       alignItems: 'center',
-      justifyContent: 'space-between'
+      justifyContent: 'space-between',
+      marginBottom: 8
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       color: 'var(--text-muted)'
     }
-  }, "Drag & drop sidebar icons to reorder"), /*#__PURE__*/React.createElement("button", {
+  }, "Reorder \u2014 use the arrows, or drag icons directly on desktop"), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-sm",
     onClick: onResetSidebarOrder
-  }, "Reset Order")))), /*#__PURE__*/React.createElement(DeviceConfigSection, null), /*#__PURE__*/React.createElement(GpsShareSection, {
+  }, "Reset Order")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 4
+    }
+  }, (sidebarFullOrder || []).map((p, idx, arr) => /*#__PURE__*/React.createElement("div", {
+    key: p.id,
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10,
+      padding: '7px 10px',
+      background: 'var(--bg-tertiary)',
+      borderRadius: 6
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      color: 'var(--text-muted)'
+    }
+  }, p.icon), /*#__PURE__*/React.createElement("span", {
+    style: {
+      flex: 1,
+      fontSize: 13,
+      color: hiddenPages.includes(p.id) ? 'var(--text-muted)' : 'var(--text-primary)'
+    }
+  }, p.label), /*#__PURE__*/React.createElement("button", {
+    onClick: () => onMoveSidebarPage(p.id, -1),
+    disabled: idx === 0,
+    style: {
+      background: 'none',
+      border: 'none',
+      color: 'var(--text-muted)',
+      cursor: 'pointer',
+      padding: '6px 8px',
+      fontSize: 14,
+      minHeight: 32,
+      opacity: idx === 0 ? 0.25 : 1
+    }
+  }, "\u2191"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => onMoveSidebarPage(p.id, 1),
+    disabled: idx === arr.length - 1,
+    style: {
+      background: 'none',
+      border: 'none',
+      color: 'var(--text-muted)',
+      cursor: 'pointer',
+      padding: '6px 8px',
+      fontSize: 14,
+      minHeight: 32,
+      opacity: idx === arr.length - 1 ? 0.25 : 1
+    }
+  }, "\u2193")))))), /*#__PURE__*/React.createElement(DeviceConfigSection, null), /*#__PURE__*/React.createElement(GpsShareSection, {
     nodes: nodes || []
   }), /*#__PURE__*/React.createElement(SoftwareUpdateSection, null), /*#__PURE__*/React.createElement(FactoryResetSection, null), /*#__PURE__*/React.createElement("div", {
     className: "settings-actions",
@@ -9448,8 +9730,91 @@ function DeviceConfigSaveBar({
     }
   }, "\u2713 Applied"));
 }
+
+// Desktop: same flat "title + divider" block as always. Phones: the same
+// content behind a tap-to-expand accordion — 7 always-open sections (~30
+// fields) made this the single longest scroll in the app.
+function DeviceConfigSubsection({
+  title,
+  compact,
+  open,
+  onToggle,
+  isLast,
+  children
+}) {
+  if (!compact) {
+    return /*#__PURE__*/React.createElement("div", {
+      style: isLast ? null : {
+        marginBottom: 20,
+        paddingBottom: 16,
+        borderBottom: '1px solid var(--border)'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        ..._DC_SL,
+        marginBottom: 8
+      }
+    }, title), children);
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: 10,
+      border: '1px solid var(--border)',
+      borderRadius: 'var(--radius)',
+      overflow: 'hidden'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    onClick: onToggle,
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: '12px 14px',
+      cursor: 'pointer',
+      minHeight: 44,
+      boxSizing: 'border-box'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      ..._DC_SL,
+      marginBottom: 0
+    }
+  }, title), /*#__PURE__*/React.createElement("svg", {
+    width: "14",
+    height: "14",
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "2.5",
+    style: {
+      color: 'var(--text-muted)',
+      flexShrink: 0,
+      transition: 'transform 200ms',
+      transform: open ? 'rotate(180deg)' : 'none'
+    }
+  }, /*#__PURE__*/React.createElement("polyline", {
+    points: "6 9 12 15 18 9"
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxHeight: open ? '3000px' : '0px',
+      opacity: open ? 1 : 0,
+      overflow: 'hidden',
+      transition: 'max-height 300ms ease, opacity 200ms ease'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '0 14px 16px'
+    }
+  }, children)));
+}
 const DeviceConfigSection = React.memo(function DeviceConfigSection() {
   var _cfg$device$role, _cfg$device, _cfg$device$rebroadca, _cfg$device2, _cfg$device3, _cfg$device4, _cfg$device$node_info, _cfg$device5, _cfg$lora$region, _cfg$lora, _cfg$lora$modem_prese, _cfg$lora2, _cfg$lora3, _cfg$lora4, _cfg$lora$hop_limit, _cfg$lora5, _cfg$lora$tx_power, _cfg$lora6, _cfg$lora7, _cfg$lora8, _cfg$lora$bandwidth, _cfg$lora9, _cfg$lora$spread_fact, _cfg$lora10, _cfg$lora$coding_rate, _cfg$lora11, _cfg$position$gps_upd, _cfg$position, _cfg$position$positio, _cfg$position2, _cfg$position3, _cfg$position4, _cfg$power, _cfg$power$on_battery, _cfg$power2, _cfg$power$wait_bluet, _cfg$power3, _cfg$bluetooth, _cfg$bluetooth$fixed_, _cfg$bluetooth2, _cfg$network, _cfg$network$address_, _cfg$network2, _cfg$network$wifi_ssi, _cfg$network3, _cfg$network$wifi_psk, _cfg$network4, _cfg$network$ntp_serv, _cfg$network5, _cfg$network6;
+  const compact = isSmallScreen();
+  const [openSections, setOpenSections] = useState({});
+  const toggleSection = id => setOpenSections(p => ({
+    ...p,
+    [id]: !p[id]
+  }));
   const [cfg, setCfg] = useState(null);
   const [owner, setOwner] = useState({
     long_name: '',
@@ -9593,18 +9958,12 @@ const DeviceConfigSection = React.memo(function DeviceConfigSection() {
       borderRadius: 'var(--radius)',
       border: '1px solid rgba(245,158,11,0.3)'
     }
-  }, "\u26A0 Changes are written directly to the radio. The device will reboot to apply some settings."), /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginBottom: 20,
-      paddingBottom: 16,
-      borderBottom: '1px solid var(--border)'
-    }
+  }, "\u26A0 Changes are written directly to the radio. The device will reboot to apply some settings."), /*#__PURE__*/React.createElement(DeviceConfigSubsection, {
+    title: "Node Identity",
+    compact: compact,
+    open: !!openSections.owner,
+    onToggle: () => toggleSection('owner')
   }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      ...SL,
-      marginBottom: 8
-    }
-  }, "Node Identity"), /*#__PURE__*/React.createElement("div", {
     className: "device-identity-grid"
   }, /*#__PURE__*/React.createElement(Row, {
     label: "Long Name",
@@ -9684,18 +10043,12 @@ const DeviceConfigSection = React.memo(function DeviceConfigSection() {
       fontFamily: 'var(--font-mono)',
       color: 'var(--text-muted)'
     }
-  }, owner.node_id, " \xB7 ", owner.hw_model))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginBottom: 20,
-      paddingBottom: 16,
-      borderBottom: '1px solid var(--border)'
-    }
+  }, owner.node_id, " \xB7 ", owner.hw_model))), /*#__PURE__*/React.createElement(DeviceConfigSubsection, {
+    title: "Node Behaviour",
+    compact: compact,
+    open: !!openSections.device,
+    onToggle: () => toggleSection('device')
   }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      ...SL,
-      marginBottom: 8
-    }
-  }, "Node Behaviour"), /*#__PURE__*/React.createElement("div", {
     className: "settings-grid-2",
     style: {
       marginBottom: 0
@@ -9723,22 +10076,13 @@ const DeviceConfigSection = React.memo(function DeviceConfigSection() {
   }, l)))), /*#__PURE__*/React.createElement(Row, {
     label: "Serial Output"
   }, /*#__PURE__*/React.createElement("label", {
-    style: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: 8,
-      cursor: 'pointer',
-      marginTop: 4
-    }
+    className: "power-toggle"
   }, /*#__PURE__*/React.createElement("input", {
     type: "checkbox",
     checked: !!((_cfg$device3 = cfg.device) !== null && _cfg$device3 !== void 0 && _cfg$device3.serial_enabled),
-    onChange: e => set('device', 'serial_enabled', e.target.checked),
-    style: {
-      accentColor: 'var(--accent-green)',
-      width: 16,
-      height: 16
-    }
+    onChange: e => set('device', 'serial_enabled', e.target.checked)
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "power-toggle-track"
   }), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 13,
@@ -9747,22 +10091,13 @@ const DeviceConfigSection = React.memo(function DeviceConfigSection() {
   }, "Enabled"))), /*#__PURE__*/React.createElement(Row, {
     label: "LED Heartbeat"
   }, /*#__PURE__*/React.createElement("label", {
-    style: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: 8,
-      cursor: 'pointer',
-      marginTop: 4
-    }
+    className: "power-toggle"
   }, /*#__PURE__*/React.createElement("input", {
     type: "checkbox",
     checked: !!((_cfg$device4 = cfg.device) !== null && _cfg$device4 !== void 0 && _cfg$device4.led_heartbeat_disabled),
-    onChange: e => set('device', 'led_heartbeat_disabled', e.target.checked),
-    style: {
-      accentColor: 'var(--accent-green)',
-      width: 16,
-      height: 16
-    }
+    onChange: e => set('device', 'led_heartbeat_disabled', e.target.checked)
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "power-toggle-track"
   }), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 13,
@@ -9779,18 +10114,12 @@ const DeviceConfigSection = React.memo(function DeviceConfigSection() {
     onChange: e => set('device', 'node_info_broadcast_secs', parseInt(e.target.value))
   }))), /*#__PURE__*/React.createElement(SaveBar, {
     section: "device"
-  })), /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginBottom: 20,
-      paddingBottom: 16,
-      borderBottom: '1px solid var(--border)'
-    }
+  })), /*#__PURE__*/React.createElement(DeviceConfigSubsection, {
+    title: "LoRa Radio",
+    compact: compact,
+    open: !!openSections.lora,
+    onToggle: () => toggleSection('lora')
   }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      ...SL,
-      marginBottom: 8
-    }
-  }, "LoRa Radio"), /*#__PURE__*/React.createElement("div", {
     className: "settings-grid-2"
   }, /*#__PURE__*/React.createElement(Row, {
     label: "Region",
@@ -9817,22 +10146,13 @@ const DeviceConfigSection = React.memo(function DeviceConfigSection() {
     label: "Use Preset",
     hint: "Disabling allows manual SF/BW/CR tuning"
   }, /*#__PURE__*/React.createElement("label", {
-    style: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: 8,
-      cursor: 'pointer',
-      marginTop: 4
-    }
+    className: "power-toggle"
   }, /*#__PURE__*/React.createElement("input", {
     type: "checkbox",
     checked: !!((_cfg$lora4 = cfg.lora) !== null && _cfg$lora4 !== void 0 && _cfg$lora4.use_preset),
-    onChange: e => set('lora', 'use_preset', e.target.checked),
-    style: {
-      accentColor: 'var(--accent-green)',
-      width: 16,
-      height: 16
-    }
+    onChange: e => set('lora', 'use_preset', e.target.checked)
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "power-toggle-track"
   }), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 13,
@@ -9861,22 +10181,13 @@ const DeviceConfigSection = React.memo(function DeviceConfigSection() {
   })), /*#__PURE__*/React.createElement(Row, {
     label: "TX Enabled"
   }, /*#__PURE__*/React.createElement("label", {
-    style: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: 8,
-      cursor: 'pointer',
-      marginTop: 4
-    }
+    className: "power-toggle"
   }, /*#__PURE__*/React.createElement("input", {
     type: "checkbox",
     checked: !!((_cfg$lora7 = cfg.lora) !== null && _cfg$lora7 !== void 0 && _cfg$lora7.tx_enabled),
-    onChange: e => set('lora', 'tx_enabled', e.target.checked),
-    style: {
-      accentColor: 'var(--accent-green)',
-      width: 16,
-      height: 16
-    }
+    onChange: e => set('lora', 'tx_enabled', e.target.checked)
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "power-toggle-track"
   }), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 13,
@@ -9914,18 +10225,12 @@ const DeviceConfigSection = React.memo(function DeviceConfigSection() {
     onChange: e => set('lora', 'coding_rate', parseInt(e.target.value))
   })))), /*#__PURE__*/React.createElement(SaveBar, {
     section: "lora"
-  })), /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginBottom: 20,
-      paddingBottom: 16,
-      borderBottom: '1px solid var(--border)'
-    }
+  })), /*#__PURE__*/React.createElement(DeviceConfigSubsection, {
+    title: "Position",
+    compact: compact,
+    open: !!openSections.position,
+    onToggle: () => toggleSection('position')
   }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      ...SL,
-      marginBottom: 8
-    }
-  }, "Position"), /*#__PURE__*/React.createElement("div", {
     className: "settings-grid-2"
   }, /*#__PURE__*/React.createElement(Row, {
     label: "GPS Update Interval (s)",
@@ -9949,22 +10254,13 @@ const DeviceConfigSection = React.memo(function DeviceConfigSection() {
     label: "Smart Position",
     hint: "Adapts broadcast rate to movement speed"
   }, /*#__PURE__*/React.createElement("label", {
-    style: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: 8,
-      cursor: 'pointer',
-      marginTop: 4
-    }
+    className: "power-toggle"
   }, /*#__PURE__*/React.createElement("input", {
     type: "checkbox",
     checked: !!((_cfg$position3 = cfg.position) !== null && _cfg$position3 !== void 0 && _cfg$position3.position_broadcast_smart_enabled),
-    onChange: e => set('position', 'position_broadcast_smart_enabled', e.target.checked),
-    style: {
-      accentColor: 'var(--accent-green)',
-      width: 16,
-      height: 16
-    }
+    onChange: e => set('position', 'position_broadcast_smart_enabled', e.target.checked)
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "power-toggle-track"
   }), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 13,
@@ -9974,22 +10270,13 @@ const DeviceConfigSection = React.memo(function DeviceConfigSection() {
     label: "Fixed Position",
     hint: "Use manually entered coords instead of GPS"
   }, /*#__PURE__*/React.createElement("label", {
-    style: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: 8,
-      cursor: 'pointer',
-      marginTop: 4
-    }
+    className: "power-toggle"
   }, /*#__PURE__*/React.createElement("input", {
     type: "checkbox",
     checked: !!((_cfg$position4 = cfg.position) !== null && _cfg$position4 !== void 0 && _cfg$position4.fixed_position),
-    onChange: e => set('position', 'fixed_position', e.target.checked),
-    style: {
-      accentColor: 'var(--accent-green)',
-      width: 16,
-      height: 16
-    }
+    onChange: e => set('position', 'fixed_position', e.target.checked)
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "power-toggle-track"
   }), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 13,
@@ -9997,39 +10284,24 @@ const DeviceConfigSection = React.memo(function DeviceConfigSection() {
     }
   }, "Fixed Position")))), /*#__PURE__*/React.createElement(SaveBar, {
     section: "position"
-  })), /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginBottom: 20,
-      paddingBottom: 16,
-      borderBottom: '1px solid var(--border)'
-    }
+  })), /*#__PURE__*/React.createElement(DeviceConfigSubsection, {
+    title: "Power",
+    compact: compact,
+    open: !!openSections.power,
+    onToggle: () => toggleSection('power')
   }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      ...SL,
-      marginBottom: 8
-    }
-  }, "Power"), /*#__PURE__*/React.createElement("div", {
     className: "settings-grid-2"
   }, /*#__PURE__*/React.createElement(Row, {
     label: "Power Save Mode",
     hint: "Reduces radio duty cycle to extend battery"
   }, /*#__PURE__*/React.createElement("label", {
-    style: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: 8,
-      cursor: 'pointer',
-      marginTop: 4
-    }
+    className: "power-toggle"
   }, /*#__PURE__*/React.createElement("input", {
     type: "checkbox",
     checked: !!((_cfg$power = cfg.power) !== null && _cfg$power !== void 0 && _cfg$power.is_power_saving),
-    onChange: e => set('power', 'is_power_saving', e.target.checked),
-    style: {
-      accentColor: 'var(--accent-green)',
-      width: 16,
-      height: 16
-    }
+    onChange: e => set('power', 'is_power_saving', e.target.checked)
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "power-toggle-track"
   }), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 13,
@@ -10055,38 +10327,23 @@ const DeviceConfigSection = React.memo(function DeviceConfigSection() {
     onChange: e => set('power', 'wait_bluetooth_secs', parseInt(e.target.value))
   }))), /*#__PURE__*/React.createElement(SaveBar, {
     section: "power"
-  })), /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginBottom: 20,
-      paddingBottom: 16,
-      borderBottom: '1px solid var(--border)'
-    }
+  })), /*#__PURE__*/React.createElement(DeviceConfigSubsection, {
+    title: "Bluetooth",
+    compact: compact,
+    open: !!openSections.bluetooth,
+    onToggle: () => toggleSection('bluetooth')
   }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      ...SL,
-      marginBottom: 8
-    }
-  }, "Bluetooth"), /*#__PURE__*/React.createElement("div", {
     className: "settings-grid-2"
   }, /*#__PURE__*/React.createElement(Row, {
     label: "Bluetooth Enabled"
   }, /*#__PURE__*/React.createElement("label", {
-    style: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: 8,
-      cursor: 'pointer',
-      marginTop: 4
-    }
+    className: "power-toggle"
   }, /*#__PURE__*/React.createElement("input", {
     type: "checkbox",
     checked: !!((_cfg$bluetooth = cfg.bluetooth) !== null && _cfg$bluetooth !== void 0 && _cfg$bluetooth.enabled),
-    onChange: e => set('bluetooth', 'enabled', e.target.checked),
-    style: {
-      accentColor: 'var(--accent-green)',
-      width: 16,
-      height: 16
-    }
+    onChange: e => set('bluetooth', 'enabled', e.target.checked)
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "power-toggle-track"
   }), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 13,
@@ -10104,33 +10361,25 @@ const DeviceConfigSection = React.memo(function DeviceConfigSection() {
     onChange: e => set('bluetooth', 'fixed_pin', parseInt(e.target.value))
   }))), /*#__PURE__*/React.createElement(SaveBar, {
     section: "bluetooth"
-  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      ...SL,
-      marginBottom: 8
-    }
-  }, "Network / WiFi"), /*#__PURE__*/React.createElement("div", {
+  })), /*#__PURE__*/React.createElement(DeviceConfigSubsection, {
+    title: "Network / WiFi",
+    compact: compact,
+    open: !!openSections.network,
+    onToggle: () => toggleSection('network'),
+    isLast: true
+  }, /*#__PURE__*/React.createElement("div", {
     className: "settings-grid-2"
   }, /*#__PURE__*/React.createElement(Row, {
     label: "WiFi Enabled",
     hint: "Enable onboard WiFi (uses more power)"
   }, /*#__PURE__*/React.createElement("label", {
-    style: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: 8,
-      cursor: 'pointer',
-      marginTop: 4
-    }
+    className: "power-toggle"
   }, /*#__PURE__*/React.createElement("input", {
     type: "checkbox",
     checked: !!((_cfg$network = cfg.network) !== null && _cfg$network !== void 0 && _cfg$network.wifi_enabled),
-    onChange: e => set('network', 'wifi_enabled', e.target.checked),
-    style: {
-      accentColor: 'var(--accent-green)',
-      width: 16,
-      height: 16
-    }
+    onChange: e => set('network', 'wifi_enabled', e.target.checked)
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "power-toggle-track"
   }), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 13,
@@ -10185,22 +10434,13 @@ const DeviceConfigSection = React.memo(function DeviceConfigSection() {
     label: "Ethernet",
     hint: "Enable wired Ethernet (hardware dependent)"
   }, /*#__PURE__*/React.createElement("label", {
-    style: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: 8,
-      cursor: 'pointer',
-      marginTop: 4
-    }
+    className: "power-toggle"
   }, /*#__PURE__*/React.createElement("input", {
     type: "checkbox",
     checked: !!((_cfg$network6 = cfg.network) !== null && _cfg$network6 !== void 0 && _cfg$network6.eth_enabled),
-    onChange: e => set('network', 'eth_enabled', e.target.checked),
-    style: {
-      accentColor: 'var(--accent-green)',
-      width: 16,
-      height: 16
-    }
+    onChange: e => set('network', 'eth_enabled', e.target.checked)
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "power-toggle-track"
   }), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 13,
@@ -11056,16 +11296,73 @@ function NavigatePage({
   }, [routeData]);
   const isHiking = mode === 'hiking';
   const speedNote = isHiking ? '@ ~2–3 mph on trail' : null;
+  // Phone-sized viewport: map goes full-bleed and search/directions float over
+  // it instead of sharing layout space. Independent of the fullBleed prop,
+  // which only controls desktop Hiking's flush-toolbar look.
+  const compact = isSmallScreen();
+  const mapEdgeToEdge = fullBleed || compact;
+  const nextManeuverCard = steps[currentStep] ? /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      padding: '12px 14px',
+      flexShrink: 0,
+      background: 'var(--accent-blue-dim)',
+      borderColor: 'rgba(59,130,246,0.3)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      fontWeight: 600,
+      textTransform: 'uppercase',
+      letterSpacing: '0.06em',
+      color: 'var(--accent-blue)',
+      marginBottom: 6
+    }
+  }, "Next Maneuver"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 10,
+      alignItems: 'center'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      flexShrink: 0
+    }
+  }, navStepIcon(steps[currentStep].maneuver.type, isHiking, 28)), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 14,
+      fontWeight: 600,
+      color: 'var(--text-primary)'
+    }
+  }, navStepLabel(steps[currentStep].maneuver, mode)), steps[currentStep].name && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: 'var(--text-secondary)',
+      marginTop: 2
+    }
+  }, "onto ", steps[currentStep].name), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: 'var(--text-muted)',
+      fontFamily: 'var(--font-mono)',
+      marginTop: 4
+    }
+  }, fmtNavDist(steps[currentStep].distance), " \xB7 ", fmtNavDuration(steps[currentStep].duration))))) : null;
   return /*#__PURE__*/React.createElement("div", {
+    className: "nav-page-root",
     style: {
       display: 'flex',
       flexDirection: 'column',
-      gap: fullBleed ? 0 : 12,
+      gap: mapEdgeToEdge ? 0 : 12,
       flex: 1,
       minHeight: 0,
       overflow: 'visible',
-      padding: fullBleed ? 0 : 16
+      padding: mapEdgeToEdge ? 0 : 16
     }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "nav-top-overlay"
   }, /*#__PURE__*/React.createElement("div", {
     className: "card",
     style: {
@@ -11074,7 +11371,7 @@ function NavigatePage({
       position: 'relative',
       zIndex: 20,
       overflow: 'visible',
-      ...(fullBleed ? {
+      ...(fullBleed && !compact ? {
         borderRadius: 0,
         borderLeft: 'none',
         borderRight: 'none',
@@ -11157,7 +11454,7 @@ function NavigatePage({
     className: "btn btn-primary btn-sm",
     onClick: searchAddress,
     disabled: searching
-  }, searching ? '…' : 'Search'), availableModes.map(m => /*#__PURE__*/React.createElement("button", {
+  }, searching ? '…' : 'Search'), availableModes.length > 1 && availableModes.map(m => /*#__PURE__*/React.createElement("button", {
     key: m.value,
     onClick: () => setMode(m.value),
     title: m.label,
@@ -11288,7 +11585,7 @@ function NavigatePage({
       color: 'var(--accent-amber)',
       fontSize: 12
     }
-  }, "No GPS fix \u2014 tap the map to set a destination anyway.")), showFavorites && /*#__PURE__*/React.createElement("div", {
+  }, "No GPS fix \u2014 tap the map to set a destination anyway.")), compact && nextManeuverCard, showFavorites && /*#__PURE__*/React.createElement("div", {
     className: "card",
     style: {
       padding: '10px 14px',
@@ -11448,12 +11745,12 @@ function NavigatePage({
         lineHeight: 1
       }
     }, "\xD7"));
-  }))), /*#__PURE__*/React.createElement("div", {
+  })))), /*#__PURE__*/React.createElement("div", {
     className: "nav-map-directions",
     style: {
       flex: 1,
       display: 'flex',
-      gap: fullBleed ? 0 : 12,
+      gap: mapEdgeToEdge ? 0 : 12,
       minHeight: 0,
       position: 'relative',
       zIndex: 1
@@ -11464,7 +11761,7 @@ function NavigatePage({
       minWidth: 0,
       position: 'relative',
       overflow: 'hidden',
-      ...(fullBleed ? null : {
+      ...(mapEdgeToEdge ? null : {
         borderRadius: 'var(--radius-lg)',
         border: '1px solid var(--border)'
       })
@@ -11483,9 +11780,14 @@ function NavigatePage({
     title: "Toggle topo overlay",
     style: {
       position: 'absolute',
-      top: 12,
-      right: 12,
       zIndex: 1000,
+      ...(compact ? {
+        bottom: 16,
+        left: 16
+      } : {
+        top: 12,
+        right: 12
+      }),
       padding: '6px 10px',
       borderRadius: 16,
       cursor: 'pointer',
@@ -11613,55 +11915,7 @@ function NavigatePage({
       color: 'var(--text-muted)',
       marginTop: 2
     }
-  }, speedNote)))), steps[currentStep] && /*#__PURE__*/React.createElement("div", {
-    className: "card",
-    style: {
-      padding: '12px 14px',
-      flexShrink: 0,
-      background: 'var(--accent-blue-dim)',
-      borderColor: 'rgba(59,130,246,0.3)'
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 11,
-      fontWeight: 600,
-      textTransform: 'uppercase',
-      letterSpacing: '0.06em',
-      color: 'var(--accent-blue)',
-      marginBottom: 6
-    }
-  }, "Next Maneuver"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      gap: 10,
-      alignItems: 'center'
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      display: 'flex',
-      alignItems: 'center',
-      flexShrink: 0
-    }
-  }, navStepIcon(steps[currentStep].maneuver.type, isHiking, 28)), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 14,
-      fontWeight: 600,
-      color: 'var(--text-primary)'
-    }
-  }, navStepLabel(steps[currentStep].maneuver, mode)), steps[currentStep].name && /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 12,
-      color: 'var(--text-secondary)',
-      marginTop: 2
-    }
-  }, "onto ", steps[currentStep].name), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 11,
-      color: 'var(--text-muted)',
-      fontFamily: 'var(--font-mono)',
-      marginTop: 4
-    }
-  }, fmtNavDist(steps[currentStep].distance), " \xB7 ", fmtNavDuration(steps[currentStep].duration))))), /*#__PURE__*/React.createElement("div", {
+  }, speedNote)))), !compact && nextManeuverCard, /*#__PURE__*/React.createElement("div", {
     className: "card",
     style: {
       padding: 0,
@@ -13372,10 +13626,7 @@ function CalendarPage() {
     }
   }, /*#__PURE__*/React.createElement("button", {
     className: "btn btn-sm",
-    onClick: prevMonth,
-    style: {
-      padding: '4px 10px'
-    }
+    onClick: prevMonth
   }, "\u2039"), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 18,
@@ -13386,10 +13637,7 @@ function CalendarPage() {
     }
   }, MONTH_NAMES[viewMonth], " ", viewYear), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-sm",
-    onClick: nextMonth,
-    style: {
-      padding: '4px 10px'
-    }
+    onClick: nextMonth
   }, "\u203A")), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-sm",
     onClick: () => {
@@ -13450,7 +13698,7 @@ function CalendarPage() {
       onClick: e => openEdit(ev, e),
       style: {
         fontSize: 10,
-        padding: '1px 5px',
+        padding: '3px 5px',
         borderRadius: 3,
         marginBottom: 2,
         background: (accentMap[ev.color] || accentMap.blue) + '33',
@@ -13698,9 +13946,11 @@ function CalendarPage() {
     style: {
       width: 22,
       height: 22,
+      padding: 4,
       borderRadius: '50%',
       background: accentMap[c],
       cursor: 'pointer',
+      backgroundClip: 'content-box',
       outline: form.color === c ? `2px solid white` : '2px solid transparent',
       outlineOffset: 2
     }
@@ -13759,6 +14009,7 @@ function CalendarPage() {
 // CalculatorPage
 // ═══════════════════════════════════════════════
 function CalculatorPage() {
+  const compact = isSmallScreen();
   const [expr, setExpr] = useState('');
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
@@ -13858,7 +14109,9 @@ function CalculatorPage() {
     }
   }, /*#__PURE__*/React.createElement("div", {
     className: "card",
-    style: {
+    style: compact ? {
+      width: '100%'
+    } : {
       width: 340,
       flexShrink: 0
     }
@@ -14096,7 +14349,7 @@ function MapSection({
   gpsStatus,
   onRemoveTracker
 }) {
-  const MAP_TABS = ['map', 'navigate'];
+  const MAP_TABS = ['map', 'navigate', 'hiking'];
   const [tab, setTabState] = useState(() => {
     const saved = recallTab('map');
     return MAP_TABS.includes(saved) ? saved : 'map';
@@ -14132,13 +14385,16 @@ function MapSection({
   }, []); // eslint-disable-line
 
   return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
-    className: "page-tab-bar"
+    className: "page-tab-bar map-nav-tabbar"
   }, [{
     id: 'map',
     label: 'Map'
   }, {
     id: 'navigate',
     label: 'Road Nav'
+  }, {
+    id: 'hiking',
+    label: 'Hiking'
   }].map(t => /*#__PURE__*/React.createElement("button", {
     key: t.id,
     className: `page-tab-btn${tab === t.id ? ' active' : ''}`,
@@ -14157,6 +14413,10 @@ function MapSection({
     defaultMode: "road",
     availableModes: NAV_MODES.filter(m => m.value === 'road'),
     searchPlaceholder: "Search road destination or enter lat, lon\u2026"
+  }), tab === 'hiking' && /*#__PURE__*/React.createElement(HikingSection, {
+    nodes: nodes,
+    device: device,
+    gpsStatus: gpsStatus
   }));
 }
 function HikingSection({
@@ -14497,12 +14757,6 @@ const DEFAULT_PAGES = [{
   short: 'Map',
   group: 'map'
 }, {
-  id: 'hiking',
-  icon: Icons.mountain,
-  label: 'Hiking',
-  short: 'Hike',
-  group: 'map'
-}, {
   id: 'comms',
   icon: Icons.messages,
   label: 'Messages',
@@ -14689,7 +14943,6 @@ function App() {
     nodes: ['mesh', 'telemetry'],
     topology: ['mesh'],
     map: ['mesh', 'map'],
-    hiking: ['mesh', 'map'],
     navigate: ['mesh'],
     power: ['system'],
     alerts: ['mesh', 'chat'],
@@ -14869,6 +15122,15 @@ function App() {
     return fullOrder.map(id => DEFAULT_PAGES.find(p => p.id === id)).filter(p => p && !hiddenPages.includes(p.id));
   }, [sidebarOrder, hiddenPages]);
 
+  // Same full order, but including hidden pages — feeds the Settings reorder
+  // list, where order and visibility are edited as two separate controls.
+  const sidebarFullOrder = useMemo(() => {
+    const allIds = DEFAULT_PAGES.map(p => p.id);
+    const order = sidebarOrder || allIds;
+    const fullOrder = [...order, ...allIds.filter(id => !order.includes(id))];
+    return fullOrder.map(id => DEFAULT_PAGES.find(p => p.id === id)).filter(Boolean);
+  }, [sidebarOrder]);
+
   // Sidebar drag-and-drop handlers
   // Drop is handled at the <nav> level so releasing over a divider still works.
   function handleDragStart(e, pageId) {
@@ -14963,6 +15225,22 @@ function App() {
     persistUiPrefs({
       sidebar_order: '[]'
     });
+  }
+  // Touch-friendly alternative to dragging sidebar icons — HTML5 drag-and-drop
+  // (below) doesn't fire from touch on iOS Safari and most other mobile
+  // browsers, so this is the only way to reorder pages on a phone.
+  function moveSidebarPage(pageId, direction) {
+    const ids = sidebarFullOrder.map(p => p.id);
+    const i = ids.indexOf(pageId);
+    const j = i + direction;
+    if (i === -1 || j < 0 || j >= ids.length) return;
+    const next = [...ids];
+    [next[i], next[j]] = [next[j], next[i]];
+    setSidebarOrder(next);
+    localStorage.setItem('sidebarOrder', JSON.stringify(next));
+    api.put('/api/settings', {
+      sidebar_order: JSON.stringify(next)
+    }).catch(() => {});
   }
   const hasAlerts = alerts.filter(a => !a.acknowledged).length > 0;
   return /*#__PURE__*/React.createElement(SettingsContext.Provider, {
@@ -15115,10 +15393,6 @@ function App() {
     device: device,
     gpsStatus: gpsStatus,
     onRemoveTracker: id => api.del(`/api/tracker/devices/${id}`).then(() => setTrackerDevices(prev => prev.filter(d => d.id !== id)))
-  }), page === 'hiking' && /*#__PURE__*/React.createElement(HikingSection, {
-    nodes: nodes,
-    device: device,
-    gpsStatus: gpsStatus
   }), page === 'comms' && /*#__PURE__*/React.createElement(CommsSection, {
     messages: messages,
     alerts: alerts,
@@ -15135,6 +15409,8 @@ function App() {
     onHiddenPagesChange: updateHiddenPages,
     onResetSidebarOrder: resetSidebarOrder,
     defaultPages: DEFAULT_PAGES,
+    sidebarFullOrder: sidebarFullOrder,
+    onMoveSidebarPage: moveSidebarPage,
     nodes: nodes
   }), page === 'ai' && /*#__PURE__*/React.createElement(AIPage, null), isAtlasMobileApp && /*#__PURE__*/React.createElement("nav", {
     style: {

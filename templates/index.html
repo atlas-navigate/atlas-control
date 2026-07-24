@@ -648,6 +648,7 @@ tr:hover td { background: rgba(255,255,255,0.03); }
 }
 .contact-item:hover .contact-rename-btn { opacity: 1; }
 .contact-rename-btn:hover { color: var(--accent-cyan); }
+.contact-rename-btn.confirm-delete { opacity: 1; color: var(--accent-red); background: rgba(255,90,90,0.14); }
 .channel-icon {
   width: 22px; height: 22px; border-radius: 6px;
   display: flex; align-items: center; justify-content: center;
@@ -728,7 +729,8 @@ tr:hover td { background: rgba(255,255,255,0.03); }
   display: flex; align-items: center; gap: 10px;
   flex-shrink: 0;
 }
-.chat-header-name { font-size: 16px; font-weight: 700; letter-spacing: -0.02em; }
+.chat-header-title-wrap { min-width: 0; flex: 1; }
+.chat-header-name { font-size: 16px; font-weight: 700; letter-spacing: -0.02em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-header-sub { font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); }
 .chat-messages {
   flex: 1; overflow-y: auto;
@@ -862,6 +864,8 @@ tr:hover td { background: rgba(255,255,255,0.03); }
   padding: 24px;
   width: 320px;
   box-shadow: var(--shadow);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
 }
 .rename-modal h3 { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
 .rename-modal p { font-size: 12px; color: var(--text-muted); margin-bottom: 16px; }
@@ -923,6 +927,7 @@ tr:hover td { background: rgba(255,255,255,0.03); }
 }
 .btn-primary:hover { filter: brightness(1.03); }
 .btn-sm { padding: 7px 12px; font-size: 11px; }
+.kb-doc-delete-btn { padding: 2px 8px; }
 
 /* ── Power toggle switch ── */
 .power-toggle { display:inline-flex; align-items:center; cursor:pointer; gap:10px; user-select:none; }
@@ -933,12 +938,13 @@ tr:hover td { background: rgba(255,255,255,0.03); }
   transition:background 200ms, border-color 200ms;
 }
 .power-toggle-track::after {
-  content:''; position:absolute; top:3px; left:3px;
+  content:''; position:absolute; top:50%; left:3px;
   width:16px; height:16px; border-radius:50%;
-  background:var(--text-muted); transition:transform 200ms, background 200ms;
+  background:var(--text-muted); transform:translateY(-50%);
+  transition:transform 200ms, background 200ms;
 }
 .power-toggle input:checked + .power-toggle-track { background:var(--accent-green); border-color:var(--accent-green); }
-.power-toggle input:checked + .power-toggle-track::after { transform:translateX(20px); background:#fff; }
+.power-toggle input:checked + .power-toggle-track::after { transform:translate(20px, -50%); background:#fff; }
 
 /* ── Alerts ── */
 .alert-item {
@@ -1034,6 +1040,11 @@ tr:hover td { background: rgba(255,255,255,0.03); }
 .settings-grid-2 {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.settings-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
   gap: 12px;
 }
 .settings-actions {
@@ -1211,6 +1222,19 @@ button, .btn, .tab-btn, .sidebar-btn, .contact-item, label.power-toggle {
   border: 1px solid transparent;
 }
 .ai-chat-item:hover { background: rgba(255,255,255,0.035); border-color: rgba(255,255,255,0.06); }
+.ai-chat-input-row { padding: 10px 14px; }
+.settings-disclosure-toggle {
+  display: flex; align-items: center; justify-content: space-between;
+  cursor: pointer; user-select: none;
+  padding: 4px 0;
+}
+.ai-settings-save-bar {
+  position: sticky; bottom: 0;
+  padding: 12px 16px;
+  background: linear-gradient(180deg, rgba(10,17,28,0), rgba(10,17,28,0.92) 30%);
+  backdrop-filter: blur(8px);
+  display: flex; align-items: center; gap: 12px; flex-shrink: 0;
+}
 
 /* ── Named responsive grid utilities ── */
 .power-charts-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
@@ -1225,6 +1249,10 @@ button, .btn, .tab-btn, .sidebar-btn, .contact-item, label.power-toggle {
 .nav-directions-wrapper { width: 272px; flex-shrink: 0; display: flex; flex-direction: column; gap: 0; }
 .nav-directions-panel { max-height: none !important; overflow-y: auto; opacity: 1 !important; transition: none; display: flex; flex-direction: column; gap: 8px; }
 .nav-map-directions { flex-direction: row; }
+/* Wraps NavigatePage's search bar + favorites panel. Plain stack on desktop
+   (mirrors the gap nav-page-root used to provide directly); floats over the
+   full-bleed map on mobile — see the ≤768px block below. */
+.nav-top-overlay { display: flex; flex-direction: column; gap: 12px; }
 
 /* ══════════════════════════════════════════════
    MOBILE RESPONSIVE  (≤768px)
@@ -1294,7 +1322,7 @@ button, .btn, .tab-btn, .sidebar-btn, .contact-item, label.power-toggle {
 
   /* ── Page & cards ── */
   .card { padding: 16px; border-radius: 18px; }
-  .settings-grid-2, .device-identity-grid { grid-template-columns: 1fr; }
+  .settings-grid-2, .settings-grid-3, .device-identity-grid { grid-template-columns: 1fr; }
   .settings-actions { flex-direction: column; align-items: flex-start; }
 
   /* ── Sub-tab bars: bigger, evenly spread thumb targets ── */
@@ -1318,61 +1346,120 @@ button, .btn, .tab-btn, .sidebar-btn, .contact-item, label.power-toggle {
   /* ── Always single-column on mobile ── */
   .two-col { grid-template-columns: 1fr; }
 
-  /* ── Messages: contacts on top, chat below ── */
+  /* ── Messages: single-pane swap (list ⇄ chat). Only one of .contacts-panel /
+     .chat-panel is mounted at a time via JSX (compact + mobileView), so each
+     simply fills the available space when present — replaces the old
+     always-stacked accordion. ── */
   .messages-page-wrap { padding: 12px; }
   .messages-layout { flex-direction: column; }
   .contacts-panel {
     width: 100%; min-width: 0;
-    margin-right: 0; margin-bottom: 10px;
-    flex-shrink: 0;
+    margin-right: 0; margin-bottom: 0;
+    flex: 1; min-height: 0;
   }
-  .contacts-panel-toggle {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 8px 12px; cursor: pointer;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
-    flex-shrink: 0;
-    user-select: none;
-  }
-  .contacts-panel-toggle-label {
-    font-size: 11px; font-weight: 600; text-transform: uppercase;
-    letter-spacing: 0.07em; color: var(--text-muted);
-  }
-  .contacts-panel-toggle svg { color: var(--text-muted); transition: transform 200ms; }
-  .contacts-panel-toggle.open svg { transform: rotate(180deg); }
   .contacts-panel-body {
-    overflow-y: auto; max-height: 220px;
-    transition: max-height 250ms ease, opacity 200ms;
+    flex: 1; min-height: 0;
+    overflow-y: auto;
   }
-  .contacts-panel-body.closed { max-height: 0; overflow: hidden; opacity: 0; }
-  .chat-panel { flex: 1; min-height: 0; }
+  .chat-panel { width: 100%; flex: 1; min-height: 0; }
   .chat-bubble-stack { max-width: 85%; }
 
-  /* ── Enable mobile-only collapse toggles ── */
-  .contacts-panel-toggle { display: flex; }
-  .contacts-panel-body { max-height: 220px !important; transition: max-height 250ms ease, opacity 200ms; }
-  .contacts-panel-body.closed { max-height: 0 !important; overflow: hidden; opacity: 0; }
+  /* Rename/edit/invite/delete icons on contact rows rely on :hover to reveal
+     themselves — touchscreens have no equivalent, so they're otherwise
+     invisible and undiscoverable. Show them (dimmed) and grow the tap target. */
+  .contact-rename-btn {
+    opacity: 0.55; padding: 8px; min-width: 32px; min-height: 32px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .chat-bubble-meta { flex-wrap: wrap; row-gap: 2px; }
 
-  /* ── Nav: stack directions below map on mobile ── */
-  .nav-map-directions { flex-direction: column !important; }
-  .nav-directions-wrapper { width: 100% !important; flex-shrink: 0; }
+  .chat-back-btn {
+    display: flex; align-items: center; justify-content: center;
+    width: 36px; height: 36px; min-width: 36px;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.07);
+    background: rgba(255,255,255,0.03);
+    color: var(--text-primary);
+    cursor: pointer;
+    flex-shrink: 0;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .chat-header .btn-sm { white-space: nowrap; flex-shrink: 0; }
+  .chat-input-area .btn-primary {
+    min-width: 44px; min-height: 44px;
+    padding: 10px;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  /* ── Touch press feedback — :hover never fires on touch, so taps had
+     zero visual feedback before this ── */
+  .contact-item:active { background: rgba(255,255,255,0.065); }
+  .btn:active { transform: scale(0.97); }
+  .contact-rename-btn:active { opacity: 1; transform: scale(0.9); }
+  .chat-back-btn:active { transform: scale(0.93); background: rgba(255,255,255,0.06); }
+  .contacts-add-btn:active { color: var(--accent-green); }
+
+  /* ── Nav: map goes full-bleed; search + directions float over it instead
+     of sharing layout space (was: toolbar above the map, drawer below it) ── */
+  .nav-page-root { position: relative; overflow: hidden; }
+  .nav-map-directions { flex-direction: column !important; position: absolute !important; inset: 0; }
+
+  .nav-top-overlay {
+    position: absolute; top: 8px; left: 8px; right: 8px; z-index: 30;
+    max-height: 60vh; overflow-y: auto;
+  }
+  /* Every button floating over the map gets a real touch target, including
+     the ones that predate .btn/.btn-sm and carry only inline padding. */
+  .nav-top-overlay .btn,
+  .nav-top-overlay button { min-height: 44px; box-sizing: border-box; }
+
+  .nav-directions-wrapper {
+    position: absolute !important; left: 0; right: 0; bottom: 0; z-index: 25;
+    width: 100% !important; flex-shrink: 0;
+    background: var(--bg-card);
+    backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+    border: 1px solid var(--border); border-bottom: none;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
   .nav-directions-toggle {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 12px;
+    padding: 13px 16px;
     width: 100%;
     box-sizing: border-box;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    margin-top: 4px;
+    min-height: 44px;
   }
   .nav-directions-panel {
     width: 100% !important; flex-shrink: 0;
-    max-height: 240px !important; overflow-y: auto;
+    max-height: 50dvh !important; overflow-y: auto;
+    padding: 0 4px;
     transition: max-height 250ms ease, opacity 200ms;
   }
   .nav-directions-panel.closed { max-height: 0 !important; overflow: hidden; opacity: 0; }
+
+  /* ── Map section's Map/Road-Nav switch: compact centered pill instead of
+     a full-width underline tab bar, so it costs less vertical space ── */
+  .map-nav-tabbar {
+    justify-content: center; gap: 6px; padding: 8px 12px;
+    background: transparent; border-bottom: none; backdrop-filter: none;
+  }
+  .map-nav-tabbar .page-tab-btn {
+    flex: 0 1 auto; min-height: 0;
+    padding: 7px 16px;
+    border: 1px solid var(--border); border-bottom: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--bg-card);
+    margin-bottom: 0;
+  }
+  .map-nav-tabbar .page-tab-btn.active {
+    border-color: var(--accent-green);
+    background: var(--accent-green-dim);
+    text-shadow: none;
+  }
 
   /* ── AI chat item timestamp truncation ── */
   .ai-chat-item .ai-chat-ts {
@@ -1383,6 +1470,7 @@ button, .btn, .tab-btn, .sidebar-btn, .contact-item, label.power-toggle {
   table { font-size: 12px; }
   th, td { padding: 7px 8px; }
   .nodes-col-hw, .nodes-col-chutil, .nodes-col-dist { display: none; }
+  .power-col-voltage, .power-col-uptime { display: none; }
 
   /* ── Modals ── */
   .rename-modal { width: calc(100vw - 32px); padding: 18px; }
@@ -1410,23 +1498,46 @@ button, .btn, .tab-btn, .sidebar-btn, .contact-item, label.power-toggle {
     gap: 8px !important;
   }
 
-  /* ── AI page → stacked vertically on mobile ── */
+  /* ── AI page → mobile list/chat pane-swap (mirrors Messages page's
+     compact/mobileView pattern). Only one of .ai-sidebar / the chat+tab
+     content area is mounted at a time, so .ai-sidebar is now a full-screen
+     "list" pane when visible, not a permanent strip above the chat. ── */
   .ai-layout { flex-direction: column; }
   .ai-sidebar {
-    width: 100%; height: 80px; flex-shrink: 0;
-    border-right: none; border-bottom: 1px solid var(--border);
-    flex-direction: row; align-items: stretch;
+    width: 100%; height: 100%; flex-shrink: 0;
+    background: transparent;
+    border-right: none; border-bottom: none;
+    flex-direction: column; align-items: stretch;
   }
+  /* The light-theme sidebar gradient (defined near the top of the stylesheet)
+     has higher specificity than the plain .ai-sidebar rule above and would
+     otherwise win regardless of source order — match its specificity here
+     so this later rule wins the tie-break and stays transparent on mobile. */
+  :root[data-theme="light"] .ai-sidebar { background: transparent; }
   .ai-sidebar-header {
-    padding: 8px; border-bottom: none; border-right: 1px solid var(--border);
+    padding: 12px; border-bottom: 1px solid var(--border); border-right: none;
     display: flex; align-items: center;
   }
   .ai-sidebar-body {
-    overflow-y: hidden; overflow-x: auto; padding: 4px 6px;
-    display: flex; flex-direction: row; align-items: center; gap: 4px;
+    flex: 1; overflow-y: auto; overflow-x: hidden; padding: 6px;
+    display: flex; flex-direction: column; align-items: stretch; gap: 2px;
   }
-  .ai-sidebar-footer { display: none; }
-  .ai-chat-item { flex-shrink: 0; width: 130px; margin-bottom: 0 !important; height: 64px; }
+  .ai-chat-item { width: 100%; height: auto; flex-shrink: 0; }
+  .knowledge-map-svg { width: 100%; max-width: 560px; height: auto; }
+
+  /* ── Ray chat input: 44px touch target for send + safe-area bottom inset ── */
+  .ai-chat-input-row { padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0)); }
+  .ai-chat-input-row .btn-primary {
+    min-width: 44px; min-height: 44px;
+    padding: 10px;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  /* ── KB document delete: real touch target instead of a cramped inline pad ── */
+  .kb-doc-delete-btn { padding: 8px 12px; min-height: 36px; min-width: 40px; }
+
+  /* ── Settings sticky save bar: honor the iOS home-indicator gesture area ── */
+  .ai-settings-save-bar { padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0)); }
 
   /* ── Responsive named grids ── */
   .power-charts-grid { grid-template-columns: 1fr; }
@@ -1456,8 +1567,6 @@ button, .btn, .tab-btn, .sidebar-btn, .contact-item, label.power-toggle {
   .page { padding: 8px; }
   .messages-page-wrap { padding: 8px; }
   .topo-container { height: 260px; }
-  .ai-sidebar { height: 60px; }
-  .ai-chat-item { height: 44px; }
 }
 </style>
 </head>
@@ -2058,6 +2167,10 @@ const DEFAULT_DASH_WIDGETS = [
   { id: 'active_alerts',   label: 'Active Alerts',         enabled: true },
 ];
 
+// Shown up top, always expanded, on phones — "is my gear working right now."
+// Everything else collapses into the Network Details accordion on mobile.
+const DASH_HERO_WIDGET_IDS = ['stat_atlas_status', 'stat_atlas_battery'];
+
 function useDashWidgets() {
   const migrateWidgets = (stored) => {
     if (!Array.isArray(stored)) return null;
@@ -2111,6 +2224,8 @@ function DashboardPage({ stats, nodes, messages, alerts, setPage, device, gpsSta
   const enabledWidgets = widgets.filter(w => w.enabled);
   const statWidgets = enabledWidgets.filter(w => w.id.startsWith('stat_'));
   const contentWidgets = enabledWidgets.filter(w => !w.id.startsWith('stat_'));
+  const compact = isSmallScreen();
+  const [detailsOpen, setDetailsOpen] = React.useState(() => !isSmallScreen());
 
   const recentAlerts = alerts.filter(a => !a.acknowledged).slice(0, 5);
   const recentMsgs   = messages.slice(0, 5);
@@ -2552,39 +2667,85 @@ function DashboardPage({ stats, nodes, messages, alerts, setPage, device, gpsSta
       </div>
 
       {/* Widgets in user-configured order */}
-      <div style={{display:'flex',flexDirection:'column',gap:16}}>
-        {statWidgets.length > 0 && (
-          <div className="dash-grid">
-            {statWidgets.map(w => renderStatWidget(w.id))}
+      {enabledWidgets.length === 0 ? (
+        <div className="card" style={{padding:20}}>
+          <div className="card-header">
+            <div className="card-title">Dashboard Hidden</div>
           </div>
-        )}
-        {enabledWidgets.length > 0 ? (
-          contentWidgets.map(w => renderWidget(w.id))
-        ) : (
-          <div className="card" style={{padding:20}}>
-            <div className="card-header">
-              <div className="card-title">Dashboard Hidden</div>
-            </div>
-            <div style={{color:'var(--text-muted)',fontSize:13,marginBottom:14}}>
-              All dashboard widgets are currently disabled on this device, so the dashboard has nothing to render.
-            </div>
-            <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
-              <button
-                className="btn btn-sm btn-primary"
-                onClick={() => {
-                  reset();
-                  setCustomizing(false);
-                }}
-              >
-                Reset Dashboard
-              </button>
-              <button className="btn btn-sm" onClick={() => setCustomizing(true)}>
-                Customize Widgets
-              </button>
-            </div>
+          <div style={{color:'var(--text-muted)',fontSize:13,marginBottom:14}}>
+            All dashboard widgets are currently disabled on this device, so the dashboard has nothing to render.
           </div>
-        )}
-      </div>
+          <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+            <button
+              className="btn btn-sm btn-primary"
+              onClick={() => {
+                reset();
+                setCustomizing(false);
+              }}
+            >
+              Reset Dashboard
+            </button>
+            <button className="btn btn-sm" onClick={() => setCustomizing(true)}>
+              Customize Widgets
+            </button>
+          </div>
+        </div>
+      ) : compact ? (() => {
+        /* ── Phone: hero status up top (is my gear working?), everything else collapsed below ── */
+        const heroStats = statWidgets.filter(w => DASH_HERO_WIDGET_IDS.includes(w.id));
+        const restStats = statWidgets.filter(w => !DASH_HERO_WIDGET_IDS.includes(w.id));
+        const activeAlertsWidget = contentWidgets.find(w => w.id === 'active_alerts');
+        const restContent = contentWidgets.filter(w => w.id !== 'active_alerts');
+        return (
+          <div style={{display:'flex',flexDirection:'column',gap:16}}>
+            {heroStats.length > 0 && (
+              <div className="dash-grid">
+                {heroStats.map(w => renderStatWidget(w.id))}
+              </div>
+            )}
+            {activeAlertsWidget && renderWidget('active_alerts')}
+            {(restStats.length > 0 || restContent.length > 0) && (
+              <div className="card" style={{padding:0,overflow:'hidden'}}>
+                <div
+                  onClick={() => setDetailsOpen(o => !o)}
+                  style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 16px',cursor:'pointer'}}
+                >
+                  <div style={{fontSize:13,fontWeight:600,color:'var(--text-primary)'}}>Network Details</div>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+                    style={{color:'var(--text-muted)',transition:'transform 200ms',transform: detailsOpen ? 'rotate(180deg)' : 'none'}}>
+                    <polyline points="6 9 12 15 18 9"/>
+                  </svg>
+                </div>
+                <div style={{
+                  maxHeight: detailsOpen ? '4000px' : '0px',
+                  opacity: detailsOpen ? 1 : 0,
+                  transition: 'max-height 300ms ease, opacity 200ms ease',
+                  overflow: 'hidden',
+                }}>
+                  <div style={{display:'flex',flexDirection:'column',gap:16,padding:'0 16px 16px'}}>
+                    {restStats.length > 0 && (
+                      <div className="dash-grid">
+                        {restStats.map(w => renderStatWidget(w.id))}
+                      </div>
+                    )}
+                    {restContent.map(w => renderWidget(w.id))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })() : (
+        /* ── Desktop: unchanged ── */
+        <div style={{display:'flex',flexDirection:'column',gap:16}}>
+          {statWidgets.length > 0 && (
+            <div className="dash-grid">
+              {statWidgets.map(w => renderStatWidget(w.id))}
+            </div>
+          )}
+          {contentWidgets.map(w => renderWidget(w.id))}
+        </div>
+      )}
     </div>
   );
 }
@@ -2718,7 +2879,7 @@ function ChannelModal({ existing, takenNums, onSave, onClose }) {
   if (shareData) {
     return (
       <div className="rename-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-        <div className="rename-modal" style={{width:400}}>
+        <div className="rename-modal" style={{width:'min(400px, calc(100vw - 32px))'}}>
           <h3>Channel Ready</h3>
           <p style={{marginBottom:12}}>
             Atlas created <span style={{color:'var(--text-primary)',fontWeight:700}}>{name.trim()}</span> on channel {num}. Share this invite with the other nodes you want to add.
@@ -2766,7 +2927,7 @@ function ChannelModal({ existing, takenNums, onSave, onClose }) {
 
   return (
     <div className="rename-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="rename-modal" style={{width:400}}>
+      <div className="rename-modal" style={{width:'min(400px, calc(100vw - 32px))'}}>
         <h3>{title}</h3>
         <p style={{marginBottom:12}}>
           {editMode
@@ -2887,7 +3048,7 @@ function ChannelShareModal({ channel, onClose }) {
 
   return (
     <div className="rename-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="rename-modal" style={{width:380}}>
+      <div className="rename-modal" style={{width:'min(380px, calc(100vw - 32px))'}}>
         <h3>Invite Nodes</h3>
         <p style={{marginBottom:12}}>
           Add another node to <span style={{color:'var(--text-primary)',fontWeight:600}}>{channel.name}</span> by sharing this invite.
@@ -2938,17 +3099,19 @@ function ChannelShareModal({ channel, onClose }) {
 // Messages Page
 // ═══════════════════════════════════════════════
 function MessagesPage({ messages, nodes, device, refresh }) {
+  const compact = isSmallScreen();
   const [selection, setSelection] = useState({ type: 'channel', num: 0 });
   const [text, setText] = useState('');
   const [channels, setChannels] = useState([]);
   const [dmDiagnostics, setDmDiagnostics] = useState(null);
   const [dmDiagnosticsOpen, setDmDiagnosticsOpen] = useState(false);
   const [contactsOpen, setContactsOpen] = useState(() => !isSmallScreen());
+  const [mobileView, setMobileView] = useState('list');         // 'list' | 'chat' — mobile-only single-pane swap
   const [renameTarget, setRenameTarget] = useState(null);       // node for contact rename
   const [channelModal, setChannelModal] = useState(null);       // null | 'new' | channel obj
   const [channelShare, setChannelShare] = useState(null);       // null | channel obj
+  const [confirmDeleteNum, setConfirmDeleteNum] = useState(null); // channel num armed for delete confirm
   const [aliases, setAliases] = useState({});
-  const [sendError, setSendError] = useState(null);
   const [sendStatus, setSendStatus] = useState(null);
   const [sending, setSending] = useState(false);
   const [dmLastRead, setDmLastRead] = useState(() => {
@@ -3078,6 +3241,12 @@ function MessagesPage({ messages, nodes, device, refresh }) {
   }, [sendStatus]);
 
   useEffect(() => {
+    if (!confirmDeleteNum) return undefined;
+    const timer = setTimeout(() => setConfirmDeleteNum(null), 3000);
+    return () => clearTimeout(timer);
+  }, [confirmDeleteNum]);
+
+  useEffect(() => {
     if (selection.type !== 'node' || !selection.nodeId) return;
     const latestIncomingTs = conversation.reduce((latest, m) => {
       if (m.is_direct && m.from_id === selection.nodeId) return Math.max(latest, Number(m.rx_time || 0));
@@ -3128,7 +3297,6 @@ function MessagesPage({ messages, nodes, device, refresh }) {
   const send = async () => {
     if (!text.trim()) return;
     setSending(true);
-    setSendError(null);
     setSendStatus(null);
     const payload = selection.type === 'node'
       ? { text: text.trim(), destination: selection.nodeId, channel: 0 }
@@ -3148,7 +3316,6 @@ function MessagesPage({ messages, nodes, device, refresh }) {
       refresh();
     } catch (err) {
       const message = err?.message || 'Message send failed';
-      setSendError(message);
       setSendStatus({
         kind: 'error',
         text: `Send failed: ${message}`,
@@ -3183,6 +3350,12 @@ function MessagesPage({ messages, nodes, device, refresh }) {
     </svg>
   );
 
+  const BackIcon = () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="15 18 9 12 15 6"/>
+    </svg>
+  );
+
   return (
     <div className="page messages-page-wrap">
 
@@ -3207,17 +3380,22 @@ function MessagesPage({ messages, nodes, device, refresh }) {
       )}
 
       <div className="messages-layout">
-        {/* ── Left panel ── */}
+        {/* ── Left panel ──
+             Desktop: always mounted, side-by-side.
+             Mobile: mounted only while mobileView === 'list' (single-pane swap). */}
+        {(!compact || mobileView === 'list') && (
         <div className="contacts-panel">
 
-          {/* Mobile collapse toggle */}
+          {/* Mobile collapse toggle — desktop only; the mobile pane-swap replaces its job */}
+          {!compact && (
           <div className={`contacts-panel-toggle ${contactsOpen ? 'open' : ''}`}
             onClick={() => setContactsOpen(o => !o)}>
             <span className="contacts-panel-toggle-label">Channels &amp; Messages</span>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
           </div>
+          )}
 
-          <div className={`contacts-panel-body ${contactsOpen ? '' : 'closed'}`}>
+          <div className={compact ? 'contacts-panel-body' : `contacts-panel-body ${contactsOpen ? '' : 'closed'}`}>
           {/* Channels section */}
           <div className="contacts-section-label">
             <span>Channels</span>
@@ -3242,7 +3420,7 @@ function MessagesPage({ messages, nodes, device, refresh }) {
             return (
               <div key={ch.channel_num}
                 className={`contact-item ${isSel ? 'active' : ''}`}
-                onClick={() => setSelection({ type: 'channel', num: ch.channel_num })}>
+                onClick={() => { setSelection({ type: 'channel', num: ch.channel_num }); if (compact) setMobileView('chat'); }}>
                 <div className="channel-icon" style={{background: color + '22', color}}>
                   {ch.channel_num}
                 </div>
@@ -3258,8 +3436,19 @@ function MessagesPage({ messages, nodes, device, refresh }) {
                   </svg>
                 </button>
                 {ch.channel_num !== 0 && (
-                  <button className="contact-rename-btn" title="Remove" style={{marginLeft:0}}
-                    onClick={e => { e.stopPropagation(); deleteChannel(ch.channel_num); }}>
+                  <button
+                    className={`contact-rename-btn ${confirmDeleteNum === ch.channel_num ? 'confirm-delete' : ''}`}
+                    title={confirmDeleteNum === ch.channel_num ? 'Tap again to delete' : 'Remove'}
+                    style={{marginLeft:0}}
+                    onClick={e => {
+                      e.stopPropagation();
+                      if (confirmDeleteNum === ch.channel_num) {
+                        setConfirmDeleteNum(null);
+                        deleteChannel(ch.channel_num);
+                      } else {
+                        setConfirmDeleteNum(ch.channel_num);
+                      }
+                    }}>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6m4-6v6"/><path d="M9 6V4h6v2"/>
                     </svg>
@@ -3285,7 +3474,7 @@ function MessagesPage({ messages, nodes, device, refresh }) {
             return (
               <div key={node.node_id}
                 className={`contact-item ${isSel ? 'active' : ''}`}
-                onClick={() => setSelection({ type: 'node', nodeId: node.node_id })}>
+                onClick={() => { setSelection({ type: 'node', nodeId: node.node_id }); if (compact) setMobileView('chat'); }}>
                 <div className="channel-icon" style={{background:'var(--accent-blue-dim)', color:'var(--accent-blue)'}}>
                   @
                 </div>
@@ -3304,10 +3493,20 @@ function MessagesPage({ messages, nodes, device, refresh }) {
           })}
           </div>{/* end contacts-panel-body */}
         </div>
+        )}
 
-        {/* ── Chat panel ── */}
+        {/* ── Chat panel ──
+             Desktop: always mounted. Mobile: mounted only once a conversation is active. */}
+        {(!compact || mobileView === 'chat') && (
         <div className="chat-panel">
           <div className="chat-header">
+            {compact && (
+              <button type="button" className="chat-back-btn"
+                onClick={() => setMobileView('list')}
+                aria-label="Back to conversations" title="Back to conversations">
+                <BackIcon/>
+              </button>
+            )}
             {selection.type === 'node' ? (
               <>
                 <div className="channel-icon" style={{
@@ -3317,7 +3516,7 @@ function MessagesPage({ messages, nodes, device, refresh }) {
                 }}>
                   @
                 </div>
-                <div>
+                <div className="chat-header-title-wrap">
                   {dmDiagnostics ? (
                     <button
                       className="chat-header-name"
@@ -3351,7 +3550,7 @@ function MessagesPage({ messages, nodes, device, refresh }) {
               }}>
                 {selection.num}
               </div>
-              <div>
+              <div className="chat-header-title-wrap">
                 <div className="chat-header-name">{channelName(selection.num)}</div>
                 <div className="chat-header-sub">Channel {selection.num} · broadcast</div>
               </div>
@@ -3448,7 +3647,7 @@ function MessagesPage({ messages, nodes, device, refresh }) {
                 : `Message ${channelName(selection.num)}...`}
               onKeyDown={e => e.key === 'Enter' && send()}
             />
-            <button className="btn btn-primary" onClick={send} disabled={sending}>{Icons.send}</button>
+            <button className="btn btn-primary" onClick={send} disabled={sending} aria-label="Send message" title="Send message">{Icons.send}</button>
           </div>
           {sendStatus && (
             <div style={{
@@ -3459,12 +3658,8 @@ function MessagesPage({ messages, nodes, device, refresh }) {
               {sendStatus.text}
             </div>
           )}
-          {sendError && (
-            <div style={{padding:'0 14px 12px', fontSize:12, color:'var(--accent-red)'}}>
-              {sendError}
-            </div>
-          )}
         </div>
+        )}
       </div>
     </div>
   );
@@ -3549,6 +3744,7 @@ function NodesPage({ nodes, device }) {
   useEffect(() => {
     if (!selected || !telemetry.length || !canvasRef.current) return;
     drawChart(canvasRef.current, telemetry);
+    return watchCanvasResize(canvasRef.current, () => canvasRef.current && drawChart(canvasRef.current, telemetry));
   }, [telemetry, selected]);
 
   return (
@@ -3699,7 +3895,10 @@ function TopologyPage({ nodes }) {
     const raf = requestAnimationFrame(() => {
       if (canvasRef.current) drawTopology(canvasRef.current, mergedTopo);
     });
-    return () => cancelAnimationFrame(raf);
+    const stopWatching = watchCanvasResize(canvasRef.current, () => {
+      if (canvasRef.current) drawTopology(canvasRef.current, mergedTopo);
+    });
+    return () => { cancelAnimationFrame(raf); stopWatching(); };
   }, [mergedTopo, visible]);
 
   return (
@@ -4465,9 +4664,15 @@ function PowerPage({ nodes }) {
 
   useEffect(() => {
     if (!telemetry.length) return;
-    if (batCanvasRef.current) drawSingleChart(batCanvasRef.current, telemetry, 'battery_level', 'Battery %', 'var(--accent-green)', 0, 100);
-    if (voltCanvasRef.current) drawSingleChart(voltCanvasRef.current, telemetry, 'voltage', 'Voltage (V)', 'var(--accent-amber)', 2.5, 4.5);
-    if (utilCanvasRef.current) drawSingleChart(utilCanvasRef.current, telemetry, 'channel_util', 'Ch Util %', 'var(--accent-cyan)', 0, 50);
+    const redraw = () => {
+      if (batCanvasRef.current) drawSingleChart(batCanvasRef.current, telemetry, 'battery_level', 'Battery %', 'var(--accent-green)', 0, 100);
+      if (voltCanvasRef.current) drawSingleChart(voltCanvasRef.current, telemetry, 'voltage', 'Voltage (V)', 'var(--accent-amber)', 2.5, 4.5);
+      if (utilCanvasRef.current) drawSingleChart(utilCanvasRef.current, telemetry, 'channel_util', 'Ch Util %', 'var(--accent-cyan)', 0, 50);
+    };
+    redraw();
+    const stops = [batCanvasRef.current, voltCanvasRef.current, utilCanvasRef.current]
+      .filter(Boolean).map(c => watchCanvasResize(c, redraw));
+    return () => stops.forEach(stop => stop());
   }, [telemetry]);
 
   const nodesSorted = useMemo(() =>
@@ -4483,7 +4688,7 @@ function PowerPage({ nodes }) {
         </div>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Node</th><th>Battery</th><th>Voltage</th><th>Uptime</th><th>Status</th></tr></thead>
+            <thead><tr><th>Node</th><th>Battery</th><th className="power-col-voltage">Voltage</th><th className="power-col-uptime">Uptime</th><th>Status</th></tr></thead>
             <tbody>
               {nodesSorted.map(n => (
                 <tr key={n.node_id}>
@@ -4500,8 +4705,8 @@ function PowerPage({ nodes }) {
                       </div>
                     ) : '—'}
                   </td>
-                  <td className="mono">{n.voltage ? `${n.voltage}V` : '—'}</td>
-                  <td className="mono" style={{fontSize:12}}>{n.uptime ? `${Math.floor(n.uptime/3600)}h ${Math.floor((n.uptime%3600)/60)}m` : '—'}</td>
+                  <td className="mono power-col-voltage">{n.voltage ? `${n.voltage}V` : '—'}</td>
+                  <td className="mono power-col-uptime" style={{fontSize:12}}>{n.uptime ? `${Math.floor(n.uptime/3600)}h ${Math.floor((n.uptime%3600)/60)}m` : '—'}</td>
                   <td>{n.battery_level != null && n.battery_level < 20 ?
                     <span className="tag tag-red">LOW</span> :
                     n.battery_level != null ? <span className="tag tag-green">OK</span> : '—'
@@ -4516,7 +4721,7 @@ function PowerPage({ nodes }) {
       <div className="card">
         <div className="card-header">
           <div className="card-title">Power Trends</div>
-          <div style={{display:'flex',gap:8,alignItems:'center'}}>
+          <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
             <select value={selectedNode || ''} onChange={e => setSelectedNode(e.target.value)}
               style={{padding:'5px 10px',background:'var(--bg-input)',border:'1px solid var(--border)',borderRadius:'var(--radius)',color:'var(--text-primary)',fontSize:12}}>
               {nodes.map(n => <option key={n.node_id} value={n.node_id}>{n.alias || n.long_name}</option>)}
@@ -4604,7 +4809,7 @@ function AlertsPage({ alerts, refresh, setAlerts }) {
       <div className="card">
         <div className="card-header">
           <div className="card-title">Alerts ({unackedCount} active)</div>
-          <div style={{display:'flex',gap:8,alignItems:'center'}}>
+          <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
             {unackedCount > 0 && (
               <button className="btn btn-sm" onClick={ackAll} title="Acknowledge all active alerts">
                 {Icons.check} Ack All
@@ -4631,6 +4836,18 @@ function AlertsPage({ alerts, refresh, setAlerts }) {
 // ═══════════════════════════════════════════════
 // Canvas drawing helpers (no chart library needed)
 // ═══════════════════════════════════════════════
+// draw*() below size themselves once from canvas.parentElement's
+// getBoundingClientRect() at call time — with no resize awareness, rotating
+// the phone (or resizing a desktop window) leaves the canvas stale/clipped
+// at its old size until something else happens to trigger a redraw. This
+// keeps it in sync; a no-op if the container never resizes.
+function watchCanvasResize(canvas, redraw) {
+  if (!canvas || !canvas.parentElement || typeof ResizeObserver === 'undefined') return () => {};
+  const ro = new ResizeObserver(() => redraw());
+  ro.observe(canvas.parentElement);
+  return () => ro.disconnect();
+}
+
 function drawChart(canvas, telemetry) {
   const ctx = canvas.getContext('2d');
   const rect = canvas.parentElement.getBoundingClientRect();
@@ -5006,12 +5223,12 @@ function KnowledgeMap() {
         </div>
       </div>
       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
-        {data.nodes.length} docs · {data.edges.length} connections · Drag to reposition · Click to explore
+        {data.nodes.length} docs · {data.edges.length} connections · {isSmallScreen() ? 'Tap to explore' : 'Drag to reposition · Click to explore'}
       </div>
 
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {/* SVG graph */}
-        <svg ref={svgRef} width={W} height={H}
+        <svg ref={svgRef} width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="knowledge-map-svg"
           style={{ background: 'var(--bg-card, #1a1f2e)', borderRadius: 8, flexShrink: 0,
                    cursor: isDragging ? 'grabbing' : 'default' }}
           onMouseMove={onSVGMouseMove} onMouseUp={onSVGMouseUp} onMouseLeave={onSVGMouseUp}>
@@ -5064,6 +5281,9 @@ function KnowledgeMap() {
                 onMouseDown={ev => onNodeMouseDown(ev, n.id)}
                 onMouseEnter={() => setHoveredNode(n.id)}
                 onMouseLeave={() => setHoveredNode(null)}>
+                {/* Invisible larger hit-area — visible dot stays small/uncluttered,
+                    but a fingertip tap doesn't need to land on those few px. */}
+                <circle cx={pos.x} cy={pos.y} r={14} fill="transparent" />
                 {isSel && <circle cx={pos.x} cy={pos.y} r={13}
                   fill="none" stroke={n.color} strokeWidth={1.5} strokeOpacity={0.45} />}
                 <circle cx={pos.x} cy={pos.y}
@@ -5244,6 +5464,10 @@ function AIPage() {
   const [warmingUp, setWarmingUp] = useState(false);
   const [deletingChatId, setDeletingChatId] = useState(null);
   const [creatingChat, setCreatingChat] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [addDocOpen, setAddDocOpen] = useState(!isSmallScreen());
+  const compact = isSmallScreen();
+  const [mobileView, setMobileView] = useState('list'); // 'list' | 'chat' — mobile-only single-pane swap
   const chatEndRef = useRef(null);
   const aiReady = !!(status?.running && status?.ai_ready);
 
@@ -5255,7 +5479,7 @@ function AIPage() {
       return s;
     });
   }
-  function loadChats()  { return api.get('/api/ai/chats').then(setChats); }
+  function loadChats()  { return api.get('/api/ai/chats').then(list => { setChats(list); return list; }); }
   function loadDocs()   { return api.get('/api/ai/documents').then(setDocuments); }
   function loadSettings() { return api.get('/api/ai/settings').then(setSettings); }
 
@@ -5312,6 +5536,8 @@ function AIPage() {
       setChats(prev => [chat, ...prev]);
       setActiveChatId(chat.id);
       setMessages([]);
+      setTab('chat');
+      if (compact) setMobileView('chat');
     } finally {
       setCreatingChat(false);
     }
@@ -5466,16 +5692,13 @@ function AIPage() {
     return d.toLocaleDateString([], { month: 'short', day: 'numeric', timeZone: tz }) + ' ' +
            d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZone: tz });
   }
+  function fmtMsgTime(ts) {
+    if (!ts) return '';
+    const tz = resolveTz(tzSetting);
+    return new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZone: tz });
+  }
 
   // ── Render ─────────────────────────────────────
-  const tabBtnStyle = (active) => ({
-    padding: '6px 14px', borderRadius: 'var(--radius)',
-    border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 500,
-    background: active ? 'var(--accent-green-dim)' : 'transparent',
-    color: active ? 'var(--accent-green)' : 'var(--text-muted)',
-    transition: 'all 200ms',
-  });
-
   const inputStyle = {
     background: 'var(--bg-input)', border: '1px solid var(--border)',
     color: 'var(--text-primary)', borderRadius: 'var(--radius)',
@@ -5483,11 +5706,20 @@ function AIPage() {
   };
 
   const labelStyle = { fontSize: 12, color: 'var(--text-muted)', marginBottom: 4, display: 'block' };
+  const bubbleMaxWidth = isSmallScreen() ? '88%' : '78%';
+  // On mobile, tab panels shed the boxed "card" look (border/shadow/radius/
+  // distinct background) so the header and content read as one continuous
+  // screen instead of stacked boxes.
+  const mobileFlatCard = compact ? {
+    border: 'none', borderRadius: 0, boxShadow: 'none',
+    backdropFilter: 'none', WebkitBackdropFilter: 'none', background: 'transparent',
+  } : {};
 
   return (
     <div className="page ai-layout">
 
       {/* ── Left sidebar: chat list ── */}
+      {(!compact || mobileView === 'list') && (
       <div className="ai-sidebar">
         <div className="ai-sidebar-header">
           <div style={{ display:'flex', gap:8, width:'100%' }}>
@@ -5510,7 +5742,7 @@ function AIPage() {
             <div
               key={chat.id}
               className="ai-chat-item"
-              onClick={() => { setActiveChatId(chat.id); setTab('chat'); }}
+              onClick={() => { setActiveChatId(chat.id); setTab('chat'); if (compact) setMobileView('chat'); }}
               style={{
                 background: activeChatId === chat.id ? 'var(--bg-input)' : 'transparent',
                 borderLeft: activeChatId === chat.id ? '3px solid var(--accent-green)' : '3px solid transparent',
@@ -5569,36 +5801,61 @@ function AIPage() {
           </div>
         </div>
       </div>
+      )}
 
       {/* ── Right content area ── */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '16px' }}>
+      {(!compact || mobileView === 'chat') && (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: compact ? 0 : '16px' }}>
 
         {/* Header row */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexShrink: 0 }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--text-primary)' }}>Ray</div>
-            <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>
-              {warmingUp
-                ? `Loading ${settings.model || 'qwen2.5:3b'}…`
-                : aiReady
-                  ? `${settings.model || 'qwen2.5:3b'} · RAG ${settings.rag_enabled === 'true' ? 'on' : 'off'} · ${status?.doc_count || 0} docs`
-                  : status?.running
-                    ? `Starting Ray… ${status?.startup_phase || 'warming_up'}`
-                    : 'Ollama not reachable'}
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 4 }}>
-            {['chat','kb','settings'].map(t => (
-              <button key={t} style={tabBtnStyle(tab === t)} onClick={() => setTab(t)}>
-                {t === 'chat' ? 'Chat' : t === 'kb' ? 'Knowledge Base' : 'Settings'}
+        <div style={{ display: 'flex', flexDirection: 'column', flexShrink: 0, gap: compact ? 8 : 0, marginBottom: compact ? 8 : 14, padding: compact ? '10px 16px 0' : 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: compact ? 'nowrap' : 'wrap' }}>
+            {compact && (
+              <button type="button" className="chat-back-btn"
+                onClick={() => setMobileView('list')}
+                aria-label="Back to conversations" title="Back to conversations">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
               </button>
-            ))}
+            )}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--text-primary)' }}>Ray</div>
+              <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {warmingUp
+                  ? `Loading ${settings.model || 'qwen2.5:3b'}…`
+                  : aiReady
+                    ? `${settings.model || 'qwen2.5:3b'} · RAG ${settings.rag_enabled === 'true' ? 'on' : 'off'} · ${status?.doc_count || 0} docs`
+                    : status?.running
+                      ? `Starting Ray… ${status?.startup_phase || 'warming_up'}`
+                      : 'Ollama not reachable'}
+              </div>
+            </div>
+            {!compact && (
+              <div className="page-tab-bar">
+                {['chat','kb','settings'].map(t => (
+                  <button key={t} className={`page-tab-btn${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>
+                    {t === 'chat' ? 'Chat' : t === 'kb' ? 'Knowledge Base' : 'Settings'}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
+          {compact && (
+            <div className="page-tab-bar" style={{ background: 'transparent', backdropFilter: 'none', WebkitBackdropFilter: 'none', border: 'none', borderBottom: '1px solid var(--border)', padding: 0, margin: '0 -16px' }}>
+              {['chat','kb','settings'].map(t => (
+                <button key={t} className={`page-tab-btn${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>
+                  {t === 'chat' ? 'Chat' : t === 'kb' ? 'Knowledge Base' : 'Settings'}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* ── CHAT TAB ── */}
         {tab === 'chat' && (
-          <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <div className="card" style={{
+            flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0,
+            ...mobileFlatCard,
+          }}>
             {!activeChatId ? (
               <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
                 Select or create a chat
@@ -5628,17 +5885,18 @@ function AIPage() {
                     <div key={m.id || i} style={{ display: 'flex', flexDirection: 'column', alignItems: m.role === 'user' ? 'flex-end' : 'flex-start', gap: 3 }}>
                       {m.role === 'assistant' ? (
                         <>
-                          <div className="card" style={{
-                            maxWidth: '78%', padding: '10px 14px',
-                            background: 'var(--bg-input)', border: '1px solid var(--border)',
+                          <div style={{
+                            maxWidth: bubbleMaxWidth, padding: '10px 14px',
+                            background: 'var(--bg-input)',
                             borderRadius: '4px 12px 12px 12px',
                             fontSize: 14, lineHeight: 1.65, wordBreak: 'break-word',
                             color: 'var(--text-primary)',
+                            boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
                           }}>
                             <MarkdownMessage text={msgBody} />{m.streaming && <span style={{ display: 'inline-block', width: 2, height: '1em', background: 'var(--accent-green)', marginLeft: 2, verticalAlign: 'text-bottom', animation: 'blink 1s step-end infinite' }} />}
                           </div>
                           {confLabel && (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 4 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingLeft: 4 }}>
                               <span style={{ width: 6, height: 6, borderRadius: '50%', background: confColor, flexShrink: 0 }} />
                               <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{confLabel}</span>
                               {!m.streaming && (
@@ -5649,7 +5907,7 @@ function AIPage() {
                                   style={{
                                     background: 'none', border: '1px solid var(--border)', borderRadius: 4,
                                     color: 'var(--text-muted)', fontSize: 10, fontFamily: 'monospace',
-                                    padding: '1px 7px', cursor: (!aiReady || loading) ? 'default' : 'pointer',
+                                    padding: '4px 10px', minHeight: 28, cursor: (!aiReady || loading) ? 'default' : 'pointer',
                                     opacity: (!aiReady || loading) ? 0.5 : 1,
                                   }}
                                   onMouseEnter={e => { if (aiReady && !loading) { e.target.style.borderColor = 'var(--accent-green)'; e.target.style.color = 'var(--accent-green)'; } }}
@@ -5663,21 +5921,32 @@ function AIPage() {
                               AI answers can be incorrect — verify important details.
                             </div>
                           )}
-                          {!!(m.tokens || m.duration_ms) && (
+                          {(m.created_at || !!(m.tokens || m.duration_ms)) && (
                             <div className="mono" style={{ fontSize: 10, color: 'var(--text-muted)', paddingLeft: 4 }}>
                               {m.tokens && m.duration_ms ? `${(m.tokens / (m.duration_ms / 1000)).toFixed(1)} tok/s · ` : ''}
-                              {m.duration_ms ? `${(m.duration_ms/1000).toFixed(1)}s` : ''}
+                              {m.duration_ms ? `${(m.duration_ms/1000).toFixed(1)}s · ` : ''}
+                              {fmtMsgTime(m.created_at)}
                             </div>
                           )}
                         </>
                       ) : (
-                        <div style={{
-                          maxWidth: '78%', padding: '8px 12px',
-                          fontSize: 14, lineHeight: 1.65, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                          color: 'var(--text-primary)',
-                        }}>
-                          {m.content}
-                        </div>
+                        <>
+                          <div style={{
+                            maxWidth: bubbleMaxWidth, padding: '10px 14px',
+                            background: 'linear-gradient(135deg, var(--accent-green), #89ffd8 55%, var(--accent-blue))',
+                            color: '#06111d',
+                            borderRadius: '12px 4px 12px 12px',
+                            fontSize: 14, lineHeight: 1.65, fontWeight: 500, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                            boxShadow: '0 6px 16px rgba(94,242,194,0.2)',
+                          }}>
+                            {m.content}
+                          </div>
+                          {m.created_at && (
+                            <div className="mono" style={{ fontSize: 10, color: 'var(--text-muted)', paddingRight: 4 }}>
+                              {fmtMsgTime(m.created_at)}
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
                   );
@@ -5686,8 +5955,9 @@ function AIPage() {
                     <div style={{ display: 'flex', alignItems: 'flex-start' }}>
                       <div style={{
                         padding: '10px 16px', borderRadius: '4px 12px 12px 12px',
-                        background: 'var(--bg-input)', border: '1px solid var(--border)',
+                        background: 'var(--bg-input)',
                         color: 'var(--text-muted)', fontSize: 14, fontStyle: 'italic',
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
                       }}>
                         Thinking…
                       </div>
@@ -5695,7 +5965,7 @@ function AIPage() {
                   )}
                   <div ref={chatEndRef}/>
                 </div>
-                <div style={{ borderTop: '1px solid var(--border)', padding: '10px 14px', display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+                <div className="ai-chat-input-row" style={{ borderTop: '1px solid var(--border)', display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
                   <input
                     value={input}
                     onChange={e => setInput(e.target.value)}
@@ -5738,7 +6008,7 @@ function AIPage() {
         {/* ── KNOWLEDGE BASE TAB ── */}
         {tab === 'kb' && (
           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div className="card" style={{ padding: 0, overflow: 'hidden', ...mobileFlatCard }}>
               <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
                 Knowledge Base — {documents.length} document{documents.length !== 1 ? 's' : ''}
               </div>
@@ -5766,8 +6036,8 @@ function AIPage() {
                           {doc.is_seed ? 'Seed' : 'Custom'}
                         </span>
                         <button
-                          className="btn btn-sm"
-                          style={{ color: 'var(--accent-red)', border: '1px solid var(--accent-red)', background: 'transparent', padding: '2px 8px' }}
+                          className="btn btn-sm kb-doc-delete-btn"
+                          style={{ color: 'var(--accent-red)', border: '1px solid var(--accent-red)', background: 'transparent' }}
                           onClick={() => deleteDocument(doc.id)}
                         >
                           Delete
@@ -5780,8 +6050,19 @@ function AIPage() {
             </div>
 
             {/* Add document form */}
-            <div className="card" style={{ padding: 16 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 12 }}>Add Knowledge</div>
+            <div className="card" style={{ padding: 16, ...mobileFlatCard }}>
+              <div
+                className="settings-disclosure-toggle"
+                onClick={() => setAddDocOpen(o => !o)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setAddDocOpen(o => !o); } }}
+                style={{ marginBottom: addDocOpen ? 12 : 0 }}
+              >
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Add Knowledge</span>
+                <span className="mono" style={{ fontSize: 12, color: 'var(--text-muted)' }}>{addDocOpen ? '▲' : '▼'}</span>
+              </div>
+              {addDocOpen && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div>
                   <label style={labelStyle}>Title</label>
@@ -5810,14 +6091,16 @@ function AIPage() {
                   Add Document
                 </button>
               </div>
+              )}
             </div>
           </div>
         )}
 
         {/* ── SETTINGS TAB ── */}
         {tab === 'settings' && (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <div style={{ flex: 1, overflowY: 'auto' }}>
-            <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 20, ...mobileFlatCard }}>
 
               {/* Current runtime summary */}
               <div>
@@ -5891,10 +6174,11 @@ function AIPage() {
                       onChange={e => setSettings(p => ({...p, system_prompt: e.target.value}))}
                     />
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <input type="checkbox" id="warmup" checked={settings.warmup_on_start === 'true'} onChange={e => setSettings(p => ({...p, warmup_on_start: e.target.checked ? 'true' : 'false'}))} />
-                    <label htmlFor="warmup" style={{ fontSize: 13, color: 'var(--text-primary)', cursor: 'pointer' }}>Warmup model on startup</label>
-                  </div>
+                  <label className="power-toggle">
+                    <input type="checkbox" checked={settings.warmup_on_start === 'true'} onChange={e => setSettings(p => ({...p, warmup_on_start: e.target.checked ? 'true' : 'false'}))} />
+                    <span className="power-toggle-track"></span>
+                    <span style={{ fontSize: 13, color: 'var(--text-primary)' }}>Warmup model on startup</span>
+                  </label>
                   <div>
                     <label style={labelStyle}>Keep-Alive Hours (1–24)</label>
                     <input type="number" min="1" max="24" style={{ ...inputStyle, width: 80 }} value={settings.keep_alive_hours || '10'} onChange={e => setSettings(p => ({...p, keep_alive_hours: e.target.value}))} />
@@ -5906,18 +6190,20 @@ function AIPage() {
               <div>
                 <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 12 }}>Retrieval (RAG)</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <input type="checkbox" id="rag_enabled" checked={settings.rag_enabled === 'true'} onChange={e => setSettings(p => ({...p, rag_enabled: e.target.checked ? 'true' : 'false'}))} />
-                    <label htmlFor="rag_enabled" style={{ fontSize: 13, color: 'var(--text-primary)', cursor: 'pointer' }}>Enable RAG (inject relevant docs into context)</label>
-                  </div>
+                  <label className="power-toggle">
+                    <input type="checkbox" checked={settings.rag_enabled === 'true'} onChange={e => setSettings(p => ({...p, rag_enabled: e.target.checked ? 'true' : 'false'}))} />
+                    <span className="power-toggle-track"></span>
+                    <span style={{ fontSize: 13, color: 'var(--text-primary)' }}>Enable RAG (inject relevant docs into context)</span>
+                  </label>
                   <div>
                     <label style={labelStyle}>Top-K Documents (1–10)</label>
                     <input type="number" min="1" max="10" style={{ ...inputStyle, width: 80 }} value={settings.rag_top_k || '5'} onChange={e => setSettings(p => ({...p, rag_top_k: e.target.value}))} />
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <input type="checkbox" id="mesh_ctx" checked={settings.inject_mesh_context === 'true'} onChange={e => setSettings(p => ({...p, inject_mesh_context: e.target.checked ? 'true' : 'false'}))} />
-                    <label htmlFor="mesh_ctx" style={{ fontSize: 13, color: 'var(--text-primary)', cursor: 'pointer' }}>Inject mesh network context (nodes + recent messages)</label>
-                  </div>
+                  <label className="power-toggle">
+                    <input type="checkbox" checked={settings.inject_mesh_context === 'true'} onChange={e => setSettings(p => ({...p, inject_mesh_context: e.target.checked ? 'true' : 'false'}))} />
+                    <span className="power-toggle-track"></span>
+                    <span style={{ fontSize: 13, color: 'var(--text-primary)' }}>Inject mesh network context (nodes + recent messages)</span>
+                  </label>
                 </div>
               </div>
 
@@ -5926,11 +6212,21 @@ function AIPage() {
                 <KnowledgeMap />
               </div>
 
-              {/* Inference section */}
+              {/* Inference section (advanced — collapsed by default) */}
               <div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 12 }}>Inference</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div
+                  className="settings-disclosure-toggle"
+                  onClick={() => setAdvancedOpen(o => !o)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setAdvancedOpen(o => !o); } }}
+                >
+                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Advanced (Inference)</span>
+                  <span className="mono" style={{ fontSize: 12, color: 'var(--text-muted)' }}>{advancedOpen ? '▲' : '▼'}</span>
+                </div>
+                {advancedOpen && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
+                  <div className="settings-grid-2">
                     <div>
                       <label style={labelStyle}>Temperature (0–2)</label>
                       <input type="number" min="0" max="2" step="0.05" style={{ ...inputStyle, width: '100%' }} value={settings.temperature ?? '0.3'} onChange={e => setSettings(p => ({...p, temperature: e.target.value}))} />
@@ -5952,7 +6248,7 @@ function AIPage() {
                       <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>Max tokens generated per reply</div>
                     </div>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div className="settings-grid-2">
                     <div>
                       <label style={labelStyle}>Context Window (num_ctx)</label>
                       <input type="number" min="512" max="8192" step="512" style={{ ...inputStyle, width: '100%' }} value={settings.num_ctx ?? '4096'} onChange={e => setSettings(p => ({...p, num_ctx: e.target.value}))} />
@@ -5964,7 +6260,7 @@ function AIPage() {
                       <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>99 = all layers on GPU</div>
                     </div>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div className="settings-grid-2">
                     <div>
                       <label style={labelStyle}>CPU Threads (num_thread)</label>
                       <input type="number" min="1" max="32" style={{ ...inputStyle, width: '100%' }} value={settings.num_thread ?? '6'} onChange={e => setSettings(p => ({...p, num_thread: e.target.value}))} />
@@ -5977,22 +6273,24 @@ function AIPage() {
                     </div>
                   </div>
                 </div>
+                )}
               </div>
 
-              {/* Save button */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <button className="btn btn-primary" onClick={saveSettings} disabled={savingSettings || warmingUp}>
-                  {savingSettings ? 'Saving…' : 'Save Settings'}
-                </button>
-                {settingsSaved && !warmingUp && <span style={{ color: 'var(--accent-green)', fontSize: 13, fontWeight: 500 }}>Saved!</span>}
-                {warmingUp && <span style={{ color: 'var(--accent)', fontSize: 13, fontWeight: 500 }}>Loading model…</span>}
-                {saveError && <span style={{ color: 'var(--accent-red, #f87171)', fontSize: 13, fontWeight: 500 }}>Error: {saveError}</span>}
-              </div>
             </div>
+          </div>
+          <div className="ai-settings-save-bar">
+            <button className="btn btn-primary" onClick={saveSettings} disabled={savingSettings || warmingUp}>
+              {savingSettings ? 'Saving…' : 'Save Settings'}
+            </button>
+            {settingsSaved && !warmingUp && <span style={{ color: 'var(--accent-green)', fontSize: 13, fontWeight: 500 }}>Saved!</span>}
+            {warmingUp && <span style={{ color: 'var(--accent)', fontSize: 13, fontWeight: 500 }}>Loading model…</span>}
+            {saveError && <span style={{ color: 'var(--accent-red, #f87171)', fontSize: 13, fontWeight: 500 }}>Error: {saveError}</span>}
+          </div>
           </div>
         )}
 
       </div>
+      )}
     </div>
   );
 }
@@ -6153,7 +6451,7 @@ function SystemPage() {
                 </div>
               )}
               {(stats.disk_read_mbps != null || stats.disk_write_mbps != null) && (
-                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginTop:2}}>
+                <div className="settings-grid-2" style={{marginTop:2}}>
                   <div style={{background:'var(--bg-input)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:'8px 10px'}}>
                     <div style={{fontSize:10,color:'var(--text-muted)',textTransform:'uppercase',marginBottom:2}}>NVMe Read</div>
                     <div className="mono" style={{fontSize:14,fontWeight:600,color:'var(--accent-cyan)'}}>{stats.disk_read_mbps ?? '—'} MB/s</div>
@@ -6218,7 +6516,7 @@ function SystemPage() {
       {(stats.power_in_mw != null) && (
         <div className="card" style={{padding:'14px 16px'}}>
           <div style={{fontSize:12,fontWeight:600,marginBottom:10,color:'var(--text-primary)'}}>Power Consumption</div>
-          <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10}}>
+          <div className="settings-grid-3">
             {[['Total Input', stats.power_in_mw], ['CPU + GPU + CV', stats.power_cpu_gpu_mw], ['SOC', stats.power_soc_mw]].map(([label, mw]) => (
               mw != null && (
                 <div key={label} style={{background:'var(--bg-input)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:'10px 14px'}}>
@@ -6450,7 +6748,7 @@ function GpsShareSection({ nodes }) {
       )}
 
       {/* Save */}
-      <div style={{display:'flex',alignItems:'center',gap:10}}>
+      <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
         <button className="btn btn-primary" onClick={save} disabled={saving}>
           {saving ? 'Saving…' : 'Apply'}
         </button>
@@ -6514,7 +6812,7 @@ function RestartSetupCard({ SL }) {
 // ═══════════════════════════════════════════════
 // General Settings Page
 // ═══════════════════════════════════════════════
-function SettingsPage({ onSettingsSaved, themeMode, onThemeModeChange, hiddenPages, onHiddenPagesChange, onResetSidebarOrder, defaultPages, nodes }) {
+function SettingsPage({ onSettingsSaved, themeMode, onThemeModeChange, hiddenPages, onHiddenPagesChange, onResetSidebarOrder, defaultPages, sidebarFullOrder, onMoveSidebarPage, nodes }) {
   const [settings, setSettings] = useState(null);
   const [errors, setErrors] = useState({});
   const [saved, setSaved] = useState(false);
@@ -6657,9 +6955,21 @@ function SettingsPage({ onSettingsSaved, themeMode, onThemeModeChange, hiddenPag
               </label>
             ))}
           </div>
-          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-            <div style={{fontSize:11,color:'var(--text-muted)'}}>Drag &amp; drop sidebar icons to reorder</div>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
+            <div style={{fontSize:11,color:'var(--text-muted)'}}>Reorder — use the arrows, or drag icons directly on desktop</div>
             <button className="btn btn-sm" onClick={onResetSidebarOrder}>Reset Order</button>
+          </div>
+          <div style={{display:'flex',flexDirection:'column',gap:4}}>
+            {(sidebarFullOrder || []).map((p, idx, arr) => (
+              <div key={p.id} style={{display:'flex',alignItems:'center',gap:10,padding:'7px 10px',background:'var(--bg-tertiary)',borderRadius:6}}>
+                <span style={{display:'flex',alignItems:'center',color:'var(--text-muted)'}}>{p.icon}</span>
+                <span style={{flex:1,fontSize:13,color: hiddenPages.includes(p.id) ? 'var(--text-muted)' : 'var(--text-primary)'}}>{p.label}</span>
+                <button onClick={() => onMoveSidebarPage(p.id, -1)} disabled={idx === 0}
+                  style={{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer',padding:'6px 8px',fontSize:14,minHeight:32,opacity: idx === 0 ? 0.25 : 1}}>↑</button>
+                <button onClick={() => onMoveSidebarPage(p.id, 1)} disabled={idx === arr.length - 1}
+                  style={{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer',padding:'6px 8px',fontSize:14,minHeight:32,opacity: idx === arr.length - 1 ? 0.25 : 1}}>↓</button>
+              </div>
+            ))}
           </div>
         </div>
       </div>
@@ -7199,7 +7509,39 @@ function DeviceConfigSaveBar({section, saving, saved, onSave}) {
   );
 }
 
+// Desktop: same flat "title + divider" block as always. Phones: the same
+// content behind a tap-to-expand accordion — 7 always-open sections (~30
+// fields) made this the single longest scroll in the app.
+function DeviceConfigSubsection({ title, compact, open, onToggle, isLast, children }) {
+  if (!compact) {
+    return (
+      <div style={isLast ? null : {marginBottom:20,paddingBottom:16,borderBottom:'1px solid var(--border)'}}>
+        <div style={{..._DC_SL,marginBottom:8}}>{title}</div>
+        {children}
+      </div>
+    );
+  }
+  return (
+    <div style={{marginBottom:10,border:'1px solid var(--border)',borderRadius:'var(--radius)',overflow:'hidden'}}>
+      <div onClick={onToggle}
+        style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 14px',cursor:'pointer',minHeight:44,boxSizing:'border-box'}}>
+        <span style={{..._DC_SL,marginBottom:0}}>{title}</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+          style={{color:'var(--text-muted)',flexShrink:0,transition:'transform 200ms',transform: open ? 'rotate(180deg)' : 'none'}}>
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </div>
+      <div style={{maxHeight: open ? '3000px' : '0px', opacity: open ? 1 : 0, overflow:'hidden', transition:'max-height 300ms ease, opacity 200ms ease'}}>
+        <div style={{padding:'0 14px 16px'}}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
 const DeviceConfigSection = React.memo(function DeviceConfigSection() {
+  const compact = isSmallScreen();
+  const [openSections, setOpenSections] = useState({});
+  const toggleSection = (id) => setOpenSections(p => ({...p, [id]: !p[id]}));
   const [cfg, setCfg] = useState(null);
   const [owner, setOwner] = useState({ long_name: '', short_name: '' });
   const [saving, setSaving] = useState({});
@@ -7306,8 +7648,7 @@ const DeviceConfigSection = React.memo(function DeviceConfigSection() {
       </div>
 
       {/* Owner info */}
-      <div style={{marginBottom:20,paddingBottom:16,borderBottom:'1px solid var(--border)'}}>
-        <div style={{...SL,marginBottom:8}}>Node Identity</div>
+      <DeviceConfigSubsection title="Node Identity" compact={compact} open={!!openSections.owner} onToggle={() => toggleSection('owner')}>
         <div className="device-identity-grid">
           <Row label="Long Name" hint="Up to 39 characters — visible to other mesh nodes">
             <input style={IS} value={owner.long_name || ''} maxLength={39}
@@ -7344,11 +7685,10 @@ const DeviceConfigSection = React.memo(function DeviceConfigSection() {
           <span style={{fontSize:11,color:'var(--text-muted)',marginLeft:'auto'}}>Name change is sent to the radio immediately — node ID stays unchanged so mesh comms are unaffected.</span>
           {owner.node_id && <span style={{fontSize:11,fontFamily:'var(--font-mono)',color:'var(--text-muted)'}}>{owner.node_id} · {owner.hw_model}</span>}
         </div>
-      </div>
+      </DeviceConfigSubsection>
 
       {/* Device section */}
-      <div style={{marginBottom:20,paddingBottom:16,borderBottom:'1px solid var(--border)'}}>
-        <div style={{...SL,marginBottom:8}}>Node Behaviour</div>
+      <DeviceConfigSubsection title="Node Behaviour" compact={compact} open={!!openSections.device} onToggle={() => toggleSection('device')}>
         <div className="settings-grid-2" style={{marginBottom:0}}>
           <Row label="Node Role" hint="CLIENT=mobile user, ROUTER=fixed repeater, SENSOR=sensor-only">
             <select style={IS} value={cfg.device?.role ?? 0} onChange={e => set('device','role',parseInt(e.target.value))}>
@@ -7361,14 +7701,16 @@ const DeviceConfigSection = React.memo(function DeviceConfigSection() {
             </select>
           </Row>
           <Row label="Serial Output">
-            <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',marginTop:4}}>
-              <input type="checkbox" checked={!!cfg.device?.serial_enabled} onChange={e => set('device','serial_enabled',e.target.checked)} style={{accentColor:'var(--accent-green)',width:16,height:16}}/>
+            <label className="power-toggle">
+              <input type="checkbox" checked={!!cfg.device?.serial_enabled} onChange={e => set('device','serial_enabled',e.target.checked)}/>
+              <span className="power-toggle-track"></span>
               <span style={{fontSize:13,color:'var(--text-muted)'}}>Enabled</span>
             </label>
           </Row>
           <Row label="LED Heartbeat">
-            <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',marginTop:4}}>
-              <input type="checkbox" checked={!!cfg.device?.led_heartbeat_disabled} onChange={e => set('device','led_heartbeat_disabled',e.target.checked)} style={{accentColor:'var(--accent-green)',width:16,height:16}}/>
+            <label className="power-toggle">
+              <input type="checkbox" checked={!!cfg.device?.led_heartbeat_disabled} onChange={e => set('device','led_heartbeat_disabled',e.target.checked)}/>
+              <span className="power-toggle-track"></span>
               <span style={{fontSize:13,color:'var(--text-muted)'}}>Disabled</span>
             </label>
           </Row>
@@ -7378,11 +7720,10 @@ const DeviceConfigSection = React.memo(function DeviceConfigSection() {
           </Row>
         </div>
         <SaveBar section="device"/>
-      </div>
+      </DeviceConfigSubsection>
 
       {/* LoRa section */}
-      <div style={{marginBottom:20,paddingBottom:16,borderBottom:'1px solid var(--border)'}}>
-        <div style={{...SL,marginBottom:8}}>LoRa Radio</div>
+      <DeviceConfigSubsection title="LoRa Radio" compact={compact} open={!!openSections.lora} onToggle={() => toggleSection('lora')}>
         <div className="settings-grid-2">
           <Row label="Region" hint="Must match all nodes in your mesh">
             <select style={IS} value={cfg.lora?.region ?? 0} onChange={e => set('lora','region',parseInt(e.target.value))}>
@@ -7395,8 +7736,9 @@ const DeviceConfigSection = React.memo(function DeviceConfigSection() {
             </select>
           </Row>
           <Row label="Use Preset" hint="Disabling allows manual SF/BW/CR tuning">
-            <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',marginTop:4}}>
-              <input type="checkbox" checked={!!cfg.lora?.use_preset} onChange={e => set('lora','use_preset',e.target.checked)} style={{accentColor:'var(--accent-green)',width:16,height:16}}/>
+            <label className="power-toggle">
+              <input type="checkbox" checked={!!cfg.lora?.use_preset} onChange={e => set('lora','use_preset',e.target.checked)}/>
+              <span className="power-toggle-track"></span>
               <span style={{fontSize:13,color:'var(--text-muted)'}}>Use Preset</span>
             </label>
           </Row>
@@ -7409,8 +7751,9 @@ const DeviceConfigSection = React.memo(function DeviceConfigSection() {
               onChange={e => set('lora','tx_power',parseInt(e.target.value))}/>
           </Row>
           <Row label="TX Enabled">
-            <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',marginTop:4}}>
-              <input type="checkbox" checked={!!cfg.lora?.tx_enabled} onChange={e => set('lora','tx_enabled',e.target.checked)} style={{accentColor:'var(--accent-green)',width:16,height:16}}/>
+            <label className="power-toggle">
+              <input type="checkbox" checked={!!cfg.lora?.tx_enabled} onChange={e => set('lora','tx_enabled',e.target.checked)}/>
+              <span className="power-toggle-track"></span>
               <span style={{fontSize:13,color:'var(--text-muted)'}}>Transmit Enabled</span>
             </label>
           </Row>
@@ -7430,11 +7773,10 @@ const DeviceConfigSection = React.memo(function DeviceConfigSection() {
           </>)}
         </div>
         <SaveBar section="lora"/>
-      </div>
+      </DeviceConfigSubsection>
 
       {/* Position section */}
-      <div style={{marginBottom:20,paddingBottom:16,borderBottom:'1px solid var(--border)'}}>
-        <div style={{...SL,marginBottom:8}}>Position</div>
+      <DeviceConfigSubsection title="Position" compact={compact} open={!!openSections.position} onToggle={() => toggleSection('position')}>
         <div className="settings-grid-2">
           <Row label="GPS Update Interval (s)" hint="How often to sample GPS internally">
             <input type="number" style={IS} value={cfg.position?.gps_update_interval ?? 30} min={1}
@@ -7445,28 +7787,30 @@ const DeviceConfigSection = React.memo(function DeviceConfigSection() {
               onChange={e => set('position','position_broadcast_secs',parseInt(e.target.value))}/>
           </Row>
           <Row label="Smart Position" hint="Adapts broadcast rate to movement speed">
-            <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',marginTop:4}}>
-              <input type="checkbox" checked={!!cfg.position?.position_broadcast_smart_enabled} onChange={e => set('position','position_broadcast_smart_enabled',e.target.checked)} style={{accentColor:'var(--accent-green)',width:16,height:16}}/>
+            <label className="power-toggle">
+              <input type="checkbox" checked={!!cfg.position?.position_broadcast_smart_enabled} onChange={e => set('position','position_broadcast_smart_enabled',e.target.checked)}/>
+              <span className="power-toggle-track"></span>
               <span style={{fontSize:13,color:'var(--text-muted)'}}>Smart Position</span>
             </label>
           </Row>
           <Row label="Fixed Position" hint="Use manually entered coords instead of GPS">
-            <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',marginTop:4}}>
-              <input type="checkbox" checked={!!cfg.position?.fixed_position} onChange={e => set('position','fixed_position',e.target.checked)} style={{accentColor:'var(--accent-green)',width:16,height:16}}/>
+            <label className="power-toggle">
+              <input type="checkbox" checked={!!cfg.position?.fixed_position} onChange={e => set('position','fixed_position',e.target.checked)}/>
+              <span className="power-toggle-track"></span>
               <span style={{fontSize:13,color:'var(--text-muted)'}}>Fixed Position</span>
             </label>
           </Row>
         </div>
         <SaveBar section="position"/>
-      </div>
+      </DeviceConfigSubsection>
 
       {/* Power section */}
-      <div style={{marginBottom:20,paddingBottom:16,borderBottom:'1px solid var(--border)'}}>
-        <div style={{...SL,marginBottom:8}}>Power</div>
+      <DeviceConfigSubsection title="Power" compact={compact} open={!!openSections.power} onToggle={() => toggleSection('power')}>
         <div className="settings-grid-2">
           <Row label="Power Save Mode" hint="Reduces radio duty cycle to extend battery">
-            <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',marginTop:4}}>
-              <input type="checkbox" checked={!!cfg.power?.is_power_saving} onChange={e => set('power','is_power_saving',e.target.checked)} style={{accentColor:'var(--accent-green)',width:16,height:16}}/>
+            <label className="power-toggle">
+              <input type="checkbox" checked={!!cfg.power?.is_power_saving} onChange={e => set('power','is_power_saving',e.target.checked)}/>
+              <span className="power-toggle-track"></span>
               <span style={{fontSize:13,color:'var(--text-muted)'}}>Power Saving</span>
             </label>
           </Row>
@@ -7480,15 +7824,15 @@ const DeviceConfigSection = React.memo(function DeviceConfigSection() {
           </Row>
         </div>
         <SaveBar section="power"/>
-      </div>
+      </DeviceConfigSubsection>
 
       {/* Bluetooth section */}
-      <div style={{marginBottom:20,paddingBottom:16,borderBottom:'1px solid var(--border)'}}>
-        <div style={{...SL,marginBottom:8}}>Bluetooth</div>
+      <DeviceConfigSubsection title="Bluetooth" compact={compact} open={!!openSections.bluetooth} onToggle={() => toggleSection('bluetooth')}>
         <div className="settings-grid-2">
           <Row label="Bluetooth Enabled">
-            <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',marginTop:4}}>
-              <input type="checkbox" checked={!!cfg.bluetooth?.enabled} onChange={e => set('bluetooth','enabled',e.target.checked)} style={{accentColor:'var(--accent-green)',width:16,height:16}}/>
+            <label className="power-toggle">
+              <input type="checkbox" checked={!!cfg.bluetooth?.enabled} onChange={e => set('bluetooth','enabled',e.target.checked)}/>
+              <span className="power-toggle-track"></span>
               <span style={{fontSize:13,color:'var(--text-muted)'}}>Enabled</span>
             </label>
           </Row>
@@ -7498,15 +7842,15 @@ const DeviceConfigSection = React.memo(function DeviceConfigSection() {
           </Row>
         </div>
         <SaveBar section="bluetooth"/>
-      </div>
+      </DeviceConfigSubsection>
 
       {/* Network section */}
-      <div>
-        <div style={{...SL,marginBottom:8}}>Network / WiFi</div>
+      <DeviceConfigSubsection title="Network / WiFi" compact={compact} open={!!openSections.network} onToggle={() => toggleSection('network')} isLast>
         <div className="settings-grid-2">
           <Row label="WiFi Enabled" hint="Enable onboard WiFi (uses more power)">
-            <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',marginTop:4}}>
-              <input type="checkbox" checked={!!cfg.network?.wifi_enabled} onChange={e => set('network','wifi_enabled',e.target.checked)} style={{accentColor:'var(--accent-green)',width:16,height:16}}/>
+            <label className="power-toggle">
+              <input type="checkbox" checked={!!cfg.network?.wifi_enabled} onChange={e => set('network','wifi_enabled',e.target.checked)}/>
+              <span className="power-toggle-track"></span>
               <span style={{fontSize:13,color:'var(--text-muted)'}}>WiFi Enabled</span>
             </label>
           </Row>
@@ -7538,14 +7882,15 @@ const DeviceConfigSection = React.memo(function DeviceConfigSection() {
               autoComplete="off"/>
           </Row>
           <Row label="Ethernet" hint="Enable wired Ethernet (hardware dependent)">
-            <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',marginTop:4}}>
-              <input type="checkbox" checked={!!cfg.network?.eth_enabled} onChange={e => set('network','eth_enabled',e.target.checked)} style={{accentColor:'var(--accent-green)',width:16,height:16}}/>
+            <label className="power-toggle">
+              <input type="checkbox" checked={!!cfg.network?.eth_enabled} onChange={e => set('network','eth_enabled',e.target.checked)}/>
+              <span className="power-toggle-track"></span>
               <span style={{fontSize:13,color:'var(--text-muted)'}}>Ethernet Enabled</span>
             </label>
           </Row>
         </div>
         <SaveBar section="network"/>
-      </div>
+      </DeviceConfigSubsection>
     </div>
   );
 });
@@ -8080,13 +8425,45 @@ function NavigatePage({
   const steps     = useMemo(() => routeData?.legs?.flatMap(leg => leg.steps || []) || [], [routeData]);
   const isHiking  = mode === 'hiking';
   const speedNote = isHiking ? '@ ~2–3 mph on trail' : null;
+  // Phone-sized viewport: map goes full-bleed and search/directions float over
+  // it instead of sharing layout space. Independent of the fullBleed prop,
+  // which only controls desktop Hiking's flush-toolbar look.
+  const compact = isSmallScreen();
+  const mapEdgeToEdge = fullBleed || compact;
+  const nextManeuverCard = steps[currentStep] ? (
+    <div className="card" style={{ padding:'12px 14px', flexShrink:0,
+      background:'var(--accent-blue-dim)', borderColor:'rgba(59,130,246,0.3)' }}>
+      <div style={{ fontSize:11, fontWeight:600, textTransform:'uppercase',
+        letterSpacing:'0.06em', color:'var(--accent-blue)', marginBottom:6 }}>Next Maneuver</div>
+      <div style={{ display:'flex', gap:10, alignItems:'center' }}>
+        <span style={{ display:'flex', alignItems:'center', flexShrink:0 }}>
+          {navStepIcon(steps[currentStep].maneuver.type, isHiking, 28)}
+        </span>
+        <div>
+          <div style={{ fontSize:14, fontWeight:600, color:'var(--text-primary)' }}>
+            {navStepLabel(steps[currentStep].maneuver, mode)}
+          </div>
+          {steps[currentStep].name && (
+            <div style={{ fontSize:12, color:'var(--text-secondary)', marginTop:2 }}>
+              onto {steps[currentStep].name}
+            </div>
+          )}
+          <div style={{ fontSize:11, color:'var(--text-muted)', fontFamily:'var(--font-mono)', marginTop:4 }}>
+            {fmtNavDist(steps[currentStep].distance)} · {fmtNavDuration(steps[currentStep].duration)}
+          </div>
+        </div>
+      </div>
+    </div>
+  ) : null;
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap: fullBleed ? 0 : 12, flex:1, minHeight:0, overflow:'visible', padding: fullBleed ? 0 : 16 }}>
+    <div className="nav-page-root" style={{ display:'flex', flexDirection:'column', gap: mapEdgeToEdge ? 0 : 12, flex:1, minHeight:0, overflow:'visible', padding: mapEdgeToEdge ? 0 : 16 }}>
 
-      {/* Search bar */}
+      {/* Search bar + Next Maneuver + Favorites float over the map on phones
+          (.nav-top-overlay); plain stacked flow on desktop. */}
+      <div className="nav-top-overlay">
       <div className="card" style={{ padding:'10px 14px', flexShrink:0, position:'relative', zIndex:20, overflow:'visible',
-        ...(fullBleed ? { borderRadius:0, borderLeft:'none', borderRight:'none', borderTop:'none', marginBottom:0 } : null) }}>
+        ...((fullBleed && !compact) ? { borderRadius:0, borderLeft:'none', borderRight:'none', borderTop:'none', marginBottom:0 } : null) }}>
         <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', position:'relative', zIndex:20, overflow:'visible' }}>
           <div style={{ flex:1, minWidth:200, position:'relative' }}>
             <input
@@ -8121,8 +8498,8 @@ function NavigatePage({
           <button className="btn btn-primary btn-sm" onClick={searchAddress} disabled={searching}>
             {searching ? '…' : 'Search'}
           </button>
-          {/* Mode buttons */}
-          {availableModes.map(m => (
+          {/* Mode buttons — only worth showing when there's an actual choice to make */}
+          {availableModes.length > 1 && availableModes.map(m => (
             <button key={m.value} onClick={() => setMode(m.value)} title={m.label}
               style={{ display:'flex', alignItems:'center', gap:5, padding:'6px 10px',
                 borderRadius:'var(--radius)', fontSize:12, fontWeight:600, cursor:'pointer',
@@ -8186,6 +8563,10 @@ function NavigatePage({
         )}
       </div>
 
+      {/* On phones, show the next turn right under the search bar — on desktop
+          it stays inline in the directions sidebar (see !compact below). */}
+      {compact && nextManeuverCard}
+
       {/* Favorites panel */}
       {showFavorites && (
         <div className="card" style={{ padding:'10px 14px', flexShrink:0 }}>
@@ -8245,17 +8626,19 @@ function NavigatePage({
           )}
         </div>
       )}
+      </div>{/* end nav-top-overlay */}
 
       {/* Map + directions */}
-      <div className="nav-map-directions" style={{ flex:1, display:'flex', gap: fullBleed ? 0 : 12, minHeight:0, position:'relative', zIndex:1 }}>
+      <div className="nav-map-directions" style={{ flex:1, display:'flex', gap: mapEdgeToEdge ? 0 : 12, minHeight:0, position:'relative', zIndex:1 }}>
         {/* Map */}
         <div style={{ flex:2, minWidth:0, position:'relative', overflow:'hidden',
-          ...(fullBleed ? null : { borderRadius:'var(--radius-lg)', border:'1px solid var(--border)' }) }}>
+          ...(mapEdgeToEdge ? null : { borderRadius:'var(--radius-lg)', border:'1px solid var(--border)' }) }}>
           <div ref={containerRef} style={{ position:'absolute', top:0, left:0, right:0, bottom:0 }}/>
-          {/* Topo toggle */}
+          {/* Topo toggle — bottom-left on phones so it doesn't collide with the floating search bar up top */}
           <button onClick={() => setShowTopo(v => !v)}
             title="Toggle topo overlay"
-            style={{ position:'absolute', top:12, right:12, zIndex:1000,
+            style={{ position:'absolute', zIndex:1000,
+              ...(compact ? { bottom:16, left:16 } : { top:12, right:12 }),
               padding:'6px 10px', borderRadius:16, cursor:'pointer', fontSize:12, fontWeight:600,
               background: showTopo ? 'rgba(167,139,250,0.85)' : 'var(--bg-card)',
               color: showTopo ? '#fff' : 'var(--text-muted)',
@@ -8324,32 +8707,8 @@ function NavigatePage({
               </div>
             </div>
 
-            {/* Current maneuver */}
-            {steps[currentStep] && (
-              <div className="card" style={{ padding:'12px 14px', flexShrink:0,
-                background:'var(--accent-blue-dim)', borderColor:'rgba(59,130,246,0.3)' }}>
-                <div style={{ fontSize:11, fontWeight:600, textTransform:'uppercase',
-                  letterSpacing:'0.06em', color:'var(--accent-blue)', marginBottom:6 }}>Next Maneuver</div>
-                <div style={{ display:'flex', gap:10, alignItems:'center' }}>
-                  <span style={{ display:'flex', alignItems:'center', flexShrink:0 }}>
-                    {navStepIcon(steps[currentStep].maneuver.type, isHiking, 28)}
-                  </span>
-                  <div>
-                    <div style={{ fontSize:14, fontWeight:600, color:'var(--text-primary)' }}>
-                      {navStepLabel(steps[currentStep].maneuver, mode)}
-                    </div>
-                    {steps[currentStep].name && (
-                      <div style={{ fontSize:12, color:'var(--text-secondary)', marginTop:2 }}>
-                        onto {steps[currentStep].name}
-                      </div>
-                    )}
-                    <div style={{ fontSize:11, color:'var(--text-muted)', fontFamily:'var(--font-mono)', marginTop:4 }}>
-                      {fmtNavDist(steps[currentStep].distance)} · {fmtNavDuration(steps[currentStep].duration)}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
+            {/* Current maneuver — on phones this already floats above the map instead (compact && nextManeuverCard, up near the search bar) */}
+            {!compact && nextManeuverCard}
 
             {/* All steps */}
             <div className="card" style={{ padding:0, flex:1, overflowY:'auto' }}>
@@ -9519,11 +9878,11 @@ function CalendarPage() {
       {/* Header */}
       <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
         <div style={{display:'flex',alignItems:'center',gap:8}}>
-          <button className="btn btn-sm" onClick={prevMonth} style={{padding:'4px 10px'}}>‹</button>
+          <button className="btn btn-sm" onClick={prevMonth}>‹</button>
           <span style={{fontSize:18,fontWeight:700,color:'var(--text-primary)',minWidth:160,textAlign:'center'}}>
             {MONTH_NAMES[viewMonth]} {viewYear}
           </span>
-          <button className="btn btn-sm" onClick={nextMonth} style={{padding:'4px 10px'}}>›</button>
+          <button className="btn btn-sm" onClick={nextMonth}>›</button>
         </div>
         <button className="btn btn-sm" onClick={() => { setViewYear(today.getFullYear()); setViewMonth(today.getMonth()); }} style={{marginLeft:'auto'}}>Today</button>
       </div>
@@ -9552,7 +9911,7 @@ function CalendarPage() {
                 <div key={ev.id}
                   onClick={e => openEdit(ev, e)}
                   style={{
-                    fontSize:10,padding:'1px 5px',borderRadius:3,marginBottom:2,
+                    fontSize:10,padding:'3px 5px',borderRadius:3,marginBottom:2,
                     background: (accentMap[ev.color]||accentMap.blue) + '33',
                     borderLeft:`2px solid ${accentMap[ev.color]||accentMap.blue}`,
                     color:'var(--text-primary)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',
@@ -9608,7 +9967,7 @@ function CalendarPage() {
                 <div style={{display:'flex',gap:8}}>
                   {COLOR_OPTS.map(c => (
                     <div key={c} onClick={() => setForm(f=>({...f,color:c}))}
-                      style={{width:22,height:22,borderRadius:'50%',background:accentMap[c],cursor:'pointer',
+                      style={{width:22,height:22,padding:4,borderRadius:'50%',background:accentMap[c],cursor:'pointer',backgroundClip:'content-box',
                         outline:form.color===c?`2px solid white`:'2px solid transparent',outlineOffset:2}}/>
                   ))}
                 </div>
@@ -9643,6 +10002,7 @@ function CalendarPage() {
 // CalculatorPage
 // ═══════════════════════════════════════════════
 function CalculatorPage() {
+  const compact = isSmallScreen();
   const [expr, setExpr] = useState('');
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
@@ -9713,8 +10073,11 @@ function CalculatorPage() {
 
   return (
     <div className="page" style={{display:'flex',gap:20,flexWrap:'wrap',alignItems:'flex-start'}}>
-      {/* Calculator panel */}
-      <div className="card" style={{width:340,flexShrink:0}}>
+      {/* Calculator panel — fixed width on desktop; fluid on phones so the
+          button grid shrinks with the viewport instead of getting clipped
+          by .page's overflow-x:hidden (buttons past the fold were otherwise
+          unreachable, not just cramped). */}
+      <div className="card" style={compact ? {width:'100%'} : {width:340,flexShrink:0}}>
         <div className="card-header" style={{marginBottom:14}}>
           <span className="card-title">Scientific Calculator</span>
         </div>
@@ -9860,7 +10223,7 @@ function MeshSection({ nodes, device }) {
 }
 
 function MapSection({ nodes, trackerDevices, device, gpsStatus, onRemoveTracker }) {
-  const MAP_TABS = ['map', 'navigate'];
+  const MAP_TABS = ['map', 'navigate', 'hiking'];
   const [tab, setTabState] = useState(() => {
     const saved = recallTab('map');
     return MAP_TABS.includes(saved) ? saved : 'map';
@@ -9888,8 +10251,8 @@ function MapSection({ nodes, trackerDevices, device, gpsStatus, onRemoveTracker 
 
   return (
     <>
-      <div className="page-tab-bar">
-        {[{id:'map', label:'Map'}, {id:'navigate', label:'Road Nav'}].map(t => (
+      <div className="page-tab-bar map-nav-tabbar">
+        {[{id:'map', label:'Map'}, {id:'navigate', label:'Road Nav'}, {id:'hiking', label:'Hiking'}].map(t => (
           <button key={t.id}
             className={`page-tab-btn${tab === t.id ? ' active' : ''}`}
             onClick={() => setTab(t.id)}>
@@ -9908,6 +10271,9 @@ function MapSection({ nodes, trackerDevices, device, gpsStatus, onRemoveTracker 
           availableModes={NAV_MODES.filter(m => m.value === 'road')}
           searchPlaceholder="Search road destination or enter lat, lon…"
         />
+      )}
+      {tab === 'hiking' && (
+        <HikingSection nodes={nodes} device={device} gpsStatus={gpsStatus}/>
       )}
     </>
   );
@@ -10161,7 +10527,6 @@ const DEFAULT_PAGES = [
   { id: 'dashboard', icon: Icons.dashboard,  label: 'Dashboard', short: 'Home',  group: 'main'  },
   { id: 'mesh',      icon: Icons.topology,   label: 'Mesh',      short: 'Mesh',  group: 'mesh'  },
   { id: 'map',       icon: Icons.map,        label: 'Map',       short: 'Map',   group: 'map'   },
-  { id: 'hiking',    icon: Icons.mountain,   label: 'Hiking',    short: 'Hike',  group: 'map'   },
   { id: 'comms',     icon: Icons.messages,   label: 'Messages',  short: 'Chat',  group: 'comms' },
   { id: 'tools',     icon: Icons.calculator, label: 'Tools',     short: 'Tools', group: 'tools' },
   { id: 'system',    icon: Icons.settings,   label: 'Settings',  short: 'Setup', group: 'sys'   },
@@ -10312,7 +10677,6 @@ function App() {
     nodes:     ['mesh', 'telemetry'],
     topology:  ['mesh'],
     map:       ['mesh', 'map'],
-    hiking:    ['mesh', 'map'],
     navigate:  ['mesh'],
     power:     ['system'],
     alerts:    ['mesh', 'chat'],
@@ -10471,6 +10835,15 @@ function App() {
       .filter(p => p && !hiddenPages.includes(p.id));
   }, [sidebarOrder, hiddenPages]);
 
+  // Same full order, but including hidden pages — feeds the Settings reorder
+  // list, where order and visibility are edited as two separate controls.
+  const sidebarFullOrder = useMemo(() => {
+    const allIds = DEFAULT_PAGES.map(p => p.id);
+    const order = sidebarOrder || allIds;
+    const fullOrder = [...order, ...allIds.filter(id => !order.includes(id))];
+    return fullOrder.map(id => DEFAULT_PAGES.find(p => p.id === id)).filter(Boolean);
+  }, [sidebarOrder]);
+
   // Sidebar drag-and-drop handlers
   // Drop is handled at the <nav> level so releasing over a divider still works.
   function handleDragStart(e, pageId) {
@@ -10548,6 +10921,20 @@ function App() {
     setSidebarOrder(null);
     localStorage.removeItem('sidebarOrder');
     persistUiPrefs({ sidebar_order: '[]' });
+  }
+  // Touch-friendly alternative to dragging sidebar icons — HTML5 drag-and-drop
+  // (below) doesn't fire from touch on iOS Safari and most other mobile
+  // browsers, so this is the only way to reorder pages on a phone.
+  function moveSidebarPage(pageId, direction) {
+    const ids = sidebarFullOrder.map(p => p.id);
+    const i = ids.indexOf(pageId);
+    const j = i + direction;
+    if (i === -1 || j < 0 || j >= ids.length) return;
+    const next = [...ids];
+    [next[i], next[j]] = [next[j], next[i]];
+    setSidebarOrder(next);
+    localStorage.setItem('sidebarOrder', JSON.stringify(next));
+    api.put('/api/settings', { sidebar_order: JSON.stringify(next) }).catch(() => {});
   }
 
   const hasAlerts = alerts.filter(a => !a.acknowledged).length > 0;
@@ -10661,7 +11048,6 @@ function App() {
           {page === 'dashboard' && <DashboardPage stats={stats} nodes={nodes} messages={messages} alerts={alerts} setPage={setPage} device={device} gpsStatus={gpsStatus} trackerDevices={trackerDevices} isAtlasMobileApp={isAtlasMobileApp}/>}
           {page === 'mesh'  && <MeshSection nodes={nodes} device={device}/>}
           {page === 'map'   && <MapSection nodes={nodes} trackerDevices={trackerDevices} device={device} gpsStatus={gpsStatus} onRemoveTracker={id => api.del(`/api/tracker/devices/${id}`).then(() => setTrackerDevices(prev => prev.filter(d => d.id !== id)))}/>}
-          {page === 'hiking' && <HikingSection nodes={nodes} device={device} gpsStatus={gpsStatus}/>}
           {page === 'comms' && <CommsSection messages={messages} alerts={alerts} setAlerts={setAlerts} nodes={nodes} device={device} gpsStatus={gpsStatus} refresh={refresh}/>}
           {page === 'tools' && <ToolsSection/>}
           {page === 'system' && <SystemSection
@@ -10672,6 +11058,8 @@ function App() {
             onHiddenPagesChange={updateHiddenPages}
             onResetSidebarOrder={resetSidebarOrder}
             defaultPages={DEFAULT_PAGES}
+            sidebarFullOrder={sidebarFullOrder}
+            onMoveSidebarPage={moveSidebarPage}
             nodes={nodes}
           />}
           {page === 'ai' && <AIPage/>}
