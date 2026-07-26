@@ -7,14 +7,16 @@ filters to USA, and builds a SQLite database at static/data/us_cities.db.
 Run once while you have internet access. Works fully offline afterwards.
 
 Usage:
-    python3 download_cities.py
+    python3 download_cities.py                       # skip if the DB exists
+    python3 download_cities.py --force               # rebuild regardless
+    python3 download_cities.py --output /path/db     # explicit destination
 """
-import os, sys, zipfile, sqlite3, urllib.request
+import argparse, os, sys, zipfile, sqlite3, urllib.request
 from pathlib import Path
 
-SCRIPT_DIR = Path(__file__).parent
-DB_PATH    = SCRIPT_DIR / "static" / "data" / "us_cities.db"
-ZIP_URL    = "https://download.geonames.org/export/dump/cities1000.zip"
+SCRIPT_DIR      = Path(__file__).parent
+DEFAULT_DB_PATH = SCRIPT_DIR / "static" / "data" / "us_cities.db"
+ZIP_URL         = "https://download.geonames.org/export/dump/cities1000.zip"
 
 # US state abbreviation code → full state name
 _STATE_NAMES = {
@@ -36,7 +38,8 @@ _STATE_NAMES = {
 }
 
 
-def download_and_build():
+def download_and_build(db_path=DEFAULT_DB_PATH):
+    DB_PATH = Path(db_path)
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
     print("Downloading GeoNames cities1000 dataset...")
@@ -45,13 +48,19 @@ def download_and_build():
         tmp_path = tmp.name
 
     try:
+        # Emit only on a 10% change — install.sh pipes this into a log file,
+        # where a per-8KB-block carriage-return spinner becomes 1300 junk lines.
+        last_pct = [-1]
+
         def _progress(count, block, total):
-            if total > 0:
-                pct = min(100, count * block * 100 // total)
-                print(f"\r  {pct}%  ({count*block//1024} KB / {total//1024} KB)   ", end="", flush=True)
+            if total <= 0:
+                return
+            pct = min(100, count * block * 100 // total)
+            if pct // 10 != last_pct[0] // 10:
+                last_pct[0] = pct
+                print(f"  {pct}% ({total // 1024} KB total)", flush=True)
 
         urllib.request.urlretrieve(ZIP_URL, tmp_path, reporthook=_progress)
-        print()
 
         print("Parsing cities data (US only)...")
         rows = []
@@ -114,11 +123,25 @@ def download_and_build():
 
 
 if __name__ == "__main__":
-    if DB_PATH.exists():
-        size_kb = DB_PATH.stat().st_size // 1024
-        print(f"Database already exists: {DB_PATH} ({size_kb} KB)")
-        ans = input("Rebuild? [y/N]: ").strip().lower()
-        if ans != "y":
-            print("Aborted.")
-            sys.exit(0)
-    download_and_build()
+    # argparse rather than a bare script: install.sh has always passed
+    # `--output "$DATA_DIR/us_cities.db"`, which this script silently ignored —
+    # harmless only because the hardcoded default happened to resolve to the
+    # same path. Change DATA_DIR in install.sh and the DB lands somewhere the
+    # app never reads.
+    ap = argparse.ArgumentParser(
+        description="Build the offline US city geocoding database from GeoNames.")
+    ap.add_argument("--output", default=str(DEFAULT_DB_PATH),
+                    help="destination SQLite file")
+    ap.add_argument("--force", action="store_true",
+                    help="rebuild even if the database already exists")
+    args = ap.parse_args()
+
+    out = Path(args.output)
+    if out.exists() and not args.force:
+        # Never prompt. This runs under `systemd-run` (via atlas-update) with no
+        # stdin, where input() raises EOFError -> non-zero exit -> `set -e`
+        # aborts the whole update.
+        print(f"Database already exists: {out} ({out.stat().st_size // 1024} KB)")
+        print("Use --force to rebuild.")
+        sys.exit(0)
+    download_and_build(out)

@@ -375,6 +375,7 @@ if [[ "$SRC_DIR" != "$APP_DIR" ]]; then
               --exclude='osrm-data/' --exclude='static/tiles/' \
               --exclude='data/atlas.db*' --exclude='data/meshtastic.db*' \
               --exclude='atlas.db' \
+              --exclude='data/US.txt' --exclude='data/cities5000.txt' \
               --exclude='data/.secret_key' \
               --exclude='hotspot_config.json' \
               --exclude='osrm_active.json' \
@@ -1252,6 +1253,40 @@ else
 fi
 
 fi  # end full-install-only provisioning (sections 5–8)
+
+# ════════════════════════════════════════════════════════════════════════════
+# 8c.  OFFLINE GEOCODER FALLBACK DATA  (GeoNames)
+# ════════════════════════════════════════════════════════════════════════════
+# Ray's reverse geocoder has three tiers. Tier 1 (static/data/us_cities.db, §7d)
+# is US-only, so these two files are the ONLY source of any non-US place name,
+# and the ZIP centroids beat city centroids badly in sparse terrain (on Mt
+# Rainier: "Longmire, WA" 12 km vs "Tacoma, WA" 68 km).
+#
+# Nothing in this repo fetched them until now, so both tiers silently loaded
+# zero rows on every install and Ray hallucinated city names from bare lat/lon.
+#
+# Deliberately placed OUTSIDE the full-install-only block above: these are ~9 MB
+# and every existing box updates via `atlas-update` → `install.sh --update`, so
+# gating them behind a full install would leave every deployed device broken.
+# Same reasoning as the §3b swap and the §12 Ollama model pull.
+#
+# Non-fatal by design — these are fallback tiers; us_cities.db keeps the primary
+# path working, so a failed download must never abort an install or an update.
+section "Offline Geocoder Data (GeoNames)"
+
+if [[ ! -s "$APP_DIR/data/US.txt" || ! -s "$APP_DIR/data/cities5000.txt" ]]; then
+    info "Downloading GeoNames geocoder data (~6 MB) ..."
+    if sudo -u "$ATLAS_USER" "$VENV/bin/python3" "$APP_DIR/download_geonames.py" \
+            --data-dir "$APP_DIR/data"; then
+        log "Geocoder fallback data ready"
+    else
+        warn "GeoNames download failed — Ray keeps US city geocoding via"
+        warn "us_cities.db, but international coordinates will not resolve."
+        warn "Re-run later with: $VENV/bin/python3 $APP_DIR/download_geonames.py"
+    fi
+else
+    log "Geocoder fallback data present ($(du -sh "$APP_DIR/data/US.txt" | cut -f1) + $(du -sh "$APP_DIR/data/cities5000.txt" | cut -f1))"
+fi
 
 # ════════════════════════════════════════════════════════════════════════════
 # 9.  HTTPS / NGINX
