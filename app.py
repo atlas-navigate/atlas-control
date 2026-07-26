@@ -92,7 +92,8 @@ import meshtastic
 import meshtastic.util
 from mesh_manager import MeshManager
 from gps_node import GpsNode as GpsManager      # ground-up rewrite with UBX + Kalman + self-DR
-from ai_manager import AIManager
+from ai_manager import (AIManager, reverse_geocode, geocoder_status,
+                        _CAT_STOPWORDS, _detect_category)
 from routing_node import RoutingNode, STATE_BBOX as _STATE_BBOX
 from navigation_node import NavigationNode
 from mobile_bridge import AtlasMobileBridge
@@ -993,6 +994,12 @@ def api_ai_status():
     chat_count = len(db.ai_get_chats())
     settings = db.ai_get_settings()
     ai_ready = bool(running and manager_status.get("ready"))
+    # Geocoder health is surfaced here because its absence is otherwise silent:
+    # Ray keeps answering, just without ever knowing where the user is.
+    try:
+        geo = geocoder_status()
+    except Exception as e:
+        geo = {"ok": False, "error": str(e)}
     return jsonify({
         "running": running,
         "ai_ready": ai_ready,
@@ -1001,6 +1008,7 @@ def api_ai_status():
         "doc_count": doc_count,
         "chat_count": chat_count,
         "settings": settings,
+        "geocoder": geo,
         "startup_phase": manager_status.get("phase"),
         "warming_up": bool(manager_status.get("warming_up")),
         "last_error": manager_status.get("last_error") or "",
@@ -1497,41 +1505,9 @@ _PLACES_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                           "static", "data", "places.db")
 
 # "<thing> near me" → coarse category column in places.db.
-_CATEGORY_SYNONYMS = [
-    ("fuel", ("gas station", "petrol", "gasoline", "diesel", "fuel",
-              "fill up", "charging station", "ev charger")),
-    ("food", ("restaurant", "fast food", "place to eat", "somewhere to eat",
-              "food", "diner", "coffee", "cafe", "pizza", "burger",
-              "breakfast", "lunch", "dinner", "pub")),
-    ("grocery", ("grocery", "groceries", "supermarket", "food store", "market")),
-    ("finance", ("atm", "bank", "cash machine")),
-    ("health", ("hospital", "emergency room", "urgent care", "clinic",
-                "doctor", "pharmacy", "drugstore", "dentist", "medical")),
-    ("lodging", ("hotel", "motel", "lodging", "place to stay", "campground",
-                 "campsite", "camp site", "camping", "hostel")),
-    ("emergency", ("police station", "police", "fire station", "sheriff")),
-    ("facility", ("bathroom", "restroom", "toilet", "drinking water",
-                  "post office", "rest area")),
-    ("shop", ("hardware store", "shopping mall", "shopping", "store")),
-]
-_CAT_STOPWORDS = set((
-    "gas station petrol gasoline diesel fuel fill up charging ev charger "
-    "restaurant fast food place eat somewhere diner coffee cafe pizza burger "
-    "breakfast lunch dinner pub grocery groceries supermarket store market atm "
-    "bank cash machine hospital emergency room urgent care clinic doctor "
-    "pharmacy drugstore dentist medical hotel motel lodging stay campground "
-    "campsite camp site camping hostel police sheriff fire bathroom restroom "
-    "toilet drinking water post office rest area shopping mall hardware "
-    "near me around here nearby the and for"
-).split())
-
-
-def _detect_category(q_lower):
-    for cat, cues in _CATEGORY_SYNONYMS:
-        for cue in cues:
-            if cue in q_lower:
-                return cat
-    return None
+# _CATEGORY_SYNONYMS / _CAT_STOPWORDS / _detect_category live in ai_manager (see
+# the import at the top of this file) so this endpoint and Ray share one
+# definition of what "food" or "water" means and can never drift apart.
 
 
 def _fts_expr(tokens):
@@ -2296,15 +2272,32 @@ def api_nav_start():
     if not nav_node:
         return jsonify({"error": "Navigation engine not initialized"}), 503
 
-    # Free Ray's resident model RAM *before* the (possibly multi-state, up to
-    # ~120s-per-state) OSRM cold start below, so the first route of the trip —
-    # the most RAM-starved moment — actually benefits. Best-effort: a Ray/
-    # Ollama hiccup must never block navigation from starting.
+    # Ray and routing are meant to coexist. osrm-routed now runs with --mmap, so
+    # a routing instance costs ~42 MB RSS instead of ~1.1 GB, and the embedder
+    # loads at num_ctx=1024 instead of 4096 (~790 MB back) — on this box that is
+    # enough headroom for both. So this is a pressure valve, not the default
+    # path: only evict Ray when the box genuinely cannot fit the cold start,
+    # because a route that degrades to a straight line is worse than a briefly
+    # unavailable assistant. Best-effort throughout — a Ray/Ollama hiccup must
+    # never block navigation from starting.
+    unloaded_ray = False
     if ai_manager:
         try:
-            ai_manager.unload_all()
+            free_mb = ai_manager.available_ram_mb()
+            if free_mb is not None and free_mb < ai_manager._ROUTING_MIN_FREE_MB:
+                logger.warning(
+                    f"Only {free_mb:.0f} MB RAM available (< "
+                    f"{ai_manager._ROUTING_MIN_FREE_MB} MB) — unloading Ray so the "
+                    f"OSRM cold start can succeed; it reloads when navigation ends.")
+                ai_manager.unload_all()
+                unloaded_ray = True
+            else:
+                logger.info(
+                    f"Navigation starting with Ray resident "
+                    f"({free_mb:.0f} MB RAM available)" if free_mb is not None
+                    else "Navigation starting with Ray resident")
         except Exception as e:
-            logger.warning(f"Ray unload before navigation start failed: {e}")
+            logger.warning(f"Ray memory check before navigation start failed: {e}")
 
     result = nav_node.start_navigation(
         from_lat, from_lon, to_lat, to_lon,
@@ -2316,7 +2309,7 @@ def api_nav_start():
             target=routing_node.prewarm_for_position,
             args=(to_lat, to_lon), daemon=True).start()
 
-    if not result.get("ok") and ai_manager:
+    if unloaded_ray and not result.get("ok") and ai_manager:
         # Navigation never actually started, so cancel_navigation() (the only
         # other place that reloads Ray) will never fire for this session —
         # reload now instead of leaving Ray unloaded indefinitely.
@@ -2506,34 +2499,35 @@ def api_nav_reverse():
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
-    # ── Offline fallback: nearest city from local DB ──────────────────────────
+    # ── Offline: shared reverse geocoder (ai_manager), then trailheads ────────
+    # Uses the same gravity-weighted lookup Ray does, so the map and the AI can
+    # never disagree about where you are. The old local copy here sorted by raw
+    # squared degrees with no cos(lat) correction and no population weighting,
+    # which named the nearest tiny centroid (Floris) over the town you are
+    # actually in (Herndon).
     def _nearest_local(lat, lon):
         """Return display_name for the nearest city/trailhead in the local DB."""
+        name = reverse_geocode(lat, lon)
+        if name:
+            return name
         import sqlite3 as _sq
         deg = 0.5   # ~55 km bounding box each side
-        for db_path, sql in [
-            (os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                          "static", "data", "us_cities.db"),
-             ("SELECT name, state_name, lat, lon FROM cities "
-              "WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? "
-              "ORDER BY ((lat-?)*(lat-?) + (lon-?)*(lon-?)) LIMIT 1")),
-            (os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                          "static", "data", "trailheads.db"),
-             ("SELECT name, state, lat, lon FROM trailheads "
-              "WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? "
-              "ORDER BY ((lat-?)*(lat-?) + (lon-?)*(lon-?)) LIMIT 1")),
-        ]:
-            if not os.path.exists(db_path):
-                continue
-            try:
-                con = _sq.connect(f"file:{db_path}?mode=ro", uri=True)
-                row = con.execute(sql, (lat-deg, lat+deg, lon-deg, lon+deg,
-                                        lat, lat, lon, lon)).fetchone()
-                con.close()
-                if row:
-                    return f"{row[0]}, {row[1]}"
-            except Exception:
-                pass
+        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "static", "data", "trailheads.db")
+        if not os.path.exists(db_path):
+            return None
+        try:
+            con = _sq.connect(f"file:{db_path}?mode=ro", uri=True)
+            row = con.execute(
+                "SELECT name, state, lat, lon FROM trailheads "
+                "WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? "
+                "ORDER BY ((lat-?)*(lat-?) + (lon-?)*(lon-?)) LIMIT 1",
+                (lat-deg, lat+deg, lon-deg, lon+deg, lat, lat, lon, lon)).fetchone()
+            con.close()
+            if row:
+                return f"{row[0]}, {row[1]}"
+        except Exception:
+            pass
         return None
 
     local_name = _nearest_local(lat, lon)
@@ -4485,6 +4479,20 @@ def main():
     routing_node = RoutingNode(states_dir=_STATES_DIR, active_json=_ACTIVE_PATH)
     nav_node = NavigationNode(socketio=socketio, routing_node=routing_node,
                               mesh_manager=mesh)
+
+    def _on_navigation_ended():
+        """Reload Ray when a trip ends by arrival.
+
+        Arrival never routes through api_nav_cancel(), so if the memory valve in
+        api_nav_start() had unloaded Ray, completing a trip normally would leave
+        it unloaded until the user explicitly cancelled or restarted.
+        _warmup() is idempotent, so calling it when Ray is already resident is
+        harmless.
+        """
+        if ai_manager:
+            threading.Thread(target=ai_manager._warmup, daemon=True).start()
+
+    nav_node.on_navigation_ended = _on_navigation_ended
     nav_node.start()
 
     # Feed every GPS fix into the navigation engine so step-advance, off-route

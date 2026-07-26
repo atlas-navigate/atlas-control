@@ -15,18 +15,37 @@ import csv
 import os as _os
 import math as _math
 
+logger = logging.getLogger("ai_manager")
+
 # ---------------------------------------------------------------------------
-# Offline reverse geocoder — two-tier:
-#   1. US coordinates  → nearest ZIP code centroid (GeoNames US.txt, 41 k entries)
-#      ZIP centroids are far denser than city centers and map directly to the
-#      postal city name, giving near-perfect US accuracy.
-#   2. Non-US coords   → gravity-weighted city lookup (cities5000.txt, 68 k cities)
-# Both files live in data/ and are read once, then cached in memory.
+# Offline reverse geocoder — three tiers, first hit wins:
+#   1. US coordinates  → gravity-weighted city from static/data/us_cities.db
+#      (17 k GeoNames cities w/ population, built at install by
+#      download_cities.py).  This is the tier that actually runs: the DB ships
+#      with every install, loads in ~1 MB of RAM, and resolves in well under a
+#      millisecond.  Weighting by population/distance² is what makes a coord
+#      between a hamlet and a town resolve to the town people actually name.
+#   2. US coordinates  → nearest ZIP centroid (GeoNames US.txt), when present.
+#   3. Anything else   → gravity-weighted city (cities5000.txt), when present.
+#
+# Tiers 2 and 3 are the historical implementation.  They are kept because they
+# are the only source for NON-US coordinates (us_cities.db is US-only), but
+# neither file is provisioned by install.sh, so on a stock box they are empty
+# and tier 1 carries everything.  When *all* tiers come up empty we log loudly —
+# a silent `return []` here is what let this whole subsystem sit dead through an
+# entire install cycle while Ray hallucinated city names from bare lat/lon.
 # ---------------------------------------------------------------------------
 
-_DATA_DIR  = _os.path.join(_os.path.dirname(__file__), "data")
-_US_ZIP    = _os.path.join(_DATA_DIR, "US.txt")          # GeoNames US postal codes
-_GEO_TSV   = _os.path.join(_DATA_DIR, "cities5000.txt")  # world cities w/ population
+_DATA_DIR     = _os.path.join(_os.path.dirname(__file__), "data")
+_STATIC_DATA  = _os.path.join(_os.path.dirname(__file__), "static", "data")
+_US_CITIES_DB = _os.path.join(_STATIC_DATA, "us_cities.db")  # primary (install.sh)
+_US_ZIP       = _os.path.join(_DATA_DIR, "US.txt")           # GeoNames US postal codes
+_GEO_TSV      = _os.path.join(_DATA_DIR, "cities5000.txt")   # world cities w/ population
+
+# A resolved place farther away than this is not a useful description of where
+# the user is standing — better to say nothing and let the caller admit it does
+# not know than to name a city an hour's drive away.
+_MAX_PLACE_KM = 75.0
 
 # US state abbreviation → full name
 _US_STATE = {
@@ -106,64 +125,178 @@ def _load_world_cities():
         pass
     return rows
 
+# ── Loader: US cities (us_cities.db, built by download_cities.py) ───────────
+# Schema: name, ascii_name, alt_names, lat, lon, state_code, state_name, population
+
+def _load_us_cities():
+    if not _os.path.exists(_US_CITIES_DB):
+        return []
+    rows = []
+    try:
+        import sqlite3 as _sq
+        con = _sq.connect(f"file:{_US_CITIES_DB}?mode=ro", uri=True)
+        try:
+            for name, lat, lon, sc, sn, pop in con.execute(
+                    "SELECT name, lat, lon, state_code, state_name, population "
+                    "FROM cities WHERE lat IS NOT NULL AND lon IS NOT NULL"):
+                rows.append((float(lat), float(lon), name,
+                             sn or _US_STATE.get(sc, sc), int(pop or 0)))
+                # (lat, lon, city_name, state_full_name, population)
+        finally:
+            con.close()
+    except Exception as e:
+        logger.warning(f"us_cities.db load failed ({_US_CITIES_DB}): {e}")
+        return []
+    return rows
+
+_US_CITY_DATA   = None
 _US_ZIP_DATA    = None
 _WORLD_GEO_DATA = None
 _GEO_LOCK = threading.Lock()
+_GEO_CACHE = {}          # (round(lat,3), round(lon,3)) -> 'City, State' | None
+_GEO_WARNED = False
 
 def _ensure_loaded():
-    global _US_ZIP_DATA, _WORLD_GEO_DATA
+    global _US_CITY_DATA, _US_ZIP_DATA, _WORLD_GEO_DATA, _GEO_WARNED
     with _GEO_LOCK:
+        if _US_CITY_DATA is None:
+            _US_CITY_DATA   = _load_us_cities()
         if _US_ZIP_DATA is None:
             _US_ZIP_DATA    = _load_us_zips()
         if _WORLD_GEO_DATA is None:
             _WORLD_GEO_DATA = _load_world_cities()
+        if not (_US_CITY_DATA or _US_ZIP_DATA or _WORLD_GEO_DATA) and not _GEO_WARNED:
+            _GEO_WARNED = True
+            logger.warning(
+                "Offline reverse geocoder has NO data — Ray cannot name any "
+                "location and will report coordinates only. Tried: "
+                f"{_US_CITIES_DB} (run download_cities.py), {_US_ZIP}, {_GEO_TSV}"
+            )
+
+def geocoder_status():
+    """Row counts per tier — surfaced in /api/ai/status so a missing DB is visible."""
+    _ensure_loaded()
+    return {
+        "us_cities": len(_US_CITY_DATA or []),
+        "us_zips":   len(_US_ZIP_DATA or []),
+        "world":     len(_WORLD_GEO_DATA or []),
+        "ok":        bool(_US_CITY_DATA or _US_ZIP_DATA or _WORLD_GEO_DATA),
+        "us_cities_db": _US_CITIES_DB,
+    }
 
 # ── Public API ──────────────────────────────────────────────────────────────
 
 def _reverse_geocode(lat: float, lon: float) -> str | None:
     """Return 'City, State' for US coordinates or 'City, Country' elsewhere.
 
-    US path: nearest ZIP centroid — 41 k entries gives exact postal city names
-    (Herndon, Fairfax, Chesapeake, Fort Walton Beach, etc.).
+    Returns None when nothing usable is within _MAX_PLACE_KM, or when no tier
+    has data.  Callers MUST treat None as "locality unknown" and say so — never
+    let a bare coordinate reach the model on its own, because a small model will
+    invent a city to fill the gap.
 
-    International path: gravity-weighted city from cities5000 so a nearby
-    town of 24 k beats a distant capital of 700 k.
+    Results are cached per ~110 m cell, so a parked device resolves once.
     """
     _ensure_loaded()
 
+    key = (round(lat, 3), round(lon, 3))
+    if key in _GEO_CACHE:
+        return _GEO_CACHE[key]
+    result = _reverse_geocode_uncached(lat, lon)
+    _GEO_CACHE[key] = result
+    return result
+
+
+def _us_zip_lookup(lat: float, lon: float, cos_lat: float) -> str | None:
+    """Nearest US ZIP-code centroid → 'City, State'.
+
+    ZIP centroids are both denser than city centroids (41 k vs 17 k) and map
+    directly to the postal place name, which is what makes this the better tier
+    in sparse terrain: a population-weighted city lookup drags the answer toward
+    whatever large town is within reach, so a fix on Mt Rainier resolves to
+    "Tacoma" 68 km away where this returns "Longmire" at 12 km.
+    """
+    if not _US_ZIP_DATA:
+        return None
+    best_civ_d2, best_civ = float("inf"), None
+    best_any_d2, best_any = float("inf"), None
+    for (rlat, rlon, city, state_code) in _US_ZIP_DATA:
+        dlat = (lat - rlat) * 111.0
+        dlon = (lon - rlon) * 111.0 * cos_lat
+        d2   = dlat * dlat + dlon * dlon
+        if d2 < best_any_d2:
+            best_any_d2, best_any = d2, (city, state_code)
+        if not _is_military_city(city) and d2 < best_civ_d2:
+            best_civ_d2, best_civ = d2, (city, state_code)
+    # Only trust a ZIP result within range; beyond that (e.g. a fix in Canada,
+    # which is inside the crude US bounding box) let a later tier answer.
+    if best_any_d2 > _MAX_PLACE_KM ** 2:
+        return None
+    # Prefer the nearest civilian ZIP; allow up to 20 km farther than the raw
+    # nearest to avoid returning a military base name.
+    best = best_civ if (best_civ and best_civ_d2 <= best_any_d2 + (20.0 * 20.0)) else best_any
+    if not best:
+        return None
+    city, sc = best
+    return f"{city}, {_US_STATE.get(sc, sc)}"
+
+
+def _us_city_lookup(lat: float, lon: float, cos_lat: float) -> str | None:
+    """Gravity-weighted city from us_cities.db → 'City, State'.
+
+    score = population / distance² picks the place a person would actually name
+    in a populated area: at 38.9589,-77.4156 the nearest centroid is Floris
+    (pop 8 k, 2.4 km) but the right answer is Herndon (pop 25 k, 2.8 km).
+
+    This is the fallback rather than the primary because that same weighting
+    misfires in wilderness — see _us_zip_lookup. It remains the only US tier on
+    a box where the GeoNames download never ran.
+    """
+    if not _US_CITY_DATA:
+        return None
+    max_d2   = _MAX_PLACE_KM ** 2
+    lat_band = _MAX_PLACE_KM / 111.0        # cheap prefilter before the maths
+    best_score, best = -1.0, None
+    best_near_d2, best_near = float("inf"), None
+    for (rlat, rlon, name, state, pop) in _US_CITY_DATA:
+        if abs(lat - rlat) > lat_band:
+            continue
+        dlat = (lat - rlat) * 111.0
+        dlon = (lon - rlon) * 111.0 * cos_lat
+        d2   = dlat * dlat + dlon * dlon
+        # The range check must gate CANDIDACY, not just the final answer:
+        # scored after the fact, a big city 110 km away outranks the small town
+        # 46 km away and vetoes it, yielding None for a coord that has a
+        # perfectly good answer nearby.
+        if d2 > max_d2:
+            continue
+        if d2 < best_near_d2:
+            best_near_d2, best_near = d2, (name, state)
+        if _is_military_city(name):
+            continue
+        score = (pop + 1) / max(_math.sqrt(d2), 1.0) ** 2
+        if score > best_score:
+            best_score, best = score, (name, state)
+    if best is not None:
+        return f"{best[0]}, {best[1]}"
+    # Every candidate in range was a military installation name.
+    if best_near is not None:
+        return f"{best_near[0]}, {best_near[1]}"
+    return None
+
+
+def _reverse_geocode_uncached(lat: float, lon: float) -> str | None:
     cos_lat = _math.cos(_math.radians(lat))
 
-    if _is_us_coords(lat, lon) and _US_ZIP_DATA:
-        # Find nearest civilian ZIP first; also track nearest overall as fallback.
-        best_civ_d2  = float("inf")
-        best_civ     = None
-        best_any_d2  = float("inf")
-        best_any     = None
-        for (rlat, rlon, city, state_code) in _US_ZIP_DATA:
-            dlat = (lat - rlat) * 111.0
-            dlon = (lon - rlon) * 111.0 * cos_lat
-            d2   = dlat * dlat + dlon * dlon
-            if d2 < best_any_d2:
-                best_any_d2 = d2
-                best_any    = (city, state_code)
-            if not _is_military_city(city) and d2 < best_civ_d2:
-                best_civ_d2 = d2
-                best_civ    = (city, state_code)
-        # Only trust the US ZIP result when the nearest ZIP centroid is within 50 km.
-        # Beyond that (e.g. coordinates in Canada) fall through to world cities.
-        _50km2 = 50.0 * 50.0
-        if best_any_d2 > _50km2:
-            pass  # fall through to world-cities lookup below
-        else:
-            # Prefer the nearest civilian ZIP; allow up to 20 km farther than the
-            # raw nearest to avoid returning a military base name.
-            best = best_civ if (best_civ and best_civ_d2 <= best_any_d2 + (20.0 * 20.0)) else best_any
-            if best:
-                city, sc = best
-                state = _US_STATE.get(sc, sc)
-                return f"{city}, {state}"
+    # US: ZIP centroids first, gravity-weighted cities as the fallback.
+    if _is_us_coords(lat, lon):
+        result = (_us_zip_lookup(lat, lon, cos_lat)
+                  or _us_city_lookup(lat, lon, cos_lat))
+        if result:
+            return result
+        # Nothing in range from either US tier — fall through to world cities
+        # rather than naming somewhere 100 km away.
 
-    # International (or US ZIP data missing) — gravity-weighted city
+    # International (or both US tiers empty) — gravity-weighted city
     if not _WORLD_GEO_DATA:
         return None
 
@@ -178,15 +311,20 @@ def _reverse_geocode(lat: float, lon: float) -> str | None:
         dist_km = _math.sqrt(dlat_km * dlat_km + dlon_km * dlon_km)
         d2      = dlat_km * dlat_km + dlon_km * dlon_km
 
-        score = (pop + 1) / max(dist_km, 1.0) ** 2
-        if score > best_score:
-            best_score  = score
-            best_result = (name, admin1, cc)
+        if d2 <= _MAX_PLACE_KM ** 2:
+            score = (pop + 1) / max(dist_km, 1.0) ** 2
+            if score > best_score:
+                best_score  = score
+                best_result = (name, admin1, cc)
 
         if d2 < best_near_d:
             best_near_d = d2
             best_near   = (name, admin1, cc)
 
+    # best_near is only a sane fallback when it is actually near — otherwise a
+    # mid-ocean fix would be reported as the closest coastal city.
+    if best_near is not None and best_near_d > _MAX_PLACE_KM ** 2:
+        best_near = None
     result = best_result or best_near
     if result is None:
         return None
@@ -197,7 +335,11 @@ def _reverse_geocode(lat: float, lon: float) -> str | None:
         return f"{name}, {state}"
     return f"{name}, {cc}"
 
-logger = logging.getLogger("ai_manager")
+
+# Public alias — app.py imports this so the whole process shares exactly one
+# reverse geocoder and the map can never disagree with Ray about where you are.
+reverse_geocode = _reverse_geocode
+
 
 # ---------------------------------------------------------------------------
 # Default settings
@@ -232,16 +374,37 @@ _LOCATION_KW_FRAGMENTS = [
 ]
 
 # Regex to pull decimal-degree coordinate pairs from the user message.
-# Handles: "37.5, -122.3" / "37.5°N 122.3°W" / "N37.5 W122.3" / "lat 37.5 lon -122.3"
+# Handles: "37.5°N 122.3°W" / "N37.5 W122.3" / "37.5, -122.3" / "37.5 -122.3"
+#          / "lat 37.5 lon -122.3"
+#
+# The SUFFIX branch must come first and must exist at all: _fmt_coord() below
+# emits suffix notation ("38.95890°N 77.41555°W"), so without it, quoting Ray's
+# own output back at it was parsed by the old prefix branch as lat 77.4155 /
+# lon -5.0 — the Arctic Ocean — and that garbage then overrode the real GPS fix
+# because build_context labels a user-supplied coordinate "USE THIS".
+#
+# The prefix branch is guarded by a lookbehind so a hemisphere letter that
+# TRAILS a number (the "°N" in "38.9589°N") can never start a prefix match.
+#
+# The bare comma/space branches require a decimal point in both numbers. Without
+# that, "meeting at 3, 4 pm" parsed as lat 3 / lon 4 — a point in the Gulf of
+# Guinea, injected as the user's location.
 _COORD_RE = re.compile(
     r"""
     (?:
-        # NS prefix: N37.5 W122.3  or  N37.5, W122.3
-        [Nn]\s*(?P<a_lat>\d{1,3}(?:\.\d+)?)\s*[°]?\s*[,;]?\s*[EeWw]?\s*(?P<a_lon>\d{1,3}(?:\.\d+)?)
-      | # Signed decimal: 37.5, -122.3  or  -33.8, 151.2
-        (?P<b_lat>[+-]?\d{1,3}(?:\.\d+)?)\s*[°]?\s*,\s*(?P<b_lon>[+-]?\d{1,3}(?:\.\d+)?)
+        # Suffix hemisphere: 37.5°N 122.3°W  |  37.5 N, 122.3 W
+        (?P<s_lat>\d{1,3}(?:\.\d+)?)\s*[°]?\s*(?P<s_ns>[NnSs])\s*[,;]?\s*
+        (?P<s_lon>\d{1,3}(?:\.\d+)?)\s*[°]?\s*(?P<s_ew>[EeWw])\b
+      | # Prefix hemisphere: N37.5 W122.3  |  N37.5, W122.3
+        (?<![0-9°])(?P<a_ns>[NnSs])\s*(?P<a_lat>\d{1,3}(?:\.\d+)?)\s*[°]?\s*[,;]?\s*
+        (?P<a_ew>[EeWw])?\s*(?P<a_lon>\d{1,3}(?:\.\d+)?)
       | # Keyword-prefixed: lat 37.5 lon -122.3  or  lat=37.5 lon=-122.3
-        [Ll]at\s*[=:]?\s*(?P<c_lat>[+-]?\d{1,3}(?:\.\d+)?)\s*[,;]?\s*[Ll]on\s*[=:]?\s*(?P<c_lon>[+-]?\d{1,3}(?:\.\d+)?)
+        [Ll]at\s*[=:]?\s*(?P<c_lat>[+-]?\d{1,3}(?:\.\d+)?)\s*[,;]?\s*
+        [Ll]on(?:g|gitude)?\s*[=:]?\s*(?P<c_lon>[+-]?\d{1,3}(?:\.\d+)?)
+      | # Signed decimal, comma-separated: 37.5, -122.3  |  -33.8, 151.2
+        (?P<b_lat>[+-]?\d{1,3}\.\d+)\s*[°]?\s*,\s*(?P<b_lon>[+-]?\d{1,3}\.\d+)
+      | # Signed decimal, space-separated: 37.5 -122.3
+        (?P<d_lat>[+-]?\d{1,3}\.\d+)\s+(?P<d_lon>[+-]\d{1,3}\.\d+)
     )
     """,
     re.VERBOSE,
@@ -265,14 +428,23 @@ def _extract_user_location(msg: str):
     m = _COORD_RE.search(msg)
     if m:
         g = m.groupdict()
-        if g.get("a_lat") and g.get("a_lon"):
-            lat, lon = float(g["a_lat"]), -abs(float(g["a_lon"]))  # N+W convention
+        lat = lon = None
+        if g.get("s_lat") and g.get("s_lon"):
+            lat = float(g["s_lat"]) * (-1 if g["s_ns"].upper() == "S" else 1)
+            lon = float(g["s_lon"]) * (-1 if g["s_ew"].upper() == "W" else 1)
+        elif g.get("a_lat") and g.get("a_lon"):
+            lat = float(g["a_lat"]) * (-1 if g["a_ns"].upper() == "S" else 1)
+            # Hemisphere letter is optional on the longitude; absent, assume W,
+            # which is the convention the original parser used.
+            lon = float(g["a_lon"]) * (1 if (g.get("a_ew") or "W").upper() == "E" else -1)
+        elif g.get("c_lat") and g.get("c_lon"):
+            lat, lon = float(g["c_lat"]), float(g["c_lon"])
         elif g.get("b_lat") and g.get("b_lon"):
             lat, lon = float(g["b_lat"]), float(g["b_lon"])
-        else:
-            lat, lon = float(g["c_lat"]), float(g["c_lon"])
+        elif g.get("d_lat") and g.get("d_lon"):
+            lat, lon = float(g["d_lat"]), float(g["d_lon"])
         # Sanity-check ranges
-        if -90 <= lat <= 90 and -180 <= lon <= 180:
+        if lat is not None and -90 <= lat <= 90 and -180 <= lon <= 180:
             return {"type": "coords", "lat": lat, "lon": lon, "raw": m.group(0).strip()}
     m = _NAMED_LOC_RE.search(msg)
     if m:
@@ -295,17 +467,27 @@ def _build_location_prefix(ctx_meta: dict) -> str:
     gps_fix = ctx_meta.get("gps_fix")
     user_loc = ctx_meta.get("user_location")
     parts = []
+    named = False
     if user_loc:
         if user_loc["type"] == "coords":
-            parts.append(f"User location: {_fmt_coord(user_loc['lat'], user_loc['lon'])}")
+            tag = f"User location: {_fmt_coord(user_loc['lat'], user_loc['lon'])}"
+            # Same fix as the CURRENT POSITION block: this branch used to hand
+            # the model bare coordinates and nothing else.
+            city = _reverse_geocode(user_loc["lat"], user_loc["lon"])
+            if city:
+                tag += f" ({city})"
+                named = True
+            parts.append(tag)
         else:
             parts.append(f"User location: {user_loc['name']}")
+            named = True
     if gps_fix and gps_fix.get("latitude") is not None:
         lat, lon = gps_fix["latitude"], gps_fix["longitude"]
         tag = f"Device GPS: {_fmt_coord(lat, lon)}"
         city = _reverse_geocode(lat, lon)
         if city:
             tag += f" ({city})"
+            named = True
         alt = gps_fix.get("altitude")
         if alt is not None:
             tag += f" | alt {alt:.0f} m"
@@ -315,12 +497,297 @@ def _build_location_prefix(ctx_meta: dict) -> str:
         parts.append(tag)
     if not parts:
         return ""
+    if not named:
+        parts.append("locality unknown — do not name a city or state")
     return "[" + " | ".join(parts) + "]\n"
 
 def _fmt_coord(lat: float, lon: float) -> str:
     ns = "N" if lat >= 0 else "S"
     ew = "E" if lon >= 0 else "W"
     return f"{abs(lat):.5f}°{ns} {abs(lon):.5f}°{ew}"
+
+
+def _dist_km(lat1, lon1, lat2, lon2) -> float:
+    """Great-circle distance in km (haversine)."""
+    r_lat1, r_lat2 = _math.radians(lat1), _math.radians(lat2)
+    dlat = r_lat2 - r_lat1
+    dlon = _math.radians(lon2 - lon1)
+    h = (_math.sin(dlat / 2) ** 2
+         + _math.cos(r_lat1) * _math.cos(r_lat2) * _math.sin(dlon / 2) ** 2)
+    return 6371.0 * 2 * _math.asin(min(1.0, _math.sqrt(h)))
+
+
+_COMPASS_16 = ("N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+               "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW")
+
+
+def _bearing_compass(lat1, lon1, lat2, lon2) -> str:
+    """Initial bearing from point 1 to point 2 as a 16-point compass label."""
+    r_lat1, r_lat2 = _math.radians(lat1), _math.radians(lat2)
+    dlon = _math.radians(lon2 - lon1)
+    y = _math.sin(dlon) * _math.cos(r_lat2)
+    x = (_math.cos(r_lat1) * _math.sin(r_lat2)
+         - _math.sin(r_lat1) * _math.cos(r_lat2) * _math.cos(dlon))
+    deg = (_math.degrees(_math.atan2(y, x)) + 360.0) % 360.0
+    return _COMPASS_16[int((deg + 11.25) % 360.0 / 22.5)]
+
+
+# A coordinate parsed out of the user's message overrides the live GPS fix, so a
+# misparse is worse than no parse. Beyond this separation we assume the parse is
+# wrong rather than assuming the user teleported.
+_USER_COORD_MAX_KM = 2000.0
+
+# Below this much free RAM, navigation may evict Ray to guarantee a route.
+# With osrm-routed --mmap each routing instance costs ~42 MB RSS instead of
+# ~1.1 GB, so this valve should now stay shut in normal use — it exists so that
+# a genuinely memory-starved box still routes rather than silently degrading to
+# a straight line.
+_ROUTING_MIN_FREE_MB = 800
+
+
+def available_ram_mb():
+    """MemAvailable in MB, or None if /proc/meminfo is unreadable.
+
+    MemAvailable rather than MemFree: page cache (which is what --mmap'd OSRM
+    graphs occupy) is reclaimable, so MemFree wildly understates what is
+    actually usable and would trip the valve constantly.
+    """
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) / 1024.0
+    except Exception:
+        pass
+    return None
+
+
+# Context window for the embedding model. See get_embed() for the measurements —
+# this is worth ~790 MB of RAM on a 7.3 GB box and does not change the vectors.
+_EMBED_NUM_CTX = 1024
+# Warn above this input length: ~3 chars/token is conservative for technical
+# English, so this sits below the point where 1024 tokens could truncate.
+_EMBED_TRUNCATION_WARN_CHARS = 2800
+
+
+# ---------------------------------------------------------------------------
+# Offline "what's actually near me" lookup
+# ---------------------------------------------------------------------------
+# Ray used to answer "is there water near me" purely out of its seeded survival
+# docs — generic advice about morning dew, with no idea what is actually around
+# the user — while a 62 M-feature offline OSM index sat unused on the same disk.
+# These helpers let the location agent put real, named, measured features into
+# the prompt.
+#
+# Both databases are built by install.sh (build_places_index.py /
+# download_nps_trails.py) and are absent on a bare checkout; every entry point
+# degrades to an empty list and logs once.
+
+_PLACES_DB     = _os.path.join(_STATIC_DATA, "places.db")
+_NPS_TRAILS_DB = _os.path.join(_STATIC_DATA, "nps_trails.db")
+
+# "<thing> near me" → coarse category column in places.db.
+# Single source of truth: app.py's /api/nav/geocode imports these from here, so
+# the map search and Ray can never drift apart on what "food" means.
+_CATEGORY_SYNONYMS = [
+    ("fuel", ("gas station", "petrol", "gasoline", "diesel", "fuel",
+              "fill up", "charging station", "ev charger")),
+    ("food", ("restaurant", "fast food", "place to eat", "somewhere to eat",
+              "food", "diner", "coffee", "cafe", "pizza", "burger",
+              "breakfast", "lunch", "dinner", "pub")),
+    ("grocery", ("grocery", "groceries", "supermarket", "food store", "market")),
+    ("finance", ("atm", "bank", "cash machine")),
+    ("health", ("hospital", "emergency room", "urgent care", "clinic",
+                "doctor", "pharmacy", "drugstore", "dentist", "medical")),
+    ("lodging", ("hotel", "motel", "lodging", "place to stay", "campground",
+                 "campsite", "camp site", "camping", "hostel")),
+    ("emergency", ("police station", "police", "fire station", "sheriff")),
+    ("facility", ("bathroom", "restroom", "toilet", "drinking water",
+                  "post office", "rest area")),
+    ("shop", ("hardware store", "shopping mall", "shopping", "store")),
+]
+_CAT_STOPWORDS = set((
+    "gas station petrol gasoline diesel fuel fill up charging ev charger "
+    "restaurant fast food place eat somewhere diner coffee cafe pizza burger "
+    "breakfast lunch dinner pub grocery groceries supermarket store market atm "
+    "bank cash machine hospital emergency room urgent care clinic doctor "
+    "pharmacy drugstore dentist medical hotel motel lodging stay campground "
+    "campsite camp site camping hostel police sheriff fire bathroom restroom "
+    "toilet drinking water post office rest area shopping mall hardware "
+    "near me around here nearby the and for"
+).split())
+
+
+def _detect_category(q_lower):
+    for cat, cues in _CATEGORY_SYNONYMS:
+        for cue in cues:
+            if cue in q_lower:
+                return cat
+    return None
+
+
+# Some survival-relevant asks do not map onto a places.db *category* but do map
+# onto specific OSM `kind` values. Water is the important one: the index carries
+# amenity=drinking_water / fountain / water_point, but build_places_index.py
+# never extracts natural=water or waterway=*, so there are no streams or lakes
+# in it. We surface what exists and the caller states the limit plainly rather
+# than letting the model imply the area was searched for creeks.
+#
+# Each entry carries the CATEGORIES its kinds live under as well as the kinds
+# themselves. places.db is indexed on (category, lat) and on lat alone — there
+# is no index on `kind`, so filtering by kind inside a lat band alone scans the
+# whole band nationwide and costs ~6 s. Constraining category first turns the
+# same lookup into an index seek (~0.05 s). The category values below come from
+# classify() in build_places_index.py.
+_KIND_QUERIES = [
+    ("water",   ("water", "drink", "hydrate", "spring", "creek", "stream",
+                 "river", "lake", "pond", "well"),
+                ("facility", "amenity"),
+                ("drinking_water", "water_point", "fountain", "spring")),
+    ("shelter", ("shelter", "shade", "get out of the rain", "somewhere to sleep"),
+                ("facility", "lodging"),
+                ("shelter", "wilderness_hut", "alpine_hut")),
+    ("outdoor", ("trail", "trailhead", "hike", "hiking", "park", "woods",
+                 "forest", "campsite", "camp", "wilderness", "nature"),
+                ("leisure", "lodging", "attraction"),
+                ("park", "nature_reserve", "picnic_site", "camp_site", "viewpoint")),
+]
+
+
+def _detect_kind_query(q_lower):
+    """Return (label, categories, kinds) for a survival-shaped 'near me' ask."""
+    for label, cues, cats, kinds in _KIND_QUERIES:
+        if any(cue in q_lower for cue in cues):
+            return label, cats, kinds
+    return None, None, None
+
+
+_NEARBY_WARNED = set()
+
+
+def _warn_missing_db(path):
+    if path not in _NEARBY_WARNED:
+        _NEARBY_WARNED.add(path)
+        logger.warning(
+            f"Offline feature index missing: {path} — Ray cannot answer "
+            f"'what is near me' from real data until it is built (install.sh)."
+        )
+
+
+def _nearby_places(lat, lon, categories=None, kinds=None, radius_km=12.0, limit=8):
+    """Nearest named features from places.db.
+
+    `categories` drives the (category, lat) index and is always required;
+    `kinds` optionally narrows within it. Returns
+    [{name, kind, city, dist_km, bearing}], nearest first. An empty list is a
+    real answer — "nothing of that sort is mapped nearby" — and callers are
+    expected to say so rather than fill the silence.
+    """
+    if not _os.path.exists(_PLACES_DB):
+        _warn_missing_db(_PLACES_DB)
+        return []
+    if isinstance(categories, str):
+        categories = (categories,)
+    if not categories:
+        return []
+
+    cos_lat = max(0.05, _math.cos(_math.radians(lat)))
+    out = []
+    try:
+        import sqlite3 as _sq
+        con = _sq.connect(f"file:{_PLACES_DB}?mode=ro", uri=True)
+        try:
+            # Widen only until we find something — a first-hit-wins ladder keeps
+            # the common case (dense suburb) on the cheapest possible scan.
+            for r_km in (radius_km, radius_km * 3, radius_km * 8):
+                if r_km > 80.0:
+                    break
+                dlat = r_km / 111.0
+                dlon = r_km / (111.0 * cos_lat)
+                # category IN (...) AND lat BETWEEN ... drives idx_places_cat_lat.
+                # Note category='address' (2 M rows of house numbers) is never a
+                # useful answer to "what is near me" and is never requested here.
+                q = ("SELECT name, kind, city, lat, lon FROM places "
+                     f"WHERE category IN ({','.join('?' * len(categories))}) "
+                     "AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? "
+                     "AND name IS NOT NULL AND name <> ''")
+                args = [*categories, lat - dlat, lat + dlat, lon - dlon, lon + dlon]
+                if kinds:
+                    q += f" AND kind IN ({','.join('?' * len(kinds))})"
+                    args += list(kinds)
+                rows = list(con.execute(q, args))
+                if rows:
+                    break
+        finally:
+            con.close()
+    except Exception as e:
+        logger.warning(f"Nearby lookup failed ({_PLACES_DB}): {e}")
+        return []
+
+    seen = set()
+    for name, kind, city, rlat, rlon in rows:
+        key = (name or "").strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append({
+            "name": name.strip(),
+            "kind": (kind or "").replace("_", " "),
+            "city": city or "",
+            "dist_km": _dist_km(lat, lon, rlat, rlon),
+            "bearing": _bearing_compass(lat, lon, rlat, rlon),
+        })
+    out.sort(key=lambda r: r["dist_km"])
+    return out[:limit]
+
+
+def _nearby_trails(lat, lon, radius_km=25.0, limit=6):
+    """Nearest named trails/trailheads from nps_trails.db."""
+    if not _os.path.exists(_NPS_TRAILS_DB):
+        _warn_missing_db(_NPS_TRAILS_DB)
+        return []
+    cos_lat = max(0.05, _math.cos(_math.radians(lat)))
+    dlat = radius_km / 111.0
+    dlon = radius_km / (111.0 * cos_lat)
+    out = []
+    try:
+        import sqlite3 as _sq
+        con = _sq.connect(f"file:{_NPS_TRAILS_DB}?mode=ro", uri=True)
+        try:
+            for table, kind in (("trailheads", "trailhead"), ("trails", "trail")):
+                try:
+                    rows = con.execute(
+                        f"SELECT name, lat, lon FROM {table} "
+                        "WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? "
+                        "AND name IS NOT NULL AND name <> '' LIMIT 400",
+                        (lat - dlat, lat + dlat, lon - dlon, lon + dlon)).fetchall()
+                except Exception:
+                    continue    # schema drift between builds — skip that table
+                for name, rlat, rlon in rows:
+                    if rlat is None or rlon is None:
+                        continue
+                    out.append({
+                        "name": name.strip(),
+                        "kind": kind,
+                        "city": "",
+                        "dist_km": _dist_km(lat, lon, rlat, rlon),
+                        "bearing": _bearing_compass(lat, lon, rlat, rlon),
+                    })
+        finally:
+            con.close()
+    except Exception as e:
+        logger.warning(f"Trail lookup failed ({_NPS_TRAILS_DB}): {e}")
+        return []
+
+    seen = set()
+    uniq = []
+    for r in sorted(out, key=lambda r: r["dist_km"]):
+        key = r["name"].lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(r)
+    return uniq[:limit]
 
 # ---------------------------------------------------------------------------
 # G1 ballistic drag model — piecewise-linear Cd table keyed by Mach number
@@ -4306,8 +4773,13 @@ RAY_SELF_DOC = {
         "raw pre-boost cosine score, so it cannot be inflated. Live-data questions skip RAG because the "
         "answer is already injected fresh.\n"
         "5. CONTEXT ASSEMBLY — my working memory for each reply always includes my GPS fix "
-        "reverse-geocoded to the nearest city (offline, from 41k US ZIP centroids + 68k world "
-        "cities) for grounding, any retrieved knowledge docs, and the last 8 messages of our "
+        "reverse-geocoded to the nearest city (offline, gravity-weighted over the 17k-city "
+        "us_cities.db that ships with the install — population/distance², so I name the town "
+        "you would name, not the closest map dot). If I cannot resolve a place name I am told "
+        "to say so rather than guess one. When you ask what is NEAR you, I also search the "
+        "offline OSM index (places.db, 62M features) and the NPS trail database for real "
+        "mapped features and report them with true distance and compass bearing. Also included: "
+        "any retrieved knowledge docs, and the last 8 messages of our "
         "conversation. My live SENSES — host telemetry (CPU/GPU/RAM/temps/power) and live mesh "
         "state (nodes, channels, recent messages, telemetry, topology, alerts) — are NOT loaded "
         "into every prompt. They are a retrieved source, pulled in only when your message actually "
@@ -4830,7 +5302,14 @@ class AIManager:
         # OLLAMA_MAX_LOADED_MODELS=2 the chat model stays resident alongside the
         # 0.6B embedder, so GPU embedding is far faster (passage-level indexing
         # makes many embed calls) without evicting the chat model.
-        payload = json.dumps({"model": embed_model, "input": "warmup"}).encode()
+        # num_ctx must match get_embed() exactly: Ollama keys a loaded runner by
+        # model *and* options, so warming at a different context would make the
+        # first real embed evict and reload the model — the opposite of a warmup.
+        payload = json.dumps({
+            "model": embed_model,
+            "input": "warmup",
+            "options": {"num_ctx": _EMBED_NUM_CTX},
+        }).encode()
         req = urllib.request.Request(
             f"{self.ollama_base}/api/embed",
             data=payload,
@@ -5208,7 +5687,30 @@ class AIManager:
             # Embed on GPU (num_gpu omitted = auto-place). OLLAMA_MAX_LOADED_MODELS=2
             # keeps the chat model resident, so the embedder runs on GPU without
             # the per-message reload thrash that the old CPU pin guarded against.
-            payload = json.dumps({"model": embed_model, "input": text}).encode()
+            #
+            # num_ctx matters enormously here and used to be omitted entirely, so
+            # Ollama loaded this 0.6B model at its 4096 default and sized the
+            # compute buffers to match — 2.00 GiB, MORE than the 3.1B chat model,
+            # on a 7.3 GB box. At 1024 it takes 1.23 GiB, freeing ~790 MB for OSRM
+            # with no effect on the output: the longest passage in the knowledge
+            # base (1930 chars) embeds to a vector identical to the 4096 one
+            # (cosine 1.000000000), so nothing truncates and stored vectors stay
+            # comparable. 2048 was measured too and saves only ~120 MB — the
+            # buffer scaling is steep between 1024 and 2048, so 1024 is the knee.
+            if len(text) > _EMBED_TRUNCATION_WARN_CHARS:
+                # Ollama truncates silently at num_ctx. A truncated document
+                # vector would not match one embedded earlier at a larger
+                # context, quietly degrading retrieval — so make it loud.
+                logger.warning(
+                    f"Embedding input is {len(text)} chars, which may exceed "
+                    f"num_ctx={_EMBED_NUM_CTX} tokens and be truncated by Ollama; "
+                    f"the resulting vector may not match previously stored ones."
+                )
+            payload = json.dumps({
+                "model": embed_model,
+                "input": text,
+                "options": {"num_ctx": _EMBED_NUM_CTX},
+            }).encode()
             req = urllib.request.Request(
                 f"{self.ollama_base}/api/embed",
                 data=payload,
@@ -6196,23 +6698,48 @@ class AIManager:
         if True:
             try:
                 loc_lines = ["=== CURRENT POSITION ==="]
-
-                if user_loc:
-                    if user_loc["type"] == "coords":
-                        loc_lines.append(
-                            f"User-provided location (USE THIS as the primary location): "
-                            f"{_fmt_coord(user_loc['lat'], user_loc['lon'])} "
-                            f"(decimal: {user_loc['lat']:.5f}, {user_loc['lon']:.5f})"
-                        )
-                    else:
-                        loc_lines.append(
-                            f"User-provided location (USE THIS as the primary location): "
-                            f"{user_loc['name']}"
-                        )
+                resolved_place = None       # set when we can name the place
 
                 gps_fix = None
                 if self.gps_manager is not None:
                     gps_fix = getattr(self.gps_manager, "current_fix", None)
+
+                # A parsed coordinate OVERRIDES the real GPS fix, so a bad parse
+                # is worse than no parse. If we hold a live fix and the parsed
+                # pair lands implausibly far from it, distrust the parse.
+                if (user_loc and user_loc.get("type") == "coords"
+                        and gps_fix and gps_fix.get("latitude") is not None):
+                    _d = _dist_km(user_loc["lat"], user_loc["lon"],
+                                  gps_fix["latitude"], gps_fix["longitude"])
+                    if _d > _USER_COORD_MAX_KM:
+                        logger.warning(
+                            f"Discarding parsed coordinate {user_loc['lat']:.5f},"
+                            f"{user_loc['lon']:.5f} — {_d:.0f} km from the live GPS "
+                            f"fix (limit {_USER_COORD_MAX_KM:.0f} km)"
+                        )
+                        user_loc = None
+
+                if user_loc:
+                    if user_loc["type"] == "coords":
+                        # Reverse-geocode here too. This branch used to emit bare
+                        # coordinates, which is exactly the input that makes a small
+                        # model invent a plausible-sounding city.
+                        _ucity = _reverse_geocode(user_loc["lat"], user_loc["lon"])
+                        resolved_place = _ucity
+                        _uline = (
+                            f"User-provided location (USE THIS as the primary location): "
+                            f"{_fmt_coord(user_loc['lat'], user_loc['lon'])} "
+                            f"(decimal: {user_loc['lat']:.5f}, {user_loc['lon']:.5f})"
+                        )
+                        if _ucity:
+                            _uline += f" | location: {_ucity}"
+                        loc_lines.append(_uline)
+                    else:
+                        resolved_place = user_loc["name"]
+                        loc_lines.append(
+                            f"User-provided location (USE THIS as the primary location): "
+                            f"{user_loc['name']}"
+                        )
 
                 if gps_fix and gps_fix.get("latitude") is not None:
                     lat  = gps_fix["latitude"]
@@ -6224,6 +6751,8 @@ class AIManager:
                     fix_type = gps_fix.get("fix_label") or gps_fix.get("fix_type_label") or gps_fix.get("fix_type", "")
                     label = "Atlas Control GPS fix (SparkFun M9N)" if not user_loc else "Atlas Control GPS fix (for reference / distance math)"
                     city = _reverse_geocode(lat, lon)
+                    if city and not resolved_place:
+                        resolved_place = city
                     gps_line = f"{label}: {_fmt_coord(lat, lon)} (decimal: {lat:.5f}, {lon:.5f})"
                     if city:
                         gps_line += f" | location: {city}"
@@ -6247,18 +6776,114 @@ class AIManager:
                 elif not user_loc:
                     loc_lines.append("Atlas Control GPS fix (SparkFun M9N): not available (no fix or GPS not connected)")
 
-                loc_lines.append(
-                    "INSTRUCTION: Always use the position above to ground your answer. "
-                    "Reference the specific region, local conditions, terrain, climate, regulations, "
-                    "or hazards relevant to that location — even when the user does not explicitly ask about location."
-                )
+                if resolved_place:
+                    loc_lines.append(
+                        f"INSTRUCTION: Always use the position above to ground your answer. "
+                        f"The locality is \"{resolved_place}\" — use that name exactly as "
+                        f"written when you refer to where the user is. Do NOT substitute a "
+                        f"different city, county, or state, and do NOT estimate a distance "
+                        f"or direction to some other town. Reference the specific region, "
+                        f"local conditions, terrain, climate, regulations, or hazards "
+                        f"relevant to that location — even when the user does not explicitly "
+                        f"ask about location."
+                    )
+                else:
+                    # No place name resolved. Bare coordinates are precisely the
+                    # input that makes a small model produce a confident, wrong
+                    # city, so state the limit instead of leaving the gap open.
+                    loc_lines.append(
+                        "INSTRUCTION: The place name for these coordinates could NOT be "
+                        "resolved. Report the coordinates as given and say the exact "
+                        "locality is unknown. Do NOT name a city, town, county, or state, "
+                        "and do NOT estimate a distance or bearing to a named place — you "
+                        "do not have the data to do so and guessing would mislead the user. "
+                        "You may still give general guidance, stated as general."
+                    )
                 parts.append("\n".join(loc_lines))
                 meta["has_gps_context"] = True
                 meta["user_location"] = user_loc
                 meta["gps_fix"] = gps_fix
-                logger.info(f"Location agent injected: user_loc={user_loc}, gps_available={gps_fix is not None}")
+                meta["resolved_place"] = resolved_place
+                logger.info(
+                    f"Location agent injected: user_loc={user_loc}, "
+                    f"gps_available={gps_fix is not None}, place={resolved_place!r}"
+                )
             except Exception as e:
                 logger.warning(f"Location agent failed: {e}")
+
+        # ── Nearby-features agent ────────────────────────────────────────────
+        # "Is there water near me" used to be answered entirely out of the
+        # seeded survival docs — generic advice with no idea what is actually
+        # around the user. When the question is location-scoped AND names a
+        # findable kind of thing, put the real, measured features in the prompt.
+        try:
+            _nq = user_message.lower()
+            if _is_location_query(user_message) or _is_location_scoped_query(user_message):
+                _kind_label, _kind_cats, _kinds = _detect_kind_query(_nq)
+                _cat = _detect_category(_nq)
+                _cats = _kind_cats or ((_cat,) if _cat else None)
+                _plat = _plon = None
+                if meta.get("user_location") and meta["user_location"].get("type") == "coords":
+                    _plat = meta["user_location"]["lat"]
+                    _plon = meta["user_location"]["lon"]
+                elif meta.get("gps_fix") and meta["gps_fix"].get("latitude") is not None:
+                    _plat = meta["gps_fix"]["latitude"]
+                    _plon = meta["gps_fix"]["longitude"]
+
+                if _cats and _plat is not None:
+                    _found = _nearby_places(_plat, _plon, categories=_cats, kinds=_kinds)
+                    if _kind_label == "outdoor":
+                        _found = sorted(_found + _nearby_trails(_plat, _plon),
+                                        key=lambda r: r["dist_km"])[:8]
+                    _imp = (_units == "imperial")
+
+                    def _fmt_d(km):
+                        return f"{km * 0.621371:.1f} mi" if _imp else f"{km:.1f} km"
+
+                    _what = _kind_label or _cat
+                    _nb = [f"=== NEARBY {_what.upper()} (offline OSM index, real mapped features) ==="]
+                    if _found:
+                        _nb.append("Nearest first, measured from the position above:")
+                        for _r in _found:
+                            _loc = f" ({_r['city']})" if _r["city"] else ""
+                            _nb.append(f"  {_r['name']}{_loc} — {_r['kind']} — "
+                                       f"{_fmt_d(_r['dist_km'])} {_r['bearing']}")
+                        _nb.append(
+                            "INSTRUCTION: These are real mapped features. Name them, with "
+                            "their distance and direction, before offering any general "
+                            "technique. Do NOT invent additional places, and do NOT alter "
+                            "these names, distances, or bearings."
+                        )
+                    else:
+                        _nb.append(
+                            f"No {_what} features are mapped within search range of the "
+                            f"user's position."
+                        )
+                        _nb.append(
+                            "INSTRUCTION: Say plainly that nothing of this kind is in the "
+                            "offline map near the user. Do NOT name any specific place — "
+                            "you have no data for one. General technique is fine, stated "
+                            "as general."
+                        )
+                    if _kind_label == "water":
+                        # Be explicit about what was and was not searched. The index
+                        # carries amenity=drinking_water/fountain but
+                        # build_places_index.py never extracts natural=water or
+                        # waterway=*, so there are no creeks, streams or lakes in it.
+                        _nb.append(
+                            "IMPORTANT COVERAGE LIMIT: this index contains mapped "
+                            "amenities only. Natural water — streams, creeks, rivers, "
+                            "lakes, springs — is NOT in it. Absence here does not mean "
+                            "no natural water exists nearby; say that you cannot confirm "
+                            "natural water sources from the offline map, and never state "
+                            "or imply that a specific stream or lake is or is not there."
+                        )
+                    parts.append("\n".join(_nb))
+                    meta["has_nearby_context"] = True
+                    meta["nearby_count"] = len(_found)
+                    logger.info(f"Nearby agent injected: what={_what}, hits={len(_found)}")
+        except Exception as e:
+            logger.warning(f"Nearby agent failed: {e}")
 
         # Dashboard context (nodes, map, telemetry, messages, topology, alerts, channels)
         # Injected only when the message actually asks about the mesh/alerts — the

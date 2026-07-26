@@ -14,7 +14,12 @@ atlas.db
 logs/
 *.log
 
-# ── Local datasets (downloaded by download_cities.py / scratch) ───────────────
+# ── Optional legacy geocoder datasets ────────────────────────────────────────
+# NOT provisioned by install.sh — nothing in this repo downloads them. They are
+# fallback tiers only (and the sole source for non-US coords); the primary
+# reverse geocoder uses static/data/us_cities.db, which download_cities.py does
+# build during install. Fetch these by hand from download.geonames.org if you
+# need international coverage.
 data/US.txt
 data/US_zips.zip
 data/cities5000.*

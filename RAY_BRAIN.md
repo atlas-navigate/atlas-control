@@ -44,10 +44,10 @@ Everything below lives in [`ai_manager.py`](ai_manager.py).
      │   temps/power │  │M9N fix +│  │ hybrid  │  │
      │ • mesh nodes  │  │offline  │  │cosine + │  │
      │   online/off  │  │geocode  │  │ BM25    │  │
-     │ • channels    │  │(41k US  │  │gate     │  │
-     │ • recent msgs │  │ZIPs +   │  │v≥0.35  │  │
-     │ • telemetry   │  │68k world│  │boost    │  │
-     │ • topology    │  │cities)  │  │+8% cat  │  │
+     │ • channels    │  │(17k US  │  │gate     │  │
+     │ • recent msgs │  │cities,  │  │v≥0.35  │  │
+     │ • telemetry   │  │gravity- │  │boost    │  │
+     │ • topology    │  │weighted)│  │+8% cat  │  │
      │ • alerts      │  │         │  │top-5    │  │
      │               │  │user-    │  │≥ 0.45   │  │
      │(on demand)    │  │override │  │score    │  │
@@ -325,7 +325,7 @@ flowchart TD
     U([User message]) --> R{Stage 1\nROUTING\nkeyword scanners}
 
     R -->|only when the question asks| S[Stage 2\nLive Senses — RETRIEVED SOURCE\nCPU·GPU·RAM·mesh·alerts\nNOT loaded by default]
-    R -->|always| G[Stage 3\nGPS + reverse geocode\n41k US ZIPs · 68k world cities]
+    R -->|always| G[Stage 3\nGPS + reverse geocode\n17k US cities · gravity-weighted\nunresolved ⇒ says so]
     G -.->|near me? feed region| RAG
     R -->|knowledge question| RAG[Stage 4\nRAG Retrieval — passage-level\nbest chunk per doc\nhybrid BM25+cosine · gate v≥0.35\n+8% category · +15% region\ntop-5 passages · score≥0.45\n7000-char budget]
     R -->|physics or ballistics| C[Stage 5\nCalculator Agent]
@@ -397,14 +397,56 @@ in Stage 3 is the one exception that stays always-on — it is cheap and grounds
 ### Stage 3 — Location Grounding (`_build_location_prefix`, `_reverse_geocode`)
 
 The SparkFun M9N GPS fix is injected into **every** prompt, reverse-geocoded entirely
-offline using a gravity-weighted lookup over 68,000 world cities (US: 41,000 ZIP-code
-centroids, skipping military-base names when a civilian ZIP is close). If the user types
-coordinates or a place name in their message, that overrides the device fix.
+offline against `static/data/us_cities.db` — the 17,341-city GeoNames extract that
+`install.sh` builds via `download_cities.py`. The lookup is **gravity-weighted**
+(`population / distance²`), which is what makes it name the town a person would name: at
+`38.9589, -77.4156` the *nearest* centroid is Floris (pop 8 k, 2.4 km) but the answer is
+Herndon (pop 25 k, 2.8 km). Military-installation names are skipped when a civilian
+option is in range, and anything farther than **75 km** resolves to nothing at all rather
+than naming a city an hour away. Results are cached per ~110 m cell.
+
+Two legacy tiers (GeoNames `US.txt` ZIP centroids, `cities5000.txt` world cities) remain
+as fallbacks and are the only source for **non-US** coordinates, but neither file is
+provisioned by `install.sh`, so on a stock box tier 1 carries everything.
+
+> **History.** Until July 2026 this stage read *only* those two ungitignored,
+> never-downloaded files. `_reverse_geocode()` therefore returned `None` for every
+> coordinate on every install, silently — both loaders swallow a missing file. Ray was
+> handed bare decimal degrees and, being a 3B model, invented a plausible city: a fix in
+> Herndon, VA was reported as "1.2 miles west of Pittsburgh, PA". Everything below in this
+> stage and the location half of Stage 4 was dead the whole time.
+
+**When the place name cannot be resolved, Ray is explicitly instructed to say so** and
+forbidden from naming any city, town, county, or state, or estimating a bearing to one.
+An honest "locality unknown" beats a confident wrong city.
+
+If the user types coordinates or a place name in their message, that overrides the device
+fix — but a parsed coordinate more than 2,000 km from a live GPS fix is discarded as a
+misparse rather than believed.
 
 This location also **feeds retrieval**: when a question is location-scoped ("near me",
 "in my area", …), the resolved `City, State, Region` is appended to the RAG query and
 used to boost passages that name the user's region — so "dangerous animals near me" in
 Virginia surfaces copperheads and black bears, not Florida alligators (see Stage 4).
+
+### Stage 3b — Nearby Features (`_nearby_places`, `_nearby_trails`)
+
+Knowing *where* you are is not the same as knowing *what is around* you. When a question
+is location-scoped **and** names a findable kind of thing, Ray queries the offline OSM
+index (`places.db`, 62 M features) and `nps_trails.db`, and injects the real named
+features with true haversine distance and 16-point compass bearing — so "somewhere to eat
+near me" answers with actual restaurants rather than advice about foraging.
+
+Queries always constrain `category` first: `places.db` is indexed on `(category, lat)`
+and has no index on `kind`, so a kind-only filter inside a latitude band scans the band
+nationwide (~6 s) where the indexed form seeks (~0.05 s).
+
+**Coverage limit, stated in the prompt:** `build_places_index.py` extracts only
+`amenity/shop/tourism/leisure/office/healthcare/craft/place`. There is **no** `natural` or
+`waterway` in the index — no streams, creeks, rivers, lakes or springs. For water queries
+Ray surfaces what does exist (`drinking_water`, `fountain`, `water_point`) and is
+instructed to say it cannot confirm natural water from the offline map, so absence of
+evidence is never reported as evidence of absence.
 
 ### Stage 4 — Indexing & Retrieval (RAG, passage-level hybrid BM25 + cosine)
 
