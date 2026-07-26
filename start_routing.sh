@@ -142,7 +142,7 @@ for STATE in "${VALID_STATES[@]}"; do
             -p "127.0.0.1:${PORT}:5000" \
             -v "$PDIR:/data:ro" \
             ghcr.io/project-osrm/osrm-backend \
-            osrm-routed --algorithm mld --max-table-size 1000 /data/region.osrm \
+            osrm-routed --algorithm mld --max-table-size 1000 --mmap=1 /data/region.osrm \
             > /dev/null
 
         ACTIVE_MAP["${STATE}:${PROFILE}"]=$PORT

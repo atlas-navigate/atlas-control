@@ -353,8 +353,18 @@ class RoutingNode:
             if stitched:
                 return stitched
 
-        # Straight-line fallback — always returns a route so navigation keeps working
-        logger.info(f"Route fallback: straight line {origin_state}→{dest_state}")
+        # Straight-line fallback — always returns a route so navigation keeps
+        # working. WARNING, not INFO: this is a real routing failure wearing a
+        # route's clothes. Under memory pressure an OSRM cold start blows the
+        # _port_ready timeout and lands here, so the user gets a line drawn
+        # across the map with no road in it. That looked like "long-distance
+        # routing is broken" for a long time precisely because it was logged as
+        # routine and returned a well-formed payload.
+        logger.warning(
+            f"Route DEGRADED to straight line: {origin_state}→{dest_state} "
+            f"(profile={profile}). No OSRM instance served this route — check "
+            f"whether the state graphs are built and whether cold starts are "
+            f"timing out under memory pressure.")
         return self._straight_line(from_lat, from_lon, to_lat, to_lon, profile)
 
     def shutdown(self):
@@ -556,6 +566,20 @@ class RoutingNode:
                "--port", str(port),
                "--ip", "127.0.0.1",
                "--max-table-size", "1000",
+               # Memory-map the graph instead of reading it into anonymous RAM.
+               # Measured on virginia/car: RSS 1088 MB -> 42 MB, same route, and
+               # if anything a slightly faster start. On a 7.3 GB box where Ray
+               # holds ~3 GB and a long-distance route cold-starts one instance
+               # per state, this is the difference between routing and thrashing
+               # into swap until _port_ready times out and route() silently falls
+               # back to a straight line. Pages are file-backed, so the kernel
+               # reclaims them under pressure rather than swapping them.
+               #
+               # The "=1" form is required: --mmap takes an optional value, so a
+               # bare --mmap swallows the following positional path as its
+               # argument and osrm-routed exits with "the argument (...) for
+               # option '--mmap' is invalid".
+               "--mmap=1",
                osrm_file]
         try:
             proc = _STD_POPEN(
@@ -585,7 +609,8 @@ class RoutingNode:
                "-v", f"{pdir}:/data:ro",
                _OSRM_IMAGE,
                "osrm-routed", "--algorithm", "mld",
-               "--max-table-size", "1000", "/data/region.osrm"]
+               # See _start_native for why this is "=1" and what it saves.
+               "--max-table-size", "1000", "--mmap=1", "/data/region.osrm"]
         try:
             _STD_RUN(cmd, check=True, capture_output=True, timeout=30)
             logger.info(f"Docker OSRM started: {cname} → port {port}")
@@ -977,7 +1002,12 @@ class RoutingNode:
                  "name": "", "distance": 0, "duration": 0},
             ], "distance": round(dist), "duration": round(dur)}],
             "_source": "straight_line",
-        }]}
+        }],
+            # Top-level so a client does not have to dig into routes[0]._source
+            # to discover it is holding a crow-flies line rather than a route.
+            "degraded": True,
+            "degraded_reason": "no_osrm_route",
+        }
 
     # ── osrm_active.json (backward compat with start_routing.sh) ─────────────
 

@@ -226,6 +226,14 @@ class NavigationNode:
         self._thread: Optional[threading.Thread] = None
         self.running    = False
 
+        # Optional callback fired when a navigation session ends on its own
+        # (arrival), as opposed to being cancelled by the user. app.py uses it
+        # to reload Ray: arrival never goes through cancel_navigation(), so
+        # without this an API client that completed a trip left Ray unloaded
+        # indefinitely. Kept as a plain callback so this module stays unaware
+        # of the AI manager.
+        self.on_navigation_ended = None
+
         # Last known position (set by GPS node callback or manual update)
         self._lat: Optional[float] = None
         self._lon: Optional[float] = None
@@ -386,6 +394,11 @@ class NavigationNode:
             except Exception:
                 pass
         logger.info("Navigation: arrived at destination")
+        if self.on_navigation_ended:
+            try:
+                self.on_navigation_ended()
+            except Exception as e:
+                logger.warning(f"on_navigation_ended callback failed: {e}")
 
     def _trigger_reroute(self, lat: float, lon: float):
         if not self.routing_node or self._dest_lat is None:
