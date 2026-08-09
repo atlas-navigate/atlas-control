@@ -4256,7 +4256,8 @@ function MapPage({
   nodes,
   trackerDevices = [],
   onRemoveTracker,
-  device
+  device,
+  gpsStatus
 }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -4340,11 +4341,23 @@ function MapPage({
 
   // Node markers — incremental updates
   useEffect(() => {
-    var _device$my_node_id;
+    var _device$my_node_id, _gpsStatus$fix_age_s;
     const m = mapRef.current;
     if (!m || !mapLoaded) return;
     const myNodeId = (_device$my_node_id = device === null || device === void 0 ? void 0 : device.my_node_id) !== null && _device$my_node_id !== void 0 ? _device$my_node_id : null;
-    const validNodes = nodes.filter(n => n.latitude && n.longitude);
+    // The own-node row in `nodes` keeps its last written coordinates forever,
+    // so on its own it cannot tell a live lock from a position recorded days
+    // ago. Drive the marker from the live fix when there is one, and flag it
+    // stale when there isn't.
+    const liveFix = (gpsStatus === null || gpsStatus === void 0 ? void 0 : gpsStatus.fix) || null;
+    const fixAgeS = (_gpsStatus$fix_age_s = gpsStatus === null || gpsStatus === void 0 ? void 0 : gpsStatus.fix_age_s) !== null && _gpsStatus$fix_age_s !== void 0 ? _gpsStatus$fix_age_s : null;
+    const ownNodes = liveFix && myNodeId ? nodes.map(n => n.node_id === myNodeId ? {
+      ...n,
+      latitude: liveFix.latitude,
+      longitude: liveFix.longitude,
+      altitude: liveFix.altitude != null ? liveFix.altitude : n.altitude
+    } : n) : nodes;
+    const validNodes = ownNodes.filter(n => n.latitude && n.longitude);
     const activeIds = new Set(validNodes.map(n => n.node_id));
     for (const [id, {
       marker
@@ -4384,13 +4397,21 @@ function MapPage({
     validNodes.forEach(n => {
       const online = nodeOnline(n, myNodeId, !!(device !== null && device !== void 0 && device.connected));
       const isOwn = !!(myNodeId && n.node_id === myNodeId);
-      const color = isOwn ? '#f59e0b' : online ? '#00e5a0' : '#ef4444';
+      // nodeOnline() reports the radio link for the own node, which says
+      // nothing about GPS. Grey the "you are here" marker whenever there is no
+      // live fix so a last-known position never reads as a lock.
+      const ownStale = isOwn && !liveFix;
+      const color = isOwn ? ownStale ? '#64748b' : '#f59e0b' : online ? '#00e5a0' : '#ef4444';
       const displayLngLat = nodeLngLat[n.node_id] || [n.longitude, n.latitude];
       const popupExtra = isOwn ? `Lat: ${n.latitude.toFixed(6)}<br>Lon: ${n.longitude.toFixed(6)}${n.altitude != null ? '<br>Alt: ' + n.altitude.toFixed(1) + ' m' : ''}` : `Battery: ${n.battery_level != null ? n.battery_level + '%' : '—'}<br>SNR: ${n.snr != null ? n.snr.toFixed(1) + ' dB' : '—'}`;
       const navBtn = isOwn ? '' : `<button onclick="window._atlasNavTo&&window._atlasNavTo(${n.latitude},${n.longitude},${JSON.stringify(n.alias || n.long_name || n.node_id).replace(/"/g, '&quot;')})" ` + `style="margin-top:10px;padding:6px 0;background:#0ea5e9;color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:12px;font-weight:600;width:100%;letter-spacing:0.3px">` + `Navigate Here ›</button>`;
       const displayName = n.alias || n.long_name || n.short_name || n.node_id;
-      const onlineColor = online ? '#00e5a0' : '#ef4444';
-      const popupHtml = `<div style="font-family:system-ui;font-size:13px;color:#e2e8f0;min-width:170px">` + `<div style="font-weight:700;font-size:14px;margin-bottom:3px;color:${color}">${escHtml(displayName)}</div>` + `<div style="font-family:monospace;font-size:11px;color:#5a6478;margin-bottom:6px">${escHtml(n.node_id)}</div>` + `<div style="font-size:12px;color:#94a3b8">${escHtml(n.hw_model)} · ${escHtml(n.role || 'CLIENT')}</div>` + `<div style="font-size:12px;color:#94a3b8;margin-top:3px">${popupExtra}</div>` + `<div style="font-size:12px;margin-top:4px;color:${onlineColor}">${online ? '● Online' : '● Offline'} · ${timeAgo(n.last_heard)}</div>` + `${navBtn}</div>`;
+      const onlineColor = ownStale ? '#64748b' : online ? '#00e5a0' : '#ef4444';
+      // fix_age_s is null when this process has never seen a fix, in which
+      // case the coordinates predate the current session and last_heard (kept
+      // fresh by radio traffic) would badly understate their age.
+      const statusLine = ownStale ? fixAgeS != null ? `● Last known · ${timeAgo(Math.floor(Date.now() / 1000 - fixAgeS))}` : '● Last known position' : `${online ? '● Online' : '● Offline'} · ${timeAgo(n.last_heard)}`;
+      const popupHtml = `<div style="font-family:system-ui;font-size:13px;color:#e2e8f0;min-width:170px">` + `<div style="font-weight:700;font-size:14px;margin-bottom:3px;color:${color}">${escHtml(displayName)}</div>` + `<div style="font-family:monospace;font-size:11px;color:#5a6478;margin-bottom:6px">${escHtml(n.node_id)}</div>` + `<div style="font-size:12px;color:#94a3b8">${escHtml(n.hw_model)} · ${escHtml(n.role || 'CLIENT')}</div>` + `<div style="font-size:12px;color:#94a3b8;margin-top:3px">${popupExtra}</div>` + `<div style="font-size:12px;margin-top:4px;color:${onlineColor}">${statusLine}</div>` + `${navBtn}</div>`;
       const existing = markersRef.current.get(n.node_id);
       if (existing) {
         existing.marker.setLngLat(displayLngLat);
@@ -4439,7 +4460,7 @@ function MapPage({
       }
       fitDoneRef.current = true;
     }
-  }, [nodes, device, mapLoaded]);
+  }, [nodes, device, mapLoaded, gpsStatus]);
 
   // GPS trails as GeoJSON source
   useEffect(() => {
@@ -14403,6 +14424,7 @@ function MapSection({
     nodes: nodes,
     trackerDevices: trackerDevices,
     device: device,
+    gpsStatus: gpsStatus,
     onRemoveTracker: onRemoveTracker
   }), tab === 'navigate' && /*#__PURE__*/React.createElement(NavigatePage, {
     nodes: nodes,
@@ -14870,15 +14892,22 @@ function App() {
     }
   }, [themeMode]);
   const refresh = useCallback(async () => {
-    const results = await Promise.allSettled([api.get('/api/stats'), api.get('/api/nodes'), api.get('/api/messages'), api.get('/api/alerts'), api.get('/api/device'), api.get('/api/tracker/devices')]);
+    const results = await Promise.allSettled([api.get('/api/stats'), api.get('/api/nodes'), api.get('/api/messages'), api.get('/api/alerts'), api.get('/api/device'), api.get('/api/tracker/devices'),
+    // GPS status is polled alongside everything else. It used to be fetched
+    // once on mount and then updated only by socket events, so whenever the
+    // socket was unavailable or the page mounted before the first fix, the
+    // badge stayed pinned at "NO FIX" while /api/nodes polling kept the map
+    // dot moving — the map and the badge disagreeing indefinitely.
+    api.get('/api/gps')]);
     const values = results.map(r => r.status === 'fulfilled' ? r.value : undefined);
-    const [s, n, m, a, d, t] = values;
+    const [s, n, m, a, d, t, g] = values;
     if (s !== undefined) setStats(s);
     if (n !== undefined) setNodes(Array.isArray(n) ? n : []);
     if (m !== undefined) setMessages(Array.isArray(m) ? m : []);
     if (a !== undefined) setAlerts(Array.isArray(a) ? a : []);
     if (d !== undefined) setDevice(d || {});
     if (t !== undefined) setTrackerDevices(Array.isArray(t) ? t : []);
+    if (g !== undefined && g && !g.error) setGpsStatus(g);
   }, []);
 
   // Load app settings from server
@@ -14912,13 +14941,6 @@ function App() {
           }
         } catch (_) {}
       }
-    }).catch(() => {});
-  }, []);
-
-  // Load GPS status on mount
-  useEffect(() => {
-    api.get('/api/gps').then(s => {
-      if (s) setGpsStatus(s);
     }).catch(() => {});
   }, []);
 
@@ -15095,12 +15117,19 @@ function App() {
         }));
       });
       socket.on('gps_update', fix => {
+        // A gps_update is a position that just arrived, so the fix age resets.
+        // Without this the previous (possibly large) fix_age_s would linger
+        // next to a brand new fix.
         if (fix) setGpsStatus(prev => ({
           ...prev,
           connected: true,
           fix: {
             ...fix
-          }
+          },
+          last_fix: {
+            ...fix
+          },
+          fix_age_s: 0
         }));
       });
     } catch (e) {

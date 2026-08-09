@@ -519,6 +519,11 @@ _SELF_DR_INTERVAL   = 2.0
 _MODULE_DR_INTERVAL = 2.0
 # 1 m position dedup threshold in degrees (~1 m)
 _POS_DEDUP_DEG = 1e-5
+# How long a fix stays "live" after the last positional sentence. The receiver
+# is pinned to 1 Hz by _ubx_cfg_rate(), so this is 20 missed epochs — long
+# enough to ride out an I2C/serial hiccup, short enough that a dead receiver
+# stops being reported as a lock.
+_FIX_STALE_S = 20.0
 
 
 class GpsNode:
@@ -554,6 +559,12 @@ class GpsNode:
         self._last_accuracy = None    # last UBX accuracy; carried forward for NMEA fixes
         self._last_log_fix_type = None
         self._last_fix_log_ts = 0.0
+        # Wall-clock of the last positional sentence, set before the DR
+        # rate-limit and the stationary dedup so a parked receiver holding a
+        # perfect lock never ages out. current_fix["timestamp"] cannot be used
+        # for this: the dedup returns without refreshing it.
+        self._last_fix_rx_ts  = 0.0
+        self._last_fix_live   = None   # last live/stale state we emitted
 
         # Self-DR state
         self._self_dr_active = False
@@ -596,13 +607,34 @@ class GpsNode:
         """Register callback for every position fix: cb(fix_dict)."""
         self._on_fix_cb = cb
 
+    def _fix_age(self) -> Optional[float]:
+        """Seconds since the last positional sentence, or None if we have
+        never had one this process."""
+        if not self._last_fix_rx_ts:
+            return None
+        return time.time() - self._last_fix_rx_ts
+
+    def fix_is_live(self) -> bool:
+        """True while the receiver is still delivering positions."""
+        age = self._fix_age()
+        return bool(self.current_fix) and age is not None and age < _FIX_STALE_S
+
     def get_status(self) -> dict:
-        fix = self.current_fix
+        fix  = self.current_fix
+        age  = self._fix_age()
+        live = bool(fix) and age is not None and age < _FIX_STALE_S
         return {
             "connected":  self.connected,
             "port":       self._active_port or self.port,
             "baud":       self.baud,
-            "fix":        fix,
+            # `fix` keeps its original contract: a live fix, or None. It goes
+            # back to None when the receiver stops, so the UI can no longer be
+            # left showing a lock that ended minutes ago.
+            "fix":        fix if live else None,
+            # The last position we ever had, regardless of age, so callers can
+            # show a "last known" marker without pretending it is a fix.
+            "last_fix":   fix,
+            "fix_age_s":  round(age, 1) if age is not None else None,
             "dr_active":  self._self_dr_active,
         }
 
@@ -1006,6 +1038,12 @@ class GpsNode:
         now   = time.time()
         is_dr = FixType.is_dr(fix_type)
 
+        # Liveness is "a position arrived", not "the position changed" — record
+        # it before the DR rate-limit and the stationary dedup below, both of
+        # which return early. Without this a parked receiver holding a perfect
+        # lock would age out and report No Fix.
+        self._last_fix_rx_ts = now
+
         # Rate-limit DR emits
         if is_dr and (now - self._last_dr_emit) < _MODULE_DR_INTERVAL:
             return
@@ -1096,6 +1134,12 @@ class GpsNode:
         while self.running:
             time.sleep(_SELF_DR_INTERVAL)
 
+            # This is the only loop that ticks regardless of DR state, so it
+            # doubles as the status heartbeat: when a fix ages out (or a first
+            # fix lands) nothing else would tell the clients about it.
+            if self.socketio and self.fix_is_live() != self._last_fix_live:
+                self._emit_status()
+
             if not self._self_dr_active or self.connected:
                 if self.connected:
                     self._self_dr_active = False
@@ -1165,6 +1209,9 @@ class GpsNode:
 
             with self._lock:
                 self.current_fix = fix
+            # Self-DR is a position we are still actively producing, so it
+            # keeps the fix live the same way a real sentence would.
+            self._last_fix_rx_ts = now
 
             self._maybe_broadcast(new_lat, new_lon, fix.get("altitude"), now)
             self._store_fix(fix)
@@ -1287,13 +1334,18 @@ class GpsNode:
             pass
 
     def _emit_status(self):
+        """Broadcast the full status object.
+
+        The client merges this into its GPS state with a spread, so emitting
+        only {connected, port} — as this used to — meant no server event could
+        ever clear a fix that had gone stale.
+        """
         if not self.socketio:
             return
         try:
-            self.socketio.emit("gps_status", {
-                "connected": self.connected,
-                "port":      self._active_port or self.port,
-            }, namespace="/")
+            status = self.get_status()
+            self._last_fix_live = bool(status["fix"])
+            self.socketio.emit("gps_status", status, namespace="/")
         except Exception:
             pass
 
