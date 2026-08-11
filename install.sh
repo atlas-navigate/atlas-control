@@ -623,7 +623,13 @@ section "Swap / Memory Headroom"
 install -m 755 "$APP_DIR/zram-swap.sh" /usr/local/sbin/atlas-zram
 cp "$APP_DIR/zram-swap.service" /etc/systemd/system/zram-swap.service
 cat > /etc/sysctl.d/99-zram.conf <<'SYS'
-# Swap aggressively to (fast, compressed) zram; keep the filesystem cache lean.
+# Prefer pushing anonymous pages to (fast, compressed) zram over dropping page
+# cache, and reclaim VFS metadata caches (dentries/inodes) more eagerly.
+# swappiness=100 is what protects the mmap'd OSRM graphs: they are file-backed
+# page cache, so biasing reclaim toward anonymous memory keeps a warm routing
+# graph resident. vfs_cache_pressure only governs dentry/inode reclaim, not
+# those data pages. Measured against the acceptance test in 3febdd0 — do not
+# retune without re-measuring on the 7.3 GB box.
 vm.swappiness=100
 vm.vfs_cache_pressure=200
 SYS
@@ -1286,6 +1292,52 @@ if [[ ! -s "$APP_DIR/data/US.txt" || ! -s "$APP_DIR/data/cities5000.txt" ]]; the
     fi
 else
     log "Geocoder fallback data present ($(du -sh "$APP_DIR/data/US.txt" | cut -f1) + $(du -sh "$APP_DIR/data/cities5000.txt" | cut -f1))"
+fi
+
+# ════════════════════════════════════════════════════════════════════════════
+# 8d.  ROUTING MEMORY MODE  (osrm-routed --mmap)
+# ════════════════════════════════════════════════════════════════════════════
+# routing_node.py launches osrm-routed with --mmap=1 so a state graph is
+# file-backed page cache (~42 MB RSS) instead of ~1.1 GB of anonymous RAM. That
+# is what lets Ray stay resident during a long-distance route instead of being
+# evicted for it: the unload in app.py is now a pressure valve that only fires
+# below ~800 MB free, not the default path. A binary without the flag exits
+# immediately on every launch, _port_ready times out, and route() falls back to
+# a straight line — a well-formed response, so it presents as "routing is
+# broken" rather than as a missing command-line option.
+#
+# Deliberately placed OUTSIDE the full-install-only block above: §6 never runs
+# on --update, so an updated box pairs freshly-copied code that passes --mmap=1
+# with whatever osrm-routed it already had. §6's first two branches (already on
+# PATH / prebuilt binaries from $OSRM_PREBUILT_DIR) accept any vintage without a
+# version check, so a full install can land here too. Same reasoning as the §8c
+# GeoNames download and the §3b swap.
+#
+# Probe --help rather than comparing version strings: the binary itself is the
+# authority on what it accepts, and the check costs milliseconds.
+section "Routing Memory Mode (OSRM --mmap)"
+
+if ! command_exists osrm-routed; then
+    warn "osrm-routed not on PATH — skipping --mmap capability check"
+elif osrm-routed --help 2>&1 | grep -q -- '--mmap'; then
+    log "OSRM supports --mmap — Ray and long-distance routing can run together"
+elif [[ "$INSTALL_MODE" == "full" ]]; then
+    warn "Installed osrm-routed predates --mmap — rebuilding from source (20–40 min) ..."
+    bash "$APP_DIR/setup_native_osrm.sh" --no-cleanup-prompt
+    hash -r   # forget the cached path to the old binary (mirrors §6)
+    if osrm-routed --help 2>&1 | grep -q -- '--mmap'; then
+        log "OSRM rebuilt with --mmap support"
+    else
+        warn "Rebuilt osrm-routed still lacks --mmap — long-distance routes may"
+        warn "degrade to straight lines while Ray is loaded."
+    fi
+else
+    # Update mode: warn, but never start a 20–40 minute build the user did not
+    # ask for. Non-fatal either way — a box without --mmap still routes short
+    # trips, so aborting the update would be worse than shipping this warning.
+    warn "Installed osrm-routed does not support --mmap."
+    warn "Long-distance routes will degrade to straight lines while Ray is loaded."
+    warn "Fix (rebuilds OSRM v5.27.1, 20–40 min):  sudo $APP_DIR/install.sh --full"
 fi
 
 # ════════════════════════════════════════════════════════════════════════════
