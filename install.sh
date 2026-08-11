@@ -1315,26 +1315,51 @@ fi
 #
 # Probe --help rather than comparing version strings: the binary itself is the
 # authority on what it accepts, and the check costs milliseconds.
+#
+# Capture --help into a variable instead of piping it into grep. We run under
+# `set -o pipefail` (top of file), so `osrm-routed --help | grep -q --mmap`
+# reports failure whenever EITHER side fails — and plenty of CLIs print help
+# then exit non-zero. That would read a perfectly capable binary as lacking the
+# flag: a needless 20–40 min rebuild on --full, a false alarm on --update.
+# v5.27.1 happens to exit 0, but this check exists for binaries we have not seen.
+_osrm_has_mmap() {
+    local help
+    help="$(osrm-routed --help 2>&1 || true)"
+    grep -q -- '--mmap' <<<"$help"
+}
+
 section "Routing Memory Mode (OSRM --mmap)"
 
+OSRM_MMAP_OK=true
 if ! command_exists osrm-routed; then
     warn "osrm-routed not on PATH — skipping --mmap capability check"
-elif osrm-routed --help 2>&1 | grep -q -- '--mmap'; then
+elif _osrm_has_mmap; then
     log "OSRM supports --mmap — Ray and long-distance routing can run together"
 elif [[ "$INSTALL_MODE" == "full" ]]; then
     warn "Installed osrm-routed predates --mmap — rebuilding from source (20–40 min) ..."
-    bash "$APP_DIR/setup_native_osrm.sh" --no-cleanup-prompt
-    hash -r   # forget the cached path to the old binary (mirrors §6)
-    if osrm-routed --help 2>&1 | grep -q -- '--mmap'; then
-        log "OSRM rebuilt with --mmap support"
+    # Guarded: unlike §6 (where no OSRM exists at all and dying is correct), a
+    # working-but-older binary is already installed here. Under `set -e` + the
+    # ERR trap an unguarded build failure would abort the whole install and mark
+    # the update failed — worse than continuing in high-memory mode.
+    if bash "$APP_DIR/setup_native_osrm.sh" --no-cleanup-prompt; then
+        hash -r   # forget the cached path to the old binary (mirrors §6)
+        if _osrm_has_mmap; then
+            log "OSRM rebuilt with --mmap support"
+        else
+            OSRM_MMAP_OK=false
+            warn "Rebuilt osrm-routed still lacks --mmap — long-distance routes may"
+            warn "degrade to straight lines while Ray is loaded."
+        fi
     else
-        warn "Rebuilt osrm-routed still lacks --mmap — long-distance routes may"
-        warn "degrade to straight lines while Ray is loaded."
+        OSRM_MMAP_OK=false
+        warn "OSRM rebuild failed — keeping the existing binary and continuing."
+        warn "Routing stays in high-memory mode; see the summary at the end."
     fi
 else
     # Update mode: warn, but never start a 20–40 minute build the user did not
     # ask for. Non-fatal either way — a box without --mmap still routes short
     # trips, so aborting the update would be worse than shipping this warning.
+    OSRM_MMAP_OK=false
     warn "Installed osrm-routed does not support --mmap."
     warn "Long-distance routes will degrade to straight lines while Ray is loaded."
     warn "Fix (rebuilds OSRM v5.27.1, 20–40 min):  sudo $APP_DIR/install.sh --full"
@@ -1693,6 +1718,19 @@ echo ""
 if [[ "$INSTALL_MODE" == "full" && "${STATE_INPUT,,}" == "none" ]]; then
     echo -e "  ${YLW}Routing data not installed.${NC} Add states:"
     echo -e "    sudo $APP_DIR/install.sh --full   (re-run and choose states)"
+    echo ""
+fi
+# Re-surface the §8d result here. /api/update/status only returns the LAST 60
+# LINES of logs/update.log to the web UI, and ~75 lines of output follow §8d —
+# so the warning issued up there scrolls out of view for anyone updating from
+# the browser, which is how every deployed box updates. This banner is inside
+# the tail. ${OSRM_MMAP_OK:-true} because `set -u` is on and the very early
+# failure paths never reach §8d.
+if [[ "${OSRM_MMAP_OK:-true}" == "false" ]]; then
+    echo -e "  ${YLW}Routing is in high-memory mode.${NC} This osrm-routed predates --mmap,"
+    echo -e "  so each state graph costs ~1.1 GB of RAM instead of ~42 MB. Long routes"
+    echo -e "  can degrade to a straight line while Ray is loaded. To fix (20–40 min):"
+    echo -e "    sudo $APP_DIR/install.sh --full"
     echo ""
 fi
 if [[ ! -f "$APP_DIR/static/data/places.db" ]]; then
