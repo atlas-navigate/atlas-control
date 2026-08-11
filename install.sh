@@ -1618,17 +1618,22 @@ if s.get('embed_model') in (None, '', 'nomic-embed-text'):
         n = conn.execute('UPDATE ai_documents SET embedding=NULL').rowcount
         conn.commit()
         print(f'Cleared {n} stale doc embedding(s) for re-embed')
-# embed_format_v ->3: documents are now embedded per-section (passage-level /
-# chunked) so retrieval surfaces the one relevant paragraph instead of a whole
-# multi-topic doc. init_db() handles the migration and embedding wipe; this
-# block just surfaces it in install logs. (v2 was the title+tags whole-doc vector.)
-if s.get('embed_format_v') not in ('3',):
-    conn = database.get_db()
-    n = conn.execute("UPDATE ai_documents SET embedding=NULL WHERE embedding IS NOT NULL").rowcount
-    conn.commit()
-    conn.execute("INSERT INTO ai_settings (key, value) VALUES ('embed_format_v', '3') ON CONFLICT(key) DO UPDATE SET value='3'")
-    conn.commit()
-    print(f'embed_format_v->3: cleared {n} doc embedding(s) for passage-level re-embed')
+# embed_format_v: init_db() (database.py) owns this migration -- it wipes stored
+# vectors and stamps the current format whenever the marker is stale, and it ran
+# a moment ago. Report only; do NOT wipe or write the version here.
+#
+# This block used to pin the marker back to '3' while init_db() advanced it to
+# '4', so the two fought on every single run: init_db wiped and set 4, this block
+# wiped and set 3, then the atlas-control restart at the end of the install ran
+# init_db again and wiped a third time. One update re-embedded the entire
+# knowledge base three times over, forever, because the marker could never settle.
+# Hard-coding '4' here would just reset the trap at the next format bump -- the
+# version belongs in exactly one place, and that place is init_db().
+pending = database.get_db().execute(
+    "SELECT COUNT(*) FROM ai_documents WHERE embedding IS NULL").fetchone()[0]
+if pending:
+    print(f'{pending} doc(s) queued for re-embed (embed format v{s.get("embed_format_v", "?")}) '
+          f'-- the app re-embeds them in the background on startup')
 if updates:
     database.ai_set_settings(updates)
     print(f'Updated AI defaults: {updates}')
