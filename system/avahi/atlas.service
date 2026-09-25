@@ -1,0 +1,21 @@
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<!-- Managed by the Atlas updater. How phones find this Atlas on a network:
+     _atlas._tcp carries the device id and the TLS key pin, so the Atlas app
+     can recognise the unit it paired with wherever its address moves. -->
+<service-group>
+  <name>@ATLAS_DEVICE_NAME@</name>
+  <service>
+    <type>_atlas._tcp</type>
+    <port>443</port>
+    <txt-record>id=@ATLAS_DEVICE_ID@</txt-record>
+    <txt-record>fp=@ATLAS_TLS_PIN@</txt-record>
+    <txt-record>api=2</txt-record>
+  </service>
+  <service>
+    <type>_https._tcp</type>
+    <port>443</port>
+    <txt-record>app=atlas-control</txt-record>
+    <txt-record>id=@ATLAS_DEVICE_ID@</txt-record>
+  </service>
+</service-group>

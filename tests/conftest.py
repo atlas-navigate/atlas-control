@@ -20,6 +20,11 @@ if _REPO not in sys.path:
 _STATE = tempfile.mkdtemp(prefix="atlas-test-state-")
 os.environ["ATLAS_STATE_DIR"] = _STATE
 os.environ.setdefault("ATLAS_TESTING", "1")
+# Never pick up the host's own device identity, proxy secret or helper:
+# tests that need them create their own.
+os.environ["ATLAS_IDENTITY_DIR"] = os.path.join(_STATE, "no-identity")
+os.environ["ATLAS_PROXY_SECRET_FILE"] = os.path.join(_STATE, "no-identity", "proxy_secret")
+os.environ["ATLAS_HELPER_SOCKET"] = os.path.join(_STATE, "no-helper.sock")
 os.makedirs(os.path.join(_STATE, "data"), exist_ok=True)
 os.makedirs(os.path.join(_STATE, "logs"), exist_ok=True)
 os.makedirs(os.path.join(_STATE, "static"), exist_ok=True)

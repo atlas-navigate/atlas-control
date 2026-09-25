@@ -317,9 +317,12 @@ def _extra_hostnames():
 # Outermost WSGI layer: must wrap Flask-SocketIO's middleware, not sit inside
 # it, or /socket.io/ traffic would bypass every check. See request_guard.py.
 import request_guard
+import pairing
+import device_identity
 app.wsgi_app = request_guard.EdgeMiddleware(
     app.wsgi_app,
     host_policy=request_guard.HostPolicy(extra_names=_extra_hostnames),
+    client_check=pairing.client_check,
     logger=logger,
 )
 
@@ -731,8 +734,174 @@ def tracker_page():
 
 
 # ------------------------------------------------------------------ API: device
+@app.route("/api/device/info")
+def api_device_info():
+    """Public identity: what discovery shows before a device is paired."""
+    import atlas_version
+    dev = device_identity.device()
+    return jsonify({
+        "app": "atlas-control",
+        "api": 2,
+        "device_id": dev.get("device_id"),
+        "name": dev.get("name"),
+        "hostname": dev.get("hostname"),
+        "tls_spki_sha256": dev.get("tls_spki_sha256"),
+        "version": atlas_version.version(),
+        "pairing_required": pairing.required(),
+    })
+
+
+# ------------------------------------------------------------------ API: pairing
+def _pair_kind(data):
+    kind = str(data.get("kind") or "browser")
+    return kind if kind in pairing.KINDS else "browser"
+
+
+def _pair_response(client_id, token, kind, extra=None):
+    """Browsers get an HttpOnly cookie; native apps get the token itself."""
+    body = {"ok": True, "client_id": client_id, "csrf": pairing.csrf_for(pairing._hash(token))}
+    if kind in ("android", "ios"):
+        body["token"] = token
+    body.update(extra or {})
+    resp = jsonify(body)
+    resp.set_cookie(pairing.COOKIE, token, max_age=pairing.COOKIE_MAX_AGE, httponly=True,
+                    secure=request.is_secure, samesite="Strict", path="/")
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+def _hotspot_interface():
+    """ip_interface of Atlas's own hotspot, or None when it is not running."""
+    iface = _wifi_iface()
+    if not iface:
+        return None
+    out, rc = _nmcli("-t", "-f", "GENERAL.CONNECTION,IP4.ADDRESS", "dev", "show", iface)
+    if rc != 0:
+        return None
+    conn, cidr = "", None
+    for line in out.splitlines():
+        if line.startswith("GENERAL.CONNECTION:"):
+            conn = line.split(":", 1)[1].strip()
+        elif line.startswith("IP4.ADDRESS") and cidr is None:
+            cidr = line.split(":", 1)[1].strip()
+    return pairing.hotspot_network(conn == "Hotspot", lambda: cidr)
+
+
+@app.route("/api/pair/status")
+def api_pair_status():
+    client = request.environ.get("atlas.client")
+    dev = device_identity.device()
+    hs = None
+    if client is None and request.environ.get("atlas.server_addr"):
+        try:
+            hs = _hotspot_interface()
+        except Exception:
+            hs = None
+    body = {
+        "required": pairing.required(),
+        "paired": client is not None,
+        "device": {"name": dev.get("name"), "id": dev.get("device_id"), "hostname": dev.get("hostname")},
+        "via_hotspot": bool(hs and request.environ.get("atlas.server_addr") == str(hs.ip)),
+    }
+    if client is not None:
+        body["client"] = {"id": client["id"], "name": client["name"], "kind": client["kind"]}
+        if request.environ.get("atlas.auth") == "cookie":
+            body["csrf"] = pairing.csrf_for(client["token_hash"])
+    resp = jsonify(body)
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.route("/api/pair/claim", methods=["POST"])
+@limiter.limit("10 per minute")
+def api_pair_claim():
+    data = request.get_json(silent=True) or {}
+    kind = _pair_kind(data)
+    try:
+        client_id, token = pairing.claim_with_setup_code(data.get("setup_code"), data.get("name"), kind,
+                                                         request.remote_addr or "")
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 403
+    logger.info("Paired a new %s using the setup code", kind)
+    return _pair_response(client_id, token, kind)
+
+
+@app.route("/api/pair/hotspot", methods=["POST"])
+@limiter.limit("10 per minute")
+def api_pair_hotspot():
+    data = request.get_json(silent=True) or {}
+    kind = _pair_kind(data)
+    try:
+        client_id, token = pairing.claim_via_hotspot(request.environ, data.get("name"), kind,
+                                                     _hotspot_interface())
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 403
+    logger.info("Paired a new %s over Atlas's hotspot", kind)
+    return _pair_response(client_id, token, kind)
+
+
+@app.route("/api/pair/request", methods=["POST"])
+@limiter.limit("6 per minute")
+def api_pair_request():
+    data = request.get_json(silent=True) or {}
+    try:
+        req = pairing.create_request(data.get("name"), _pair_kind(data), data.get("client_nonce"))
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 429
+    socketio.emit("pair_request", {"request_id": req["request_id"], "name": pairing._clean_name(
+        data.get("name"), _pair_kind(data)), "kind": _pair_kind(data), "match_code": req["match_code"]},
+        to="paired", namespace="/")
+    return jsonify(dict(req, ok=True))
+
+
+@app.route("/api/pair/request/<request_id>")
+def api_pair_request_poll(request_id):
+    result = pairing.poll_request(request_id, request.args.get("secret"))
+    if result.get("status") == "approved":
+        kind = request.args.get("kind") or "browser"
+        return _pair_response(result["client_id"], result["token"], kind if kind in pairing.KINDS else "browser",
+                              {"status": "approved"})
+    resp = jsonify(result)
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.route("/api/pair/requests")
+def api_pair_requests():
+    return jsonify(pairing.pending_requests())
+
+
+@app.route("/api/pair/request/<request_id>/approve", methods=["POST"])
+def api_pair_approve(request_id):
+    ok = pairing.decide(request_id, True, request.environ["atlas.client"]["id"])
+    socketio.emit("pair_request_decided", {"request_id": request_id, "approved": True}, to="paired", namespace="/")
+    return jsonify({"ok": ok}), (200 if ok else 404)
+
+
+@app.route("/api/pair/request/<request_id>/deny", methods=["POST"])
+def api_pair_deny(request_id):
+    ok = pairing.decide(request_id, False, request.environ["atlas.client"]["id"])
+    socketio.emit("pair_request_decided", {"request_id": request_id, "approved": False}, to="paired", namespace="/")
+    return jsonify({"ok": ok}), (200 if ok else 404)
+
+
+@app.route("/api/pair/clients")
+def api_pair_clients():
+    me = request.environ["atlas.client"]["id"]
+    return jsonify([dict(c, this=(c["id"] == me)) for c in pairing.list_clients()])
+
+
+@app.route("/api/pair/clients/<client_id>", methods=["DELETE"])
+def api_pair_revoke(client_id):
+    ok = pairing.revoke(client_id)
+    return jsonify({"ok": ok}), (200 if ok else 404)
+
+
 @app.route("/api/device")
 def api_device():
+    if request.environ.get("atlas.client") is None and pairing.required():
+        # Unpaired callers (discovery probes) learn only that this is an Atlas.
+        return jsonify({"app": "atlas-control", "pairing_required": True})
     info = mesh.get_device_info() if mesh else {"connected": False}
     # Stable identifier the mobile apps probe for during LAN discovery.
     # Without it, a port-5000 fingerprint sweep can't distinguish Atlas
@@ -2999,6 +3168,13 @@ def handle_connect(auth=None):
     if not _is_local(request.remote_addr or ""):
         logger.warning("Rejected WebSocket client from non-local address %s", request.remote_addr or "-")
         return False
+    client = pairing.authenticate(request.environ)
+    if client is None and isinstance(auth, dict) and auth.get("token"):
+        client = pairing.lookup(str(auth["token"]))
+    if client is None and pairing.required():
+        return False
+    from flask_socketio import join_room
+    join_room("paired")
     logger.info("WebSocket client connected")
 
 @socketio.on("join_rooms")
@@ -3664,19 +3840,12 @@ def _avahi_reload_quiet():
     threading.Thread(target=_run, daemon=True, name="avahi-reload").start()
 
 def _candidate_mobile_hosts():
-    # Ordering matters: these become the apps' baseUrls and preferredBaseUrl
-    # (hosts[0]), and the mobile WebView loads whichever it ends up on.
-    #
-    #  - Numeric-IP URLs first: Chromium WebView cannot resolve .local via mDNS
-    #    but reaches a direct IP URL fine.
-    #  - For each IP, the plain-HTTP :5000 URL BEFORE the https one. Flask binds
-    #    0.0.0.0:5000 in the clear and is always up; the https/443 path depends
-    #    on nginx running with a cert the WebView trusts, which on a self-signed
-    #    box it does not — Chromium cancels the page (this was a primary cause of
-    #    the mobile "can't connect"/crash loop). Probing clients trust all certs
-    #    so https stays a usable fallback, just not the preferred base.
-    #
-    # IPv6 literals are bracketed so the URLs are well-formed.
+    """HTTPS URLs this Atlas answers on, numeric addresses first.
+
+    Chromium WebView cannot resolve .local names, so IP literals lead. There
+    are no plain-HTTP URLs: the app talks TLS only and pins this device's key
+    (see device_identity), so an address change never weakens anything.
+    """
     ip_hosts = []
     try:
         _, addrs = _discover_local_networks()
@@ -3684,42 +3853,43 @@ def _candidate_mobile_hosts():
             a = str(addr)
             if not _is_local(a):
                 continue
-            host = f"[{a}]" if ":" in a else a  # bracket IPv6 literals
-            ip_hosts.append(f"http://{host}:5000")
-            ip_hosts.append(f"https://{host}")
+            ip_hosts.append(f"https://[{a}]" if ":" in a else f"https://{a}")
     except Exception:
         pass
-    return ip_hosts + ["http://atlas.local:5000", "https://atlas.local"]
+    hostname = device_identity.device().get("hostname") or "atlas"
+    names = [f"https://{hostname}.local"]
+    if hostname != "atlas":
+        names.append("https://atlas.local")
+    return ip_hosts + names
+
 
 def _mobile_bootstrap_manifest():
-    owner = {}
-    if mesh:
-        try:
-            owner = mesh.get_owner_info() or {}
-        except Exception:
-            owner = {}
+    """What discovery (BLE, UDP beacon, /api/mobile/bootstrap) tells a phone.
+
+    Enough to find, identify and pin this Atlas — never Wi-Fi or hotspot
+    credentials, never anything personal.
+    """
+    import atlas_version
+    dev = device_identity.device()
     hosts = _candidate_mobile_hosts()
     return {
         "device": {
-            "name": owner.get("long_name") or "Atlas Control",
-            "shortName": owner.get("short_name") or "ATLS",
+            "id": dev.get("device_id"),
+            "name": dev.get("name") or "Atlas",
+            "shortName": dev.get("short") or "ATLS",
         },
         "api": {
-            "preferredBaseUrl": hosts[0],
+            "version": 2,
+            "preferredBaseUrl": hosts[0] if hosts else None,
             "baseUrls": hosts,
             "bootstrapPath": "/api/mobile/bootstrap",
         },
-        "hotspot": _current_hotspot_state(),
-        "capabilities": {
-            "mesh": bool(mesh),
-            "gps": bool(gps_manager),
-            "ai": bool(ai_manager),
-            "navigation": bool(nav_node),
-            "wifi": True,
-            "hotspot": True,
-        },
+        "tls": {"spkiSha256": dev.get("tls_spki_sha256")},
+        "pairing": {"required": pairing.required()},
+        "software": {"version": atlas_version.version()},
         "generatedAt": int(time.time()),
     }
+
 
 _NMCLI_MUTATING = {"connect", "hotspot", "disconnect", "down", "delete", "modify", "up", "add"}
 _WIFI_LIST_PREFIX = ["--escape", "yes", "-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY", "dev", "wifi", "list"]

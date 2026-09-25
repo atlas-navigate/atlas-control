@@ -211,3 +211,28 @@ class RealSystemFilesTests(unittest.TestCase):
         self.assertIn("/etc/atlas/identity/tls/cert.pem", site)
         self.assertNotIn("0.0.0.0:5000", site)
         self.assertEqual(stat.S_IMODE(os.stat(sb.paths.p("/usr/local/lib/atlas/bin/atlas-launch")).st_mode), 0o755)
+
+
+class DiscoveryFilesTests(unittest.TestCase):
+    def test_avahi_advert_carries_identity_and_old_advert_is_restorable(self):
+        sb = Sandbox()
+        self.addCleanup(sb.cleanup)
+        from atlas_engine import identity, sysfiles
+        device = identity.ensure(hostname="atlas")
+        old = sb.paths.p("/etc/avahi/services/atlas-http.service")
+        os.makedirs(os.path.dirname(old), exist_ok=True)
+        open(old, "w").write("<service-group>old _http._tcp 5000</service-group>")
+        release = os.path.join(sb.root, "rel")
+        shutil.copytree(os.path.join(REPO, "system"), os.path.join(release, "system"))
+        backup = os.path.join(sb.root, "bk")
+        with mock.patch("atlas_engine.firewall.check", return_value=mock.Mock(returncode=0)):
+            sysfiles.install(release, backup, sb.runner)
+        self.assertFalse(os.path.exists(old))
+        advert = open(sb.paths.p("/etc/avahi/services/atlas.service")).read()
+        self.assertIn("<type>_atlas._tcp</type>", advert)
+        self.assertIn(f"id={device['device_id']}", advert)
+        self.assertIn(f"fp={device['tls_spki_sha256']}", advert)
+        self.assertNotIn("5000", advert)
+        sysfiles.restore(backup)
+        self.assertTrue(os.path.exists(old))
+        self.assertFalse(os.path.exists(sb.paths.p("/etc/avahi/services/atlas.service")))

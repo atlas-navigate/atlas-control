@@ -2090,6 +2090,12 @@ async function apiRequest(url, { method = 'GET', data, timeoutMs, headers = {} }
     const r = await fetch(url, init);
     let body = null;
     try { body = await r.json(); } catch {}
+    // This device was removed from Atlas (or its pairing expired): show the
+    // pairing screen again instead of a page full of errors.
+    if (r.status === 401 && body?.code === 'pairing_required' && !window.__atlasReloading) {
+      window.__atlasReloading = true;
+      window.location.reload();
+    }
     if (!r.ok) throw new Error(body?.error || `Request failed: ${r.status}`);
     return body;
   } catch (err) {
@@ -7011,6 +7017,7 @@ function SettingsPage({ onSettingsSaved, themeMode, onThemeModeChange, hiddenPag
       <GpsShareSection nodes={nodes || []} />
 
       {/* Software Update — full width */}
+      <ConnectedDevicesSection />
       <SoftwareUpdateSection />
 
       {/* Danger Zone — factory reset */}
@@ -10596,6 +10603,214 @@ const DEFAULT_PAGES = [
 ];
 const ALWAYS_VISIBLE_PAGES = ['system'];
 
+// ═══════════════════════════════════════════════
+// Pairing — no accounts, no passwords: a device proves once that it is with
+// this Atlas (label code, Atlas's own Wi-Fi, or "Allow" on a paired device).
+// ═══════════════════════════════════════════════
+function defaultDeviceName() {
+  const ua = navigator.userAgent || '';
+  const os = /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Android/.test(ua) ? 'Android'
+    : /Mac OS X/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows' : /Linux/.test(ua) ? 'Linux' : 'this device';
+  const br = /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome'
+    : /Safari\//.test(ua) ? 'Safari' : 'Browser';
+  return `${br} on ${os}`;
+}
+
+async function pairJson(url, data) {
+  const r = await fetch(url, {
+    method: data === undefined ? 'GET' : 'POST',
+    headers: data === undefined ? {} : { 'Content-Type': 'application/json' },
+    body: data === undefined ? undefined : JSON.stringify(data),
+    credentials: 'same-origin', cache: 'no-store',
+  });
+  let body = {};
+  try { body = await r.json(); } catch (e) {}
+  if (!r.ok) throw new Error(body.error || `Request failed (${r.status})`);
+  return body;
+}
+
+function PairingScreen({ status }) {
+  const [mode, setMode] = useState(status.via_hotspot ? 'hotspot' : 'choose');
+  const [name, setName] = useState(defaultDeviceName());
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [req, setReq] = useState(null);           // pending approval request
+  const [reqState, setReqState] = useState('');
+
+  const done = () => window.location.reload();
+  const run = (fn) => { setBusy(true); setError(''); fn().catch(e => setError(e.message)).finally(() => setBusy(false)); };
+  const submitCode = () => run(() => pairJson('/api/pair/claim', { setup_code: code, name, kind: 'browser' }).then(done));
+
+  useEffect(() => {
+    if (!req) return;
+    const iv = setInterval(() => {
+      pairJson(`/api/pair/request/${req.request_id}?secret=${encodeURIComponent(req.secret)}&kind=browser`)
+        .then(r => {
+          setReqState(r.status);
+          if (r.status === 'approved') { clearInterval(iv); done(); }
+          if (['denied', 'expired', 'unknown'].includes(r.status)) clearInterval(iv);
+        }).catch(() => {});
+    }, 2000);
+    return () => clearInterval(iv);
+  }, [req]);
+
+  const box = {maxWidth:420,margin:'0 auto',padding:'32px 20px'};
+  const card = {background:'var(--bg-card)',border:'1px solid var(--border)',borderRadius:12,padding:20,marginTop:16};
+  const input = {width:'100%',boxSizing:'border-box',padding:'10px 12px',borderRadius:8,border:'1px solid var(--border)',background:'var(--bg-input)',color:'var(--text-primary)',fontSize:15};
+  const muted = {fontSize:13,color:'var(--text-muted)',lineHeight:1.5};
+  const option = {display:'block',width:'100%',textAlign:'left',padding:'14px 16px',marginTop:10,borderRadius:10,border:'1px solid var(--border)',background:'var(--bg-input)',color:'var(--text-primary)',cursor:'pointer',fontSize:14};
+
+  return (
+    <div style={{minHeight:'100vh',background:'var(--bg-primary)',color:'var(--text-primary)'}}>
+      <div style={box}>
+        <img src="/static/img/atlas-control-logo.png" alt="" style={{height:44,marginBottom:12}}/>
+        <h1 style={{fontSize:22,margin:'0 0 6px'}}>Connect to {status.device?.name || 'Atlas'}</h1>
+        <div style={muted}>This {name.includes('iPhone') || name.includes('Android') ? 'phone' : 'device'} hasn't been connected to this Atlas before. You only need to do this once.</div>
+
+        <div style={card}>
+          <label style={{...muted,display:'block',marginBottom:6}}>Name for this device</label>
+          <input style={input} value={name} maxLength={60} onChange={e => setName(e.target.value)}/>
+
+          {mode === 'hotspot' && (
+            <>
+              <div style={{...muted,marginTop:14}}>You're connected to Atlas's own Wi-Fi.</div>
+              <button className="btn btn-primary" style={{width:'100%',marginTop:12,padding:12}} disabled={busy}
+                onClick={() => run(() => pairJson('/api/pair/hotspot', { name, kind: 'browser' }).then(done))}>
+                {busy ? 'Connecting…' : 'Connect this device'}
+              </button>
+              <button className="btn btn-sm" style={{marginTop:10}} onClick={() => setMode('choose')}>Other ways to connect</button>
+            </>
+          )}
+
+          {mode === 'choose' && (
+            <>
+              <button style={option} onClick={() => setMode('code')}>
+                <strong>Enter the setup code</strong>
+                <div style={muted}>It's printed on the label on your Atlas.</div>
+              </button>
+              <button style={option} disabled={busy} onClick={() => run(() =>
+                pairJson('/api/pair/request', { name, kind: 'browser', client_nonce: String(Math.random()).slice(2) })
+                  .then(r => { setReq(r); setReqState('pending'); setMode('waiting'); }))}>
+                <strong>Ask a connected phone or computer</strong>
+                <div style={muted}>Someone already using this Atlas taps “Allow”.</div>
+              </button>
+              <div style={{...muted,marginTop:14}}>
+                Or join Atlas's own Wi-Fi network (name and password are on the label), then open Atlas again.
+              </div>
+            </>
+          )}
+
+          {mode === 'code' && (
+            <>
+              <label style={{...muted,display:'block',margin:'14px 0 6px'}}>Setup code from the label</label>
+              <input style={{...input,letterSpacing:'0.12em',textTransform:'uppercase',fontFamily:'var(--font-mono)'}}
+                value={code} autoFocus autoCapitalize="characters" autoComplete="off" spellCheck={false}
+                placeholder="XXXX-XXXX-XXXX" onChange={e => setCode(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && code.trim() && !busy) submitCode(); }}/>
+              <button className="btn btn-primary" style={{width:'100%',marginTop:12,padding:12}} disabled={busy || !code.trim()}
+                onClick={submitCode}>
+                {busy ? 'Connecting…' : 'Connect'}
+              </button>
+              <button className="btn btn-sm" style={{marginTop:10}} onClick={() => setMode('choose')}>Back</button>
+            </>
+          )}
+
+          {mode === 'waiting' && req && (
+            <>
+              <div style={{...muted,marginTop:14}}>On a phone or computer that already uses this Atlas, tap <strong>Allow</strong> when it asks. Check both screens show:</div>
+              <div style={{fontSize:34,fontWeight:700,letterSpacing:'0.3em',textAlign:'center',margin:'14px 0',fontFamily:'var(--font-mono)'}}>{req.match_code}</div>
+              <div style={{...muted,textAlign:'center'}}>
+                {reqState === 'pending' ? 'Waiting for approval…' : reqState === 'denied' ? 'The request was declined.'
+                  : reqState === 'expired' ? 'The request timed out.' : ''}
+              </div>
+              {reqState !== 'pending' && (
+                <button className="btn btn-sm" style={{marginTop:10}} onClick={() => { setReq(null); setMode('choose'); }}>Try again</button>
+              )}
+            </>
+          )}
+
+          {error && <div style={{color:'var(--accent-red)',fontSize:13,marginTop:10}}>{error}</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AtlasRoot() {
+  const [status, setStatus] = useState(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    pairJson('/api/pair/status').then(s => {
+      if (s.csrf) window.__atlasCsrf = s.csrf;
+      setStatus(s);
+    }).catch(() => setFailed(true));
+  }, []);
+  if (failed) return <App />;              // older Atlas without pairing
+  if (!status) return null;
+  if (status.required && !status.paired) return <PairingScreen status={status} />;
+  return <App />;
+}
+
+function PairRequestPrompt({ requests, onDone }) {
+  if (!requests.length) return null;
+  const r = requests[0];
+  const decide = (allow) => api.post(`/api/pair/request/${r.request_id}/${allow ? 'approve' : 'deny'}`)
+    .catch(() => {}).finally(() => onDone(r.request_id));
+  return (
+    <div role="dialog" aria-modal="true" style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',zIndex:10000,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+      <div className="card" style={{maxWidth:380,width:'100%'}}>
+        <div style={{fontSize:16,fontWeight:700,marginBottom:6}}>Allow a new device?</div>
+        <div style={{fontSize:13,color:'var(--text-secondary)'}}>
+          <strong>{r.name}</strong> wants to use this Atlas. Only allow it if the same code is showing on that device:
+        </div>
+        <div style={{fontSize:30,fontWeight:700,letterSpacing:'0.3em',textAlign:'center',margin:'14px 0',fontFamily:'var(--font-mono)'}}>{r.match_code}</div>
+        <div style={{display:'flex',gap:10,justifyContent:'flex-end'}}>
+          <button className="btn btn-sm" onClick={() => decide(false)}>Don't allow</button>
+          <button className="btn btn-primary btn-sm" onClick={() => decide(true)}>Allow</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ConnectedDevicesSection() {
+  const [clients, setClients] = useState(null);
+  const [confirm, setConfirm] = useState(null);
+  const load = () => api.get('/api/pair/clients').then(setClients).catch(() => setClients([]));
+  useEffect(() => { load(); }, []);
+  const SL = {fontSize:11,fontWeight:700,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:12};
+  const muted = {fontSize:12,color:'var(--text-muted)'};
+  const kindLabel = { browser: 'Browser', android: 'Android app', ios: 'iPhone app', tracker: 'Location sharing' };
+  const remove = (c) => api.del(`/api/pair/clients/${c.id}`).then(() => {
+    setConfirm(null);
+    if (c.this) window.location.reload(); else load();
+  }).catch(() => setConfirm(null));
+  if (clients === null) return null;
+  return (
+    <div className="card" style={{marginBottom:16}}>
+      <div style={SL}>Connected devices</div>
+      <div style={{...muted,marginBottom:10}}>Phones and browsers that can use this Atlas. Remove any you don't recognise.</div>
+      {clients.map(c => (
+        <div key={c.id} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderTop:'1px solid var(--border)'}}>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:13,fontWeight:600}}>{c.name}{c.this ? ' (this device)' : ''}</div>
+            <div style={muted}>{kindLabel[c.kind] || c.kind}{c.last_seen ? ` · last used ${new Date(c.last_seen * 1000).toLocaleDateString()}` : ''}</div>
+          </div>
+          {confirm === c.id ? (
+            <>
+              <button className="btn btn-sm" onClick={() => setConfirm(null)}>Keep</button>
+              <button className="btn btn-sm" style={{color:'var(--accent-red)'}} onClick={() => remove(c)}>Remove</button>
+            </>
+          ) : (
+            <button className="btn btn-sm" onClick={() => setConfirm(c.id)}>Remove</button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function App() {
   const searchParams = new URLSearchParams(window.location.search);
   const isAtlasMobileApp = isAtlasMobileClient();
@@ -10603,6 +10818,7 @@ function App() {
   const dashboardTitle = 'Atlas Control';
   const initialPage = searchParams.get('page') || 'dashboard';
   const [page, setPage] = useState(initialPage);
+  const [pairRequests, setPairRequests] = useState([]);
   // Deep-link support: ?page=&tab= seeds the remembered sub-tab once at startup
   useState(() => {
     const t = searchParams.get('tab');
@@ -10776,6 +10992,14 @@ function App() {
 
       socket.on('disconnect', () => {
         setSocketConnected(false);
+      });
+
+      // Another device asking to be allowed onto this Atlas.
+      socket.on('pair_request', (r) => {
+        if (r && r.request_id) setPairRequests(prev => prev.some(x => x.request_id === r.request_id) ? prev : [...prev, r]);
+      });
+      socket.on('pair_request_decided', (r) => {
+        if (r && r.request_id) setPairRequests(prev => prev.filter(x => x.request_id !== r.request_id));
       });
 
       // node_update carries the node dict directly — update state without full refresh
@@ -11008,6 +11232,8 @@ function App() {
   const hasAlerts = alerts.filter(a => !a.acknowledged).length > 0;
   return (
     <SettingsContext.Provider value={{...appSettings, refresh}}>
+      <PairRequestPrompt requests={pairRequests}
+        onDone={(id) => setPairRequests(prev => prev.filter(x => x.request_id !== id))}/>
       <div className="app" style={isAtlasMobileApp ? {paddingLeft:0, display:'flex', flexDirection:'column', position:'fixed', inset:0, height:'100%', overflow:'hidden'} : null}>
         {!isAtlasMobileApp && (
         <nav className="sidebar"
@@ -11161,7 +11387,7 @@ function App() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+ReactDOM.createRoot(document.getElementById('root')).render(<AtlasRoot />);
 </script>
 </body>
 </html>

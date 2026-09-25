@@ -34,7 +34,11 @@ class SystemFilesError(Exception):
 
 
 def template_vars():
+    device = fsutil.read_json(os.path.join(paths.IDENTITY, "device.json"), {}) or {}
     return {
+        "ATLAS_DEVICE_NAME": _xml_safe(device.get("name") or "Atlas"),
+        "ATLAS_DEVICE_ID": _xml_safe(device.get("device_id") or "unprovisioned"),
+        "ATLAS_TLS_PIN": _xml_safe(device.get("tls_spki_sha256") or ""),
         "ATLAS_STATE_DIR": paths.APP_STATE,
         "ATLAS_SERVICE_USER": paths.SERVICE_USER,
         "ATLAS_TLS_CERT": "/etc/atlas/identity/tls/cert.pem",
@@ -42,6 +46,10 @@ def template_vars():
         "ATLAS_PROXY_SECRET_CONF": "/etc/atlas/identity/nginx-proxy-secret.conf",
         "ATLAS_CURRENT": "/opt/atlas/current",
     }
+
+
+def _xml_safe(value):
+    return "".join(c for c in str(value) if c.isalnum() or c in "-_.:= ")
 
 
 def load_spec(release_dir):
@@ -99,6 +107,17 @@ def install(release_dir, backup_dir, runner):
             fsutil.atomic_write_json(record_path, record, mode=0o600)
         fsutil.atomic_write_bytes(dst, new, mode=mode)
         changed.add(entry.get("kind") or "plain")
+    for i, dst_abs in enumerate(spec.get("remove", [])):
+        dst = paths.p(dst_abs)
+        if not os.path.isfile(dst) or dst in done:
+            continue
+        saved = os.path.join(backup_dir, f"removed-{i}")
+        shutil.copy2(dst, saved, follow_symlinks=False)
+        record["files"].append({"dst": dst, "existed": True, "saved": saved,
+                                "mode": os.lstat(dst).st_mode & 0o7777, "kind": "removed"})
+        fsutil.atomic_write_json(record_path, record, mode=0o600)
+        os.unlink(dst)
+        changed.add("avahi" if "/avahi/" in dst else "plain")
     for link in spec.get("symlinks", []):
         dst = paths.p(link["link"])
         target = link["target"]

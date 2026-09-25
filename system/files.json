@@ -108,6 +108,13 @@
       "dst": "/usr/local/lib/atlas/bin/atlas-identity",
       "mode": "0755",
       "kind": "plain"
+    },
+    {
+      "src": "avahi/atlas.service",
+      "dst": "/etc/avahi/services/atlas.service",
+      "mode": "0644",
+      "kind": "avahi",
+      "template": true
     }
   ],
   "symlinks": [
@@ -120,6 +127,10 @@
     "atlas-helper.socket",
     "atlas-update-recover.service",
     "atlas-firstboot.service",
+    "atlas-firewall.service",
     "atlas-control.service"
+  ],
+  "remove": [
+    "/etc/avahi/services/atlas-http.service"
   ]
 }

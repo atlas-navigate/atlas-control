@@ -1058,7 +1058,7 @@ async function apiRequest(url, {
   const requestTimeoutMs = apiTimeoutFor(url, method, timeoutMs);
   const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
   try {
-    var _body;
+    var _body, _body2;
     const init = {
       method,
       // X-Atlas-CSRF marks requests from Atlas's own pages (see atlas-safety.js).
@@ -1077,7 +1077,13 @@ async function apiRequest(url, {
     try {
       body = await r.json();
     } catch {}
-    if (!r.ok) throw new Error(((_body = body) === null || _body === void 0 ? void 0 : _body.error) || `Request failed: ${r.status}`);
+    // This device was removed from Atlas (or its pairing expired): show the
+    // pairing screen again instead of a page full of errors.
+    if (r.status === 401 && ((_body = body) === null || _body === void 0 ? void 0 : _body.code) === 'pairing_required' && !window.__atlasReloading) {
+      window.__atlasReloading = true;
+      window.location.reload();
+    }
+    if (!r.ok) throw new Error(((_body2 = body) === null || _body2 === void 0 ? void 0 : _body2.error) || `Request failed: ${r.status}`);
     return body;
   } catch (err) {
     if (err && err.name === 'AbortError') {
@@ -8877,7 +8883,7 @@ function SettingsPage({
     }
   }, "\u2193")))))), /*#__PURE__*/React.createElement(DeviceConfigSection, null), /*#__PURE__*/React.createElement(GpsShareSection, {
     nodes: nodes || []
-  }), /*#__PURE__*/React.createElement(SoftwareUpdateSection, null), /*#__PURE__*/React.createElement(FactoryResetSection, null), /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement(ConnectedDevicesSection, null), /*#__PURE__*/React.createElement(SoftwareUpdateSection, null), /*#__PURE__*/React.createElement(FactoryResetSection, null), /*#__PURE__*/React.createElement("div", {
     className: "settings-actions",
     style: {
       marginTop: 4
@@ -14841,6 +14847,419 @@ const DEFAULT_PAGES = [{
   group: 'ai'
 }];
 const ALWAYS_VISIBLE_PAGES = ['system'];
+
+// ═══════════════════════════════════════════════
+// Pairing — no accounts, no passwords: a device proves once that it is with
+// this Atlas (label code, Atlas's own Wi-Fi, or "Allow" on a paired device).
+// ═══════════════════════════════════════════════
+function defaultDeviceName() {
+  const ua = navigator.userAgent || '';
+  const os = /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Android/.test(ua) ? 'Android' : /Mac OS X/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows' : /Linux/.test(ua) ? 'Linux' : 'this device';
+  const br = /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : 'Browser';
+  return `${br} on ${os}`;
+}
+async function pairJson(url, data) {
+  const r = await fetch(url, {
+    method: data === undefined ? 'GET' : 'POST',
+    headers: data === undefined ? {} : {
+      'Content-Type': 'application/json'
+    },
+    body: data === undefined ? undefined : JSON.stringify(data),
+    credentials: 'same-origin',
+    cache: 'no-store'
+  });
+  let body = {};
+  try {
+    body = await r.json();
+  } catch (e) {}
+  if (!r.ok) throw new Error(body.error || `Request failed (${r.status})`);
+  return body;
+}
+function PairingScreen({
+  status
+}) {
+  var _status$device;
+  const [mode, setMode] = useState(status.via_hotspot ? 'hotspot' : 'choose');
+  const [name, setName] = useState(defaultDeviceName());
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [req, setReq] = useState(null); // pending approval request
+  const [reqState, setReqState] = useState('');
+  const done = () => window.location.reload();
+  const run = fn => {
+    setBusy(true);
+    setError('');
+    fn().catch(e => setError(e.message)).finally(() => setBusy(false));
+  };
+  const submitCode = () => run(() => pairJson('/api/pair/claim', {
+    setup_code: code,
+    name,
+    kind: 'browser'
+  }).then(done));
+  useEffect(() => {
+    if (!req) return;
+    const iv = setInterval(() => {
+      pairJson(`/api/pair/request/${req.request_id}?secret=${encodeURIComponent(req.secret)}&kind=browser`).then(r => {
+        setReqState(r.status);
+        if (r.status === 'approved') {
+          clearInterval(iv);
+          done();
+        }
+        if (['denied', 'expired', 'unknown'].includes(r.status)) clearInterval(iv);
+      }).catch(() => {});
+    }, 2000);
+    return () => clearInterval(iv);
+  }, [req]);
+  const box = {
+    maxWidth: 420,
+    margin: '0 auto',
+    padding: '32px 20px'
+  };
+  const card = {
+    background: 'var(--bg-card)',
+    border: '1px solid var(--border)',
+    borderRadius: 12,
+    padding: 20,
+    marginTop: 16
+  };
+  const input = {
+    width: '100%',
+    boxSizing: 'border-box',
+    padding: '10px 12px',
+    borderRadius: 8,
+    border: '1px solid var(--border)',
+    background: 'var(--bg-input)',
+    color: 'var(--text-primary)',
+    fontSize: 15
+  };
+  const muted = {
+    fontSize: 13,
+    color: 'var(--text-muted)',
+    lineHeight: 1.5
+  };
+  const option = {
+    display: 'block',
+    width: '100%',
+    textAlign: 'left',
+    padding: '14px 16px',
+    marginTop: 10,
+    borderRadius: 10,
+    border: '1px solid var(--border)',
+    background: 'var(--bg-input)',
+    color: 'var(--text-primary)',
+    cursor: 'pointer',
+    fontSize: 14
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      minHeight: '100vh',
+      background: 'var(--bg-primary)',
+      color: 'var(--text-primary)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: box
+  }, /*#__PURE__*/React.createElement("img", {
+    src: "/static/img/atlas-control-logo.png",
+    alt: "",
+    style: {
+      height: 44,
+      marginBottom: 12
+    }
+  }), /*#__PURE__*/React.createElement("h1", {
+    style: {
+      fontSize: 22,
+      margin: '0 0 6px'
+    }
+  }, "Connect to ", ((_status$device = status.device) === null || _status$device === void 0 ? void 0 : _status$device.name) || 'Atlas'), /*#__PURE__*/React.createElement("div", {
+    style: muted
+  }, "This ", name.includes('iPhone') || name.includes('Android') ? 'phone' : 'device', " hasn't been connected to this Atlas before. You only need to do this once."), /*#__PURE__*/React.createElement("div", {
+    style: card
+  }, /*#__PURE__*/React.createElement("label", {
+    style: {
+      ...muted,
+      display: 'block',
+      marginBottom: 6
+    }
+  }, "Name for this device"), /*#__PURE__*/React.createElement("input", {
+    style: input,
+    value: name,
+    maxLength: 60,
+    onChange: e => setName(e.target.value)
+  }), mode === 'hotspot' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...muted,
+      marginTop: 14
+    }
+  }, "You're connected to Atlas's own Wi-Fi."), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary",
+    style: {
+      width: '100%',
+      marginTop: 12,
+      padding: 12
+    },
+    disabled: busy,
+    onClick: () => run(() => pairJson('/api/pair/hotspot', {
+      name,
+      kind: 'browser'
+    }).then(done))
+  }, busy ? 'Connecting…' : 'Connect this device'), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-sm",
+    style: {
+      marginTop: 10
+    },
+    onClick: () => setMode('choose')
+  }, "Other ways to connect")), mode === 'choose' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
+    style: option,
+    onClick: () => setMode('code')
+  }, /*#__PURE__*/React.createElement("strong", null, "Enter the setup code"), /*#__PURE__*/React.createElement("div", {
+    style: muted
+  }, "It's printed on the label on your Atlas.")), /*#__PURE__*/React.createElement("button", {
+    style: option,
+    disabled: busy,
+    onClick: () => run(() => pairJson('/api/pair/request', {
+      name,
+      kind: 'browser',
+      client_nonce: String(Math.random()).slice(2)
+    }).then(r => {
+      setReq(r);
+      setReqState('pending');
+      setMode('waiting');
+    }))
+  }, /*#__PURE__*/React.createElement("strong", null, "Ask a connected phone or computer"), /*#__PURE__*/React.createElement("div", {
+    style: muted
+  }, "Someone already using this Atlas taps \u201CAllow\u201D.")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...muted,
+      marginTop: 14
+    }
+  }, "Or join Atlas's own Wi-Fi network (name and password are on the label), then open Atlas again.")), mode === 'code' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("label", {
+    style: {
+      ...muted,
+      display: 'block',
+      margin: '14px 0 6px'
+    }
+  }, "Setup code from the label"), /*#__PURE__*/React.createElement("input", {
+    style: {
+      ...input,
+      letterSpacing: '0.12em',
+      textTransform: 'uppercase',
+      fontFamily: 'var(--font-mono)'
+    },
+    value: code,
+    autoFocus: true,
+    autoCapitalize: "characters",
+    autoComplete: "off",
+    spellCheck: false,
+    placeholder: "XXXX-XXXX-XXXX",
+    onChange: e => setCode(e.target.value),
+    onKeyDown: e => {
+      if (e.key === 'Enter' && code.trim() && !busy) submitCode();
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary",
+    style: {
+      width: '100%',
+      marginTop: 12,
+      padding: 12
+    },
+    disabled: busy || !code.trim(),
+    onClick: submitCode
+  }, busy ? 'Connecting…' : 'Connect'), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-sm",
+    style: {
+      marginTop: 10
+    },
+    onClick: () => setMode('choose')
+  }, "Back")), mode === 'waiting' && req && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...muted,
+      marginTop: 14
+    }
+  }, "On a phone or computer that already uses this Atlas, tap ", /*#__PURE__*/React.createElement("strong", null, "Allow"), " when it asks. Check both screens show:"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 34,
+      fontWeight: 700,
+      letterSpacing: '0.3em',
+      textAlign: 'center',
+      margin: '14px 0',
+      fontFamily: 'var(--font-mono)'
+    }
+  }, req.match_code), /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...muted,
+      textAlign: 'center'
+    }
+  }, reqState === 'pending' ? 'Waiting for approval…' : reqState === 'denied' ? 'The request was declined.' : reqState === 'expired' ? 'The request timed out.' : ''), reqState !== 'pending' && /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-sm",
+    style: {
+      marginTop: 10
+    },
+    onClick: () => {
+      setReq(null);
+      setMode('choose');
+    }
+  }, "Try again")), error && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: 'var(--accent-red)',
+      fontSize: 13,
+      marginTop: 10
+    }
+  }, error))));
+}
+function AtlasRoot() {
+  const [status, setStatus] = useState(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    pairJson('/api/pair/status').then(s => {
+      if (s.csrf) window.__atlasCsrf = s.csrf;
+      setStatus(s);
+    }).catch(() => setFailed(true));
+  }, []);
+  if (failed) return /*#__PURE__*/React.createElement(App, null); // older Atlas without pairing
+  if (!status) return null;
+  if (status.required && !status.paired) return /*#__PURE__*/React.createElement(PairingScreen, {
+    status: status
+  });
+  return /*#__PURE__*/React.createElement(App, null);
+}
+function PairRequestPrompt({
+  requests,
+  onDone
+}) {
+  if (!requests.length) return null;
+  const r = requests[0];
+  const decide = allow => api.post(`/api/pair/request/${r.request_id}/${allow ? 'approve' : 'deny'}`).catch(() => {}).finally(() => onDone(r.request_id));
+  return /*#__PURE__*/React.createElement("div", {
+    role: "dialog",
+    "aria-modal": "true",
+    style: {
+      position: 'fixed',
+      inset: 0,
+      background: 'rgba(0,0,0,0.55)',
+      zIndex: 10000,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 16
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      maxWidth: 380,
+      width: '100%'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 16,
+      fontWeight: 700,
+      marginBottom: 6
+    }
+  }, "Allow a new device?"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: 'var(--text-secondary)'
+    }
+  }, /*#__PURE__*/React.createElement("strong", null, r.name), " wants to use this Atlas. Only allow it if the same code is showing on that device:"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 30,
+      fontWeight: 700,
+      letterSpacing: '0.3em',
+      textAlign: 'center',
+      margin: '14px 0',
+      fontFamily: 'var(--font-mono)'
+    }
+  }, r.match_code), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 10,
+      justifyContent: 'flex-end'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-sm",
+    onClick: () => decide(false)
+  }, "Don't allow"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary btn-sm",
+    onClick: () => decide(true)
+  }, "Allow"))));
+}
+function ConnectedDevicesSection() {
+  const [clients, setClients] = useState(null);
+  const [confirm, setConfirm] = useState(null);
+  const load = () => api.get('/api/pair/clients').then(setClients).catch(() => setClients([]));
+  useEffect(() => {
+    load();
+  }, []);
+  const SL = {
+    fontSize: 11,
+    fontWeight: 700,
+    color: 'var(--text-muted)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    marginBottom: 12
+  };
+  const muted = {
+    fontSize: 12,
+    color: 'var(--text-muted)'
+  };
+  const kindLabel = {
+    browser: 'Browser',
+    android: 'Android app',
+    ios: 'iPhone app',
+    tracker: 'Location sharing'
+  };
+  const remove = c => api.del(`/api/pair/clients/${c.id}`).then(() => {
+    setConfirm(null);
+    if (c.this) window.location.reload();else load();
+  }).catch(() => setConfirm(null));
+  if (clients === null) return null;
+  return /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      marginBottom: 16
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: SL
+  }, "Connected devices"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...muted,
+      marginBottom: 10
+    }
+  }, "Phones and browsers that can use this Atlas. Remove any you don't recognise."), clients.map(c => /*#__PURE__*/React.createElement("div", {
+    key: c.id,
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10,
+      padding: '8px 0',
+      borderTop: '1px solid var(--border)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      minWidth: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      fontWeight: 600
+    }
+  }, c.name, c.this ? ' (this device)' : ''), /*#__PURE__*/React.createElement("div", {
+    style: muted
+  }, kindLabel[c.kind] || c.kind, c.last_seen ? ` · last used ${new Date(c.last_seen * 1000).toLocaleDateString()}` : '')), confirm === c.id ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-sm",
+    onClick: () => setConfirm(null)
+  }, "Keep"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-sm",
+    style: {
+      color: 'var(--accent-red)'
+    },
+    onClick: () => remove(c)
+  }, "Remove")) : /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-sm",
+    onClick: () => setConfirm(c.id)
+  }, "Remove"))));
+}
 function App() {
   const searchParams = new URLSearchParams(window.location.search);
   const isAtlasMobileApp = isAtlasMobileClient();
@@ -14848,6 +15267,7 @@ function App() {
   const dashboardTitle = 'Atlas Control';
   const initialPage = searchParams.get('page') || 'dashboard';
   const [page, setPage] = useState(initialPage);
+  const [pairRequests, setPairRequests] = useState([]);
   // Deep-link support: ?page=&tab= seeds the remembered sub-tab once at startup
   useState(() => {
     const t = searchParams.get('tab');
@@ -15039,6 +15459,14 @@ function App() {
       });
       socket.on('disconnect', () => {
         setSocketConnected(false);
+      });
+
+      // Another device asking to be allowed onto this Atlas.
+      socket.on('pair_request', r => {
+        if (r && r.request_id) setPairRequests(prev => prev.some(x => x.request_id === r.request_id) ? prev : [...prev, r]);
+      });
+      socket.on('pair_request_decided', r => {
+        if (r && r.request_id) setPairRequests(prev => prev.filter(x => x.request_id !== r.request_id));
       });
 
       // node_update carries the node dict directly — update state without full refresh
@@ -15314,7 +15742,10 @@ function App() {
       ...appSettings,
       refresh
     }
-  }, /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement(PairRequestPrompt, {
+    requests: pairRequests,
+    onDone: id => setPairRequests(prev => prev.filter(x => x.request_id !== id))
+  }), /*#__PURE__*/React.createElement("div", {
     className: "app",
     style: isAtlasMobileApp ? {
       paddingLeft: 0,
@@ -15511,4 +15942,4 @@ function App() {
     className: "badge"
   })))))));
 }
-ReactDOM.createRoot(document.getElementById('root')).render( /*#__PURE__*/React.createElement(App, null));
+ReactDOM.createRoot(document.getElementById('root')).render( /*#__PURE__*/React.createElement(AtlasRoot, null));

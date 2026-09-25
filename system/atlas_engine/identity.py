@@ -153,7 +153,27 @@ def create(hotspot_password=None, hostname=None, reason="new"):
         "created_reason": reason,
     }
     fsutil.atomic_write_json(_d("device.json"), device, mode=0o644)
+    if not hostname:
+        apply_hostname(host)
     return device
+
+
+def apply_hostname(host):
+    """Give a newly provisioned unit its own mDNS name (atlas-xxxx.local)."""
+    if paths.ROOT != "/" or os.geteuid() != 0:
+        return False
+    import subprocess
+    subprocess.run(["hostnamectl", "set-hostname", host], capture_output=True)
+    try:
+        with open("/etc/hosts", encoding="utf-8") as f:
+            lines = f.read().splitlines()
+        lines = [l for l in lines if not l.startswith("127.0.1.1")]
+        lines.insert(1, f"127.0.1.1\t{host}")
+        fsutil.atomic_write_bytes("/etc/hosts", ("\n".join(lines) + "\n").encode(), mode=0o644)
+    except OSError:
+        pass
+    subprocess.run(["systemctl", "try-reload-or-restart", "avahi-daemon"], capture_output=True)
+    return True
 
 
 def ensure(adopt_hotspot_password=None, hostname=None):

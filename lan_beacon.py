@@ -236,15 +236,22 @@ class LanBeacon:
 
         device = manifest.get("device") if isinstance(manifest.get("device"), dict) else {}
         api = manifest.get("api") if isinstance(manifest.get("api"), dict) else {}
+        tls = manifest.get("tls") if isinstance(manifest.get("tls"), dict) else {}
         access_urls = api.get("baseUrls") if isinstance(api.get("baseUrls"), list) else []
 
+        # v2: identifies the device (id + TLS key pin) so a phone can recognise
+        # the Atlas it paired with after an address change, and connect over
+        # HTTPS only.
         payload: dict = {
             "app": "atlas-control",
-            "v": 1,
+            "v": 2,
+            "id": device.get("id") or "",
             "name": device.get("name") or "",
             "shortName": device.get("shortName") or "",
-            "port": 5000,
-            "accessUrls": access_urls,
+            "fp": tls.get("spkiSha256") or "",
+            "port": 443,
+            "api": api.get("version") or 2,
+            "accessUrls": [u for u in access_urls if isinstance(u, str) and u.startswith("https://")],
             "ts": int(time.time()),
         }
         if request_nonce:

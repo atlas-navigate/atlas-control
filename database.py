@@ -469,8 +469,36 @@ def _migration_baseline(conn):
     """Schema as created by init_db() at the first versioned release."""
 
 
+def _migration_pairing(conn):
+    """Clients that have paired with this Atlas (phones, browsers)."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS paired_clients (
+            id          TEXT PRIMARY KEY,
+            name        TEXT NOT NULL,
+            kind        TEXT NOT NULL DEFAULT 'browser',
+            token_hash  TEXT NOT NULL UNIQUE,
+            proof       TEXT,
+            created     INTEGER NOT NULL,
+            last_seen   INTEGER,
+            revoked     INTEGER NOT NULL DEFAULT 0
+        )""")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS pair_requests (
+            id            TEXT PRIMARY KEY,
+            secret_hash   TEXT NOT NULL,
+            name          TEXT NOT NULL,
+            kind          TEXT NOT NULL,
+            server_nonce  TEXT NOT NULL,
+            match_code    TEXT NOT NULL,
+            status        TEXT NOT NULL DEFAULT 'pending',
+            created       INTEGER NOT NULL,
+            decided_by    TEXT
+        )""")
+
+
 MIGRATIONS = [
     (1, "baseline", _migration_baseline),
+    (2, "pairing", _migration_pairing),
 ]
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 # Oldest schema version whose code can still use a database at SCHEMA_VERSION.

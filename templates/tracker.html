@@ -142,12 +142,48 @@ if (navigator.getBattery) {
   });
 }
 
-function startTracking() {
+// Sharing your location needs the Atlas owner's OK once: this phone asks,
+// the owner taps "Allow" on a device already connected to Atlas.
+async function ensurePaired(name) {
+  const st = await (await fetch('/api/pair/status', { cache: 'no-store' })).json();
+  if (!st.required || st.paired) { if (st.csrf) window.__atlasCsrf = st.csrf; return true; }
+  const r = await (await fetch('/api/pair/request', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, kind: 'tracker', client_nonce: String(Math.random()).slice(2) }),
+  })).json();
+  if (!r.request_id) throw new Error(r.error || 'Could not ask Atlas for permission');
+  setStatus('wait', 'Ask the Atlas owner to allow “' + name + '” — code ' + r.match_code);
+  document.getElementById('setup-card').style.display = 'none';
+  document.getElementById('status-card').style.display = 'block';
+  for (let i = 0; i < 90; i++) {
+    await new Promise(res => setTimeout(res, 2000));
+    const p = await (await fetch('/api/pair/request/' + r.request_id + '?secret=' +
+                                  encodeURIComponent(r.secret) + '&kind=tracker', { cache: 'no-store' })).json();
+    if (p.status === 'approved') {
+      const st2 = await (await fetch('/api/pair/status', { cache: 'no-store' })).json();
+      if (st2.csrf) window.__atlasCsrf = st2.csrf;
+      return true;
+    }
+    if (p.status === 'denied' || p.status === 'expired' || p.status === 'unknown') {
+      throw new Error(p.status === 'denied' ? 'The Atlas owner did not allow this phone.' : 'The request timed out.');
+    }
+  }
+  throw new Error('The request timed out.');
+}
+
+async function startTracking() {
   const name = document.getElementById('name-input').value.trim();
   if (!name) { document.getElementById('name-error').style.display = 'block'; return; }
   document.getElementById('name-error').style.display = 'none';
   localStorage.setItem('trackerName', name);
   localStorage.setItem('trackerColor', selectedColor);
+  try {
+    await ensurePaired(name);
+  } catch (e) {
+    setStatus('error', e.message);
+    setTimeout(stopTracking, 5000);
+    return;
+  }
 
   document.getElementById('setup-card').style.display = 'none';
   document.getElementById('status-card').style.display = 'block';
@@ -156,7 +192,8 @@ function startTracking() {
     enableHighAccuracy: true, maximumAge: 5000, timeout: 15000,
   });
 
-  sendInterval = setInterval(sendCheckin, 5000);
+  // Heartbeat so the owner's map shows this phone is still sharing.
+  sendInterval = setInterval(() => sendCheckin(true), 30000);
 }
 
 function stopTracking() {
@@ -176,7 +213,7 @@ function onPosition(pos) {
   document.getElementById('m-alt').textContent = c.altitude != null ? Math.round(c.altitude) + ' m' : '—';
   document.getElementById('m-spd').textContent = c.speed != null ? (c.speed * 3.6).toFixed(1) + ' km/h' : '—';
   setStatus('ok', 'Tracking — GPS locked');
-  sendCheckin();
+  sendCheckin(false);
 }
 
 function onGpsError(err) {
@@ -189,8 +226,24 @@ function setStatus(state, msg) {
     state === 'ok' ? 'var(--accent)' : state === 'error' ? 'var(--red)' : 'var(--amber)';
 }
 
-async function sendCheckin() {
+// Send on movement, at most every 10 s; the heartbeat covers standing still.
+let lastSent = { t: 0, lat: null, lon: null };
+function movedMeters(a1, o1, a2, o2) {
+  const R = 6371000, r = Math.PI / 180;
+  const dLat = (a2 - a1) * r, dLon = (o2 - o1) * r;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a1 * r) * Math.cos(a2 * r) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+async function sendCheckin(heartbeat) {
   if (!lastPos) return;
+  const now = Date.now();
+  const lc = lastPos.coords;
+  if (!heartbeat && lastSent.lat != null &&
+      (now - lastSent.t < 10000 || movedMeters(lastSent.lat, lastSent.lon, lc.latitude, lc.longitude) < 15)) {
+    return;
+  }
+  lastSent = { t: now, lat: lc.latitude, lon: lc.longitude };
   const name = localStorage.getItem('trackerName') || 'Unknown';
   const c = lastPos.coords;
   if (battery != null) document.getElementById('m-bat').textContent = Math.round(battery * 100) + '%';
