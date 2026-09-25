@@ -61,6 +61,13 @@ except Exception:
 BEACON_PORT = 5050
 PROBE_TOKEN = b"ATLAS-DISCOVER"
 _RECV_BUF = 2048
+# The manifest is built by the app (it may shell out to nmcli); one build is
+# reused for this long so a burst of probes cannot turn into a burst of work.
+_MANIFEST_TTL_S = 5.0
+# Replies per source address per window. Discovery needs a handful; anything
+# more is a scan or a reflection attempt.
+_REPLY_BURST = 5
+_REPLY_WINDOW_S = 10.0
 
 
 class LanBeacon:
@@ -97,6 +104,10 @@ class LanBeacon:
         # the next heartbeat shout.
         self._burst_until_monotonic = 0.0
         self._burst_lock = threading.Lock()
+        self._manifest_cache: Optional[dict] = None
+        self._manifest_at = 0.0
+        self._manifest_lock = threading.Lock()
+        self._reply_log: dict = {}
 
     # ── lifecycle ─────────────────────────────────────────────────────────
 
@@ -184,8 +195,11 @@ class LanBeacon:
 
     # ── payload ───────────────────────────────────────────────────────────
 
-    def _build_payload(self, request_nonce: Optional[str] = None) -> bytes:
-        """Build the JSON payload sent in a probe reply or unsolicited shout."""
+    def _manifest(self) -> dict:
+        now = time.monotonic()
+        with self._manifest_lock:
+            if self._manifest_cache is not None and now - self._manifest_at < _MANIFEST_TTL_S:
+                return self._manifest_cache
         manifest: dict = {}
         try:
             m = self.manifest_fn()
@@ -193,7 +207,32 @@ class LanBeacon:
                 manifest = m
         except Exception as e:  # pragma: no cover — manifest_fn is third-party
             self.logger.debug("LanBeacon manifest_fn raised: %s", e)
-            manifest = {}
+        with self._manifest_lock:
+            self._manifest_cache = manifest
+            self._manifest_at = now
+        return manifest
+
+    def _reply_allowed(self, source_ip: str) -> bool:
+        """Per-source token bucket for probe replies."""
+        now = time.monotonic()
+        recent = [t for t in self._reply_log.get(source_ip, ()) if now - t < _REPLY_WINDOW_S]
+        if len(recent) >= _REPLY_BURST:
+            self._reply_log[source_ip] = recent
+            return False
+        recent.append(now)
+        self._reply_log[source_ip] = recent
+        if len(self._reply_log) > 1024:     # bound memory under a spoofed-source flood
+            self._reply_log = {k: v for k, v in self._reply_log.items()
+                               if v and now - v[-1] < _REPLY_WINDOW_S}
+        return True
+
+    def _build_payload(self, request_nonce: Optional[str] = None) -> bytes:
+        """Build the JSON payload sent in a probe reply or unsolicited shout.
+
+        Contains only what a phone needs to find this Atlas — never Wi-Fi or
+        hotspot credentials.
+        """
+        manifest = self._manifest()
 
         device = manifest.get("device") if isinstance(manifest.get("device"), dict) else {}
         api = manifest.get("api") if isinstance(manifest.get("api"), dict) else {}
@@ -235,6 +274,8 @@ class LanBeacon:
             if not data.startswith(PROBE_TOKEN):
                 continue
 
+            if not self._reply_allowed(addr[0]):
+                continue
             nonce = self._parse_probe_nonce(data[len(PROBE_TOKEN):])
             try:
                 resp = self._build_payload(request_nonce=nonce)

@@ -2552,7 +2552,13 @@ def api_nav_reverse():
 # ------------------------------------------------------------------ API: App settings
 @app.route("/api/settings")
 def api_settings_get():
-    return jsonify(db.get_app_settings())
+    settings = dict(db.get_app_settings())
+    # The captured factory snapshot holds the radio's Wi-Fi key and BT PIN;
+    # it is only needed server-side to restore the radio.
+    for key in list(settings):
+        if key.startswith("factory_defaults_device"):
+            settings.pop(key)
+    return jsonify(settings)
 
 @app.route("/api/settings", methods=["PUT"])
 def api_settings_put():
@@ -2675,18 +2681,43 @@ def api_power_comms():
     return jsonify({"ok": True, "comms_enabled": enabled})
 
 # ------------------------------------------------------------------ API: Device config
+_RADIO_SECRET_FIELDS = (("network", "wifi_psk"), ("bluetooth", "fixed_pin"))
+
+
+def _redact_radio_config(cfg):
+    """Copy of a radio config with its Wi-Fi key and Bluetooth PIN hidden.
+
+    The fields come back as null plus a `<field>_set` flag; a PUT that leaves
+    them null or empty keeps the radio's current value.
+    """
+    import copy
+    out = copy.deepcopy(cfg) if isinstance(cfg, dict) else cfg
+    if not isinstance(out, dict):
+        return out
+    for section, field in _RADIO_SECRET_FIELDS:
+        sec = out.get(section)
+        if isinstance(sec, dict) and field in sec:
+            sec[f"{field}_set"] = bool(sec[field])
+            sec[field] = None
+    return out
+
+
 @app.route("/api/device/config")
 def api_device_config_get():
     if not mesh:
         return jsonify({"connected": False})
-    return jsonify(mesh.get_device_config())
+    return jsonify(_redact_radio_config(mesh.get_device_config()))
 
 @app.route("/api/device/config/<section>", methods=["PUT"])
 def api_device_config_put(section):
     ALLOWED = {"device", "lora", "position", "power", "bluetooth", "network"}
     if section not in ALLOWED:
         return jsonify({"error": f"Unknown section '{section}'"}), 400
-    data = request.json or {}
+    data = dict(request.json or {})
+    for sec, field in _RADIO_SECRET_FIELDS:
+        if section == sec and data.get(field) in (None, ""):
+            data.pop(field, None)   # left blank in the UI: keep the radio's value
+        data.pop(f"{field}_set", None)
     if not mesh:
         return jsonify({"ok": False, "error": "mesh manager unavailable"}), 503
     ok = mesh.set_device_config(section, data)
@@ -3127,7 +3158,7 @@ def api_factory_defaults_get():
         snap, capture_error = _capture_factory_defaults()
         captured_now = snap is not None
     return jsonify({
-        "snapshot": snap,
+        "snapshot": _redact_radio_config(snap),
         "captured_now": captured_now,
         "device_connected": state["connected"],
         "device_status": state.get("reason") or "connected",
@@ -3140,7 +3171,7 @@ def api_factory_defaults_capture():
     snap, err = _capture_factory_defaults()
     if snap is None:
         return jsonify({"ok": False, "error": err or "device not connected or config unavailable"}), 503
-    return jsonify({"ok": True, "snapshot": snap})
+    return jsonify({"ok": True, "snapshot": _redact_radio_config(snap)})
 
 @app.route("/api/factory-reset", methods=["POST"])
 def api_factory_reset():
@@ -3433,13 +3464,16 @@ def _save_hotspot_cfg(ssid, password):
     except Exception as e:
         logging.warning("Could not save hotspot config: %s", e)
 
-def _current_hotspot_state():
+def _current_hotspot_state(include_password=False):
+    """Hotspot status. The password is returned only when explicitly asked
+    for (the owner's "show Wi-Fi password" view) — never in status, bootstrap,
+    beacon or Bluetooth payloads."""
     out, _ = _nmcli("-t", "-f", "NAME,TYPE,STATE", "con", "show", "--active")
     active = any("hotspot" in line.lower() for line in out.splitlines())
     cfg = _load_hotspot_cfg()
     ssid = cfg.get("ssid", "")
     password = cfg.get("password", "")
-    if not ssid:
+    if not ssid or (include_password and not password):
         info, rc = _nmcli(
             "--show-secrets",
             "--escape",
@@ -3457,7 +3491,10 @@ def _current_hotspot_state():
                     ssid = line.split(":", 1)[1].strip()
                 elif line.startswith("802-11-wireless-security.psk:") and not password:
                     password = line.split(":", 1)[1].strip()
-    return {"active": active, "ssid": ssid, "password": password}
+    state = {"active": active, "ssid": ssid, "passwordSet": bool(password)}
+    if include_password:
+        state["password"] = password
+    return state
 
 
 def _normalize_ip_value(value):
@@ -4175,6 +4212,14 @@ def api_wifi_disconnect():
 @app.route("/api/hotspot/status")
 def api_hotspot_status():
     return jsonify(_current_hotspot_state())
+
+
+@app.route("/api/hotspot/credentials")
+def api_hotspot_credentials():
+    """The hotspot SSID and password, for the owner's Wi-Fi settings page."""
+    resp = jsonify(_current_hotspot_state(include_password=True))
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 @app.route("/api/mobile/bootstrap")
 def api_mobile_bootstrap():

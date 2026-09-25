@@ -7866,9 +7866,10 @@ const DeviceConfigSection = React.memo(function DeviceConfigSection() {
               <span style={{fontSize:13,color:'var(--text-muted)'}}>Enabled</span>
             </label>
           </Row>
-          <Row label="Fixed PIN" hint="0 = random PIN each boot">
-            <input type="number" style={IS} value={cfg.bluetooth?.fixed_pin ?? 0} min={0} max={999999}
-              onChange={e => set('bluetooth','fixed_pin',parseInt(e.target.value))}/>
+          <Row label="Fixed PIN" hint="0 = random PIN each boot. Leave blank to keep the current PIN">
+            <input type="number" style={IS} value={cfg.bluetooth?.fixed_pin ?? ''} min={0} max={999999}
+              placeholder={cfg.bluetooth?.fixed_pin_set ? 'Set (unchanged)' : ''}
+              onChange={e => set('bluetooth','fixed_pin', e.target.value === '' ? null : parseInt(e.target.value))}/>
           </Row>
         </div>
         <SaveBar section="bluetooth"/>
@@ -9302,8 +9303,11 @@ function WifiPage() {
     api.get('/api/hotspot/status').then(d => {
       setHotspot(d);
       if (initFields) {
-        if (d.ssid)     setHsSSID(d.ssid);
-        if (d.password) setHsPass(d.password);
+        if (d.ssid) setHsSSID(d.ssid);
+        // The password is never part of status; fetch it only for this form.
+        api.get('/api/hotspot/credentials').then(c => {
+          if (c.password) setHsPass(c.password);
+        }).catch(() => {});
       }
     }).catch(() => {});
 

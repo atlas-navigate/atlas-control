@@ -9836,7 +9836,7 @@ function DeviceConfigSubsection({
   }, children)));
 }
 const DeviceConfigSection = React.memo(function DeviceConfigSection() {
-  var _cfg$device$role, _cfg$device, _cfg$device$rebroadca, _cfg$device2, _cfg$device3, _cfg$device4, _cfg$device$node_info, _cfg$device5, _cfg$lora$region, _cfg$lora, _cfg$lora$modem_prese, _cfg$lora2, _cfg$lora3, _cfg$lora4, _cfg$lora$hop_limit, _cfg$lora5, _cfg$lora$tx_power, _cfg$lora6, _cfg$lora7, _cfg$lora8, _cfg$lora$bandwidth, _cfg$lora9, _cfg$lora$spread_fact, _cfg$lora10, _cfg$lora$coding_rate, _cfg$lora11, _cfg$position$gps_upd, _cfg$position, _cfg$position$positio, _cfg$position2, _cfg$position3, _cfg$position4, _cfg$power, _cfg$power$on_battery, _cfg$power2, _cfg$power$wait_bluet, _cfg$power3, _cfg$bluetooth, _cfg$bluetooth$fixed_, _cfg$bluetooth2, _cfg$network, _cfg$network$address_, _cfg$network2, _cfg$network$wifi_ssi, _cfg$network3, _cfg$network$wifi_psk, _cfg$network4, _cfg$network$ntp_serv, _cfg$network5, _cfg$network6;
+  var _cfg$device$role, _cfg$device, _cfg$device$rebroadca, _cfg$device2, _cfg$device3, _cfg$device4, _cfg$device$node_info, _cfg$device5, _cfg$lora$region, _cfg$lora, _cfg$lora$modem_prese, _cfg$lora2, _cfg$lora3, _cfg$lora4, _cfg$lora$hop_limit, _cfg$lora5, _cfg$lora$tx_power, _cfg$lora6, _cfg$lora7, _cfg$lora8, _cfg$lora$bandwidth, _cfg$lora9, _cfg$lora$spread_fact, _cfg$lora10, _cfg$lora$coding_rate, _cfg$lora11, _cfg$position$gps_upd, _cfg$position, _cfg$position$positio, _cfg$position2, _cfg$position3, _cfg$position4, _cfg$power, _cfg$power$on_battery, _cfg$power2, _cfg$power$wait_bluet, _cfg$power3, _cfg$bluetooth, _cfg$bluetooth$fixed_, _cfg$bluetooth2, _cfg$bluetooth3, _cfg$network, _cfg$network$address_, _cfg$network2, _cfg$network$wifi_ssi, _cfg$network3, _cfg$network$wifi_psk, _cfg$network4, _cfg$network$ntp_serv, _cfg$network5, _cfg$network6;
   const compact = isSmallScreen();
   const [openSections, setOpenSections] = useState({});
   const toggleSection = id => setOpenSections(p => ({
@@ -10379,14 +10379,15 @@ const DeviceConfigSection = React.memo(function DeviceConfigSection() {
     }
   }, "Enabled"))), /*#__PURE__*/React.createElement(Row, {
     label: "Fixed PIN",
-    hint: "0 = random PIN each boot"
+    hint: "0 = random PIN each boot. Leave blank to keep the current PIN"
   }, /*#__PURE__*/React.createElement("input", {
     type: "number",
     style: IS,
-    value: (_cfg$bluetooth$fixed_ = (_cfg$bluetooth2 = cfg.bluetooth) === null || _cfg$bluetooth2 === void 0 ? void 0 : _cfg$bluetooth2.fixed_pin) !== null && _cfg$bluetooth$fixed_ !== void 0 ? _cfg$bluetooth$fixed_ : 0,
+    value: (_cfg$bluetooth$fixed_ = (_cfg$bluetooth2 = cfg.bluetooth) === null || _cfg$bluetooth2 === void 0 ? void 0 : _cfg$bluetooth2.fixed_pin) !== null && _cfg$bluetooth$fixed_ !== void 0 ? _cfg$bluetooth$fixed_ : '',
     min: 0,
     max: 999999,
-    onChange: e => set('bluetooth', 'fixed_pin', parseInt(e.target.value))
+    placeholder: (_cfg$bluetooth3 = cfg.bluetooth) !== null && _cfg$bluetooth3 !== void 0 && _cfg$bluetooth3.fixed_pin_set ? 'Set (unchanged)' : '',
+    onChange: e => set('bluetooth', 'fixed_pin', e.target.value === '' ? null : parseInt(e.target.value))
   }))), /*#__PURE__*/React.createElement(SaveBar, {
     section: "bluetooth"
   })), /*#__PURE__*/React.createElement(DeviceConfigSubsection, {
@@ -12900,7 +12901,10 @@ function WifiPage() {
     setHotspot(d);
     if (initFields) {
       if (d.ssid) setHsSSID(d.ssid);
-      if (d.password) setHsPass(d.password);
+      // The password is never part of status; fetch it only for this form.
+      api.get('/api/hotspot/credentials').then(c => {
+        if (c.password) setHsPass(c.password);
+      }).catch(() => {});
     }
   }).catch(() => {});
   useEffect(() => {
