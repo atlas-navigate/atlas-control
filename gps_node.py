@@ -537,6 +537,11 @@ class GpsNode:
                    speed + heading until timeout or reconnect
     """
 
+    EMIT_MAX_HZ = 2.0            # live fix events to browsers
+    EMIT_HEARTBEAT_S = 5.0       # re-send an unchanged fix this often
+    DB_MIN_MOVE_M = 10.0         # track history: a point per 10 m moved …
+    DB_IDLE_INTERVAL_S = 60.0    # … or one a minute while parked
+
     def __init__(self, port="AUTO", baud=9600, socketio=None, mesh_manager=None):
         self.port         = port
         self.baud         = baud
@@ -595,6 +600,9 @@ class GpsNode:
         # emits below still fire at the native fix rate so the map dot
         # stays smooth.
         self._db_min_interval   = 1.0
+        self._last_emit_ts      = 0.0
+        self._last_emit_key     = None
+        self._last_db_pos       = None
         self._db_min_move_deg   = 1e-5     # ~1.1 m at the equator; force a write past this
         self._last_db_write_ts  = 0.0
         self._last_db_lat       = None
@@ -1279,12 +1287,20 @@ class GpsNode:
         # The live map dot still updates at the native fix rate via
         # _emit_fix; only the SQLite persistence is rate-limited.
         now_ts = fix["timestamp"]
-        if (now_ts - self._last_db_write_ts) < self._db_min_interval:
+        elapsed = now_ts - self._last_db_write_ts
+        if elapsed < self._db_min_interval:
             return
-        self._last_db_write_ts = now_ts
-
         lat = fix["latitude"]
         lon = fix["longitude"]
+        # Track history on movement: a row per DB_MIN_MOVE_M travelled, or one
+        # every DB_IDLE_INTERVAL_S while parked (it used to be one per second
+        # regardless — 86,400 rows a day for a device sitting on a desk).
+        if self._last_db_pos is not None and elapsed < self.DB_IDLE_INTERVAL_S and \
+                _hav_m(self._last_db_pos[0], self._last_db_pos[1], lat, lon) < self.DB_MIN_MOVE_M:
+            return
+        self._last_db_write_ts = now_ts
+        self._last_db_pos = (lat, lon)
+
         node_id = fix.get("node_id") or self._get_node_id()
         self._cleanup_fallback()
         now = int(now_ts)
@@ -1312,27 +1328,20 @@ class GpsNode:
     # ── Events ──────────────────────────────────────────────────────────────
 
     def _emit_fix(self, fix: dict):
+        """One `gps_fix` event per fix for the map dot, trail and GPS badge —
+        at most EMIT_MAX_HZ, and while parked only when the position changes
+        or every EMIT_HEARTBEAT_S. The receiver produces several fixes a
+        second (UBX + NMEA), which used to go out as three events each."""
         if not self.socketio:
             return
+        now = fix["timestamp"]
+        key = (round(fix["latitude"], 6), round(fix["longitude"], 6), fix.get("fix_type"))
+        since = now - self._last_emit_ts
+        if since < 1.0 / self.EMIT_MAX_HZ or (key == self._last_emit_key and since < self.EMIT_HEARTBEAT_S):
+            return
+        self._last_emit_ts, self._last_emit_key = now, key
         try:
-            self.socketio.emit("node_update", {
-                "node_id":    fix.get("node_id"),
-                "latitude":   fix["latitude"],
-                "longitude":  fix["longitude"],
-                "altitude":   fix.get("altitude"),
-                "last_heard": int(fix["timestamp"]),
-            }, namespace="/")
-            self.socketio.emit("gps_update", fix, namespace="/")
-            # position_update drives live trail updates on the map page
-            self.socketio.emit("position_update", {
-                "node_id":   fix.get("node_id"),
-                "latitude":  fix["latitude"],
-                "longitude": fix["longitude"],
-                "altitude":  fix.get("altitude"),
-                "timestamp": fix["timestamp"],
-                "speed":     fix.get("speed"),
-                "heading":   fix.get("heading"),
-            }, namespace="/")
+            self.socketio.emit("gps_fix", fix, namespace="/")
         except Exception:
             pass
 

@@ -452,20 +452,20 @@ def add_security_headers(response):
     response.headers.setdefault("X-XSS-Protection", "1; mode=block")
     # No referrer to external sites
     response.headers.setdefault("Referrer-Policy", "no-referrer")
-    # Content-Security-Policy: allow only local sources; no external connections
-    # unsafe-inline is required for the in-browser Babel/React SPA (no build step)
-    csp = (
-        "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
-        "style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data: blob:; "
-        "font-src 'self' data:; "
-        "connect-src 'self' ws: wss:; "
-        "worker-src blob:; "
-        "frame-ancestors 'none';"
-    )
-    response.headers.setdefault("Content-Security-Policy", csp)
+    # Content-Security-Policy: local sources only. The prebuilt app page sets
+    # the strict variant itself (index()); this looser one remains for pages
+    # with inline script (tracker) and the in-browser-Babel fallback.
+    response.headers.setdefault("Content-Security-Policy", _CSP_LOOSE)
     return response
+
+
+_CSP_COMMON = ("default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
+               "font-src 'self' data:; connect-src 'self' ws: wss:; worker-src blob:; "
+               "object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
+_CSP_LOOSE = "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " + _CSP_COMMON
+# The prebuilt app has no inline script, no inline handlers and no eval, so
+# injected markup could not run script even if it got onto the page.
+_CSP_STRICT = "script-src 'self'; " + _CSP_COMMON
 
 
 # ── Input helpers ─────────────────────────────────────────────────────────────
@@ -610,6 +610,13 @@ def _build_mobile_html():
     try:
         with open(_INDEX_HTML, "r", encoding="utf-8") as fh:
             html = fh.read()
+        # A release ships a content-hashed copy that browsers may cache forever.
+        app_js = "/static/app.compiled.js"
+        try:
+            with open(os.path.join(_BASE_DIR, "static", "build", "manifest.json"), encoding="utf-8") as fh:
+                app_js = json.load(fh).get("app_js") or app_js
+        except (OSError, ValueError):
+            pass
         # Drop the Babel loader
         html = html.replace('<script src="/static/vendor/babel.min.js"></script>\n', "")
         # Replace the inline JSX block with the pre-compiled external script.
@@ -617,10 +624,12 @@ def _build_mobile_html():
         import re as _re
         html = _re.sub(
             r'<script type="text/babel">.*?</script>',
-            '<script src="/static/app.compiled.js"></script>',
+            lambda _m: f'<script src="{app_js}"></script>',
             html,
             flags=_re.DOTALL,
         )
+        # Nothing blocks the first paint; deferred scripts still run in order.
+        html = html.replace("<script src=", "<script defer src=")
         return html
     except Exception as exc:
         logger.warning("mobile HTML build failed: %s", exc)
@@ -708,6 +717,7 @@ def index():
                 html = built
     if html:
         resp = Response(html, mimetype="text/html")
+        resp.headers["Content-Security-Policy"] = _CSP_STRICT
     else:
         resp = send_file(os.path.join(_BASE_DIR, "templates", "index.html"))
     resp.headers["Cache-Control"] = "no-store"
@@ -735,6 +745,7 @@ def mobile():
     if html:
         resp = Response(html, mimetype="text/html")
         resp.headers["Cache-Control"] = "no-store"
+        resp.headers["Content-Security-Policy"] = _CSP_STRICT
         return resp
     embedded = request.args.get("embedded") == "1" or "AtlasMobile" in request.headers.get("User-Agent", "")
     if embedded:
@@ -3325,6 +3336,7 @@ _socket_clients = {}
 @socketio.on("disconnect")
 def handle_disconnect(*_args):
     _socket_clients.pop(request.sid, None)
+    _system_room.discard(request.sid)
 
 
 def _disconnect_sockets(client_id=None):
@@ -3350,6 +3362,36 @@ def handle_join_rooms(data):
     for room in rooms:
         if room in ALL_ROOMS:
             join_room(room)
+    if "system" in rooms:
+        _system_room.add(request.sid)
+    else:
+        _system_room.discard(request.sid)
+
+
+# Live stats go to whoever has the System or Power page open (room "system");
+# with nobody watching, nothing is collected.
+_system_room = set()
+STATS_PUSH_S = 3
+
+
+def _push_stats_once():
+    if not _system_room:
+        return False
+    try:
+        with perf_metrics.timer("stats.collect"):
+            stats = atlas_blocking.call(system_stats.get_stats)
+        socketio.emit("system_stats", stats, to="system", namespace="/")
+        return True
+    except Exception as exc:
+        logger.debug("stats push failed: %s", exc)
+        return False
+
+
+def _stats_push_loop():
+    import gevent
+    while True:
+        gevent.sleep(STATS_PUSH_S)
+        _push_stats_once()
 
 @socketio.on("send_message")
 def handle_send(data):
@@ -4683,6 +4725,7 @@ def main():
         # Update checks use gevent sockets, so they run in a greenlet.
         import gevent
         gevent.spawn(_update_background_loop)
+        gevent.spawn(_stats_push_loop)
         threading.Thread(target=_wifi_failover_loop, daemon=True, name="wifi-failover").start()
 
     logger.info(f"Dashboard at http://{args.host}:{web_port}")

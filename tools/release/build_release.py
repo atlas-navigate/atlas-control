@@ -96,6 +96,8 @@ def build_frontend(tree):
     # Same mtime as the template so the app never considers it stale.
     st = os.stat(os.path.join(tree, "templates", "index.html"))
     os.utime(out, (st.st_atime, st.st_mtime))
+    # Releases never compile JSX in the browser: babel (2.8 MB) stays out.
+    os.unlink(os.path.join(tree, "static", "vendor", "babel.min.js"))
 
 
 def fetch_wheels(tree, python):

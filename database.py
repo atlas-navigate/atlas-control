@@ -49,8 +49,11 @@ def get_db():
         _local.conn.execute("PRAGMA journal_mode=WAL")
         _local.conn.execute("PRAGMA busy_timeout=10000")
         _local.conn.execute("PRAGMA synchronous=NORMAL")   # WAL mode keeps this safe; no fsync per commit
-        _local.conn.execute("PRAGMA cache_size=-65536")    # 64 MB page cache
-        _local.conn.execute("PRAGMA mmap_size=268435456")  # 256 MB memory-mapped I/O
+        # One connection per thread (hub, thread pool, radio, GPS, schedulers…),
+        # so these are per-thread costs. The database is ~7 MB: 8 MB of cache
+        # and a 64 MB map hold all of it; 64 MB/256 MB per thread only risked RAM.
+        _local.conn.execute("PRAGMA cache_size=-8192")     # 8 MB page cache
+        _local.conn.execute("PRAGMA mmap_size=67108864")   # 64 MB memory-mapped I/O
         _local.conn.execute("PRAGMA temp_store=MEMORY")    # temp tables in RAM
     return _local.conn
 

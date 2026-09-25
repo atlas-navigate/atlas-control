@@ -613,9 +613,42 @@ const MD_HEAD = {
 };
 
 // Block-level Markdown renderer. Returns a fragment of React block nodes.
+// KaTeX (~300 KB) is fetched the first time a message contains math.
+let _katexPromise = null;
+function loadKatex() {
+  if (window.katex) return Promise.resolve(window.katex);
+  if (!_katexPromise) {
+    _katexPromise = new Promise((resolve, reject) => {
+      const css = document.createElement('link');
+      css.rel = 'stylesheet';
+      css.href = '/static/vendor/katex.min.css';
+      document.head.appendChild(css);
+      const script = document.createElement('script');
+      script.src = '/static/vendor/katex.min.js';
+      script.async = true;
+      script.onload = () => resolve(window.katex);
+      script.onerror = () => {
+        _katexPromise = null;
+        reject(new Error('KaTeX unavailable'));
+      };
+      document.head.appendChild(script);
+    });
+  }
+  return _katexPromise;
+}
+
+// Re-render once KaTeX has arrived, if this text has anything math-like.
+function useKatexFor(text) {
+  const needed = !window.katex && /\$/.test(text || '');
+  const [, setLoaded] = useState(false);
+  useEffect(() => {
+    if (needed) loadKatex().then(() => setLoaded(true)).catch(() => {});
+  }, [needed]);
+}
 function MarkdownMessage({
   text
 }) {
+  useKatexFor(text);
   const lines = (text || '').split('\n');
   const blocks = [];
   let i = 0;
@@ -4349,7 +4382,11 @@ function MapPage({
       }));
     };
     socket.on('position_update', onPos);
-    return () => socket.off('position_update', onPos);
+    socket.on('gps_fix', onPos); // Atlas's own GPS
+    return () => {
+      socket.off('position_update', onPos);
+      socket.off('gps_fix', onPos);
+    };
   }, []);
 
   // Node markers — incremental updates
@@ -4417,7 +4454,10 @@ function MapPage({
       const color = isOwn ? ownStale ? '#64748b' : '#f59e0b' : online ? '#00e5a0' : '#ef4444';
       const displayLngLat = nodeLngLat[n.node_id] || [n.longitude, n.latitude];
       const popupExtra = isOwn ? `Lat: ${n.latitude.toFixed(6)}<br>Lon: ${n.longitude.toFixed(6)}${n.altitude != null ? '<br>Alt: ' + n.altitude.toFixed(1) + ' m' : ''}` : `Battery: ${n.battery_level != null ? n.battery_level + '%' : '—'}<br>SNR: ${n.snr != null ? n.snr.toFixed(1) + ' dB' : '—'}`;
-      const navBtn = isOwn ? '' : `<button onclick="window._atlasNavTo&&window._atlasNavTo(${n.latitude},${n.longitude},${JSON.stringify(n.alias || n.long_name || n.node_id).replace(/"/g, '&quot;')})" ` + `style="margin-top:10px;padding:6px 0;background:#0ea5e9;color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:12px;font-weight:600;width:100%;letter-spacing:0.3px">` + `Navigate Here ›</button>`;
+      // No inline onclick: node names come from other radios, and an attribute
+      // is HTML-decoded before it runs as script ("&quot;" in a name used to
+      // end the JS string). The click is handled by delegation (data-atlas-nav).
+      const navBtn = isOwn ? '' : `<button type="button" data-atlas-nav="${escHtml(JSON.stringify([n.latitude, n.longitude, n.alias || n.long_name || n.node_id]))}" ` + `style="margin-top:10px;padding:6px 0;background:#0ea5e9;color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:12px;font-weight:600;width:100%;letter-spacing:0.3px">` + `Navigate Here ›</button>`;
       const displayName = n.alias || n.long_name || n.short_name || n.node_id;
       const onlineColor = ownStale ? '#64748b' : online ? '#00e5a0' : '#ef4444';
       // fix_age_s is null when this process has never seen a fix, in which
@@ -7491,10 +7531,28 @@ function SystemPage() {
       loadingRef.current = false;
     }
   }, []);
+
+  // Stats are pushed every 3 s over the socket while this page is open
+  // (room "system"). Poll only when no push has arrived lately, and never
+  // from a hidden tab.
+  const lastPushRef = useRef(0);
   useEffect(() => {
     load();
-    const iv = setInterval(load, 3000);
-    return () => clearInterval(iv);
+    const sock = window._atlasSocket;
+    const onStats = s => {
+      lastPushRef.current = Date.now();
+      setStats(s);
+      setError(null);
+    };
+    if (sock) sock.on('system_stats', onStats);
+    const iv = setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
+      if (Date.now() - lastPushRef.current > 8000) load();
+    }, 3000);
+    return () => {
+      clearInterval(iv);
+      if (sock) sock.off('system_stats', onStats);
+    };
   }, [load]);
   function fmtUptime(s) {
     if (!s) return '—';
@@ -14491,7 +14549,7 @@ function MapSection({
     return () => window.removeEventListener('atlas-tab', onTab);
   }, []); // eslint-disable-line
 
-  // Global callback so plain-HTML map popups can trigger navigation
+  // Plain-HTML map popups ask for navigation through data-atlas-nav buttons.
   useEffect(() => {
     window._atlasNavTo = (lat, lon, name) => {
       setPendingDest({
@@ -14501,8 +14559,23 @@ function MapSection({
       });
       setTab('navigate');
     };
+    const onClick = e => {
+      const btn = e.target.closest && e.target.closest('button[data-atlas-nav]');
+      if (!btn) return;
+      let dest;
+      try {
+        dest = JSON.parse(btn.dataset.atlasNav);
+      } catch (_) {
+        return;
+      }
+      if (Array.isArray(dest) && Number.isFinite(dest[0]) && Number.isFinite(dest[1])) {
+        window._atlasNavTo(dest[0], dest[1], String(dest[2] || ''));
+      }
+    };
+    document.addEventListener('click', onClick);
     return () => {
       delete window._atlasNavTo;
+      document.removeEventListener('click', onClick);
     };
   }, []); // eslint-disable-line
 
@@ -15906,7 +15979,7 @@ function App() {
       });
 
       // position_update: move node marker to new coords immediately
-      socket.on('position_update', data => {
+      const onPosition = data => {
         if (data && data.node_id && data.latitude && data.longitude) {
           setNodes(prev => {
             const idx = prev.findIndex(n => n.node_id === data.node_id);
@@ -15939,7 +16012,8 @@ function App() {
             return next;
           });
         }
-      });
+      };
+      socket.on('position_update', onPosition);
 
       // new_message carries the message dict directly
       socket.on('new_message', data => {
@@ -15993,10 +16067,9 @@ function App() {
           ...data
         }));
       });
-      socket.on('gps_update', fix => {
-        // A gps_update is a position that just arrived, so the fix age resets.
-        // Without this the previous (possibly large) fix_age_s would linger
-        // next to a brand new fix.
+      const onGpsFix = fix => {
+        // A fix that just arrived, so the fix age resets. Without this the
+        // previous (possibly large) fix_age_s would linger next to a new fix.
         if (fix) setGpsStatus(prev => ({
           ...prev,
           connected: true,
@@ -16008,6 +16081,13 @@ function App() {
           },
           fix_age_s: 0
         }));
+      };
+      socket.on('gps_update', onGpsFix);
+      // Atlas's own GPS: one event per fix (≤2 per second) carries what
+      // node_update, position_update and gps_update used to send separately.
+      socket.on('gps_fix', fix => {
+        onGpsFix(fix);
+        onPosition(fix);
       });
     } catch (e) {
       console.log('WebSocket unavailable, using polling');
