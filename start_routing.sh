@@ -18,7 +18,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATES_DIR="$SCRIPT_DIR/osrm-data/states"
-ACTIVE_JSON="$SCRIPT_DIR/osrm_active.json"
+mkdir -p "$SCRIPT_DIR/data"
+ACTIVE_JSON="$SCRIPT_DIR/data/osrm_active.json"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'

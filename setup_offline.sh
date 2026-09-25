@@ -325,7 +325,8 @@ docker compose -f docker-compose.osrm.yml up -d
 echo -e "${GREEN}✓ OSRM running${NC}"
 
 # ── Write osrm_active.json so Atlas Control discovers local containers ─────────
-ACTIVE_JSON="$SCRIPT_DIR/osrm_active.json"
+mkdir -p "$SCRIPT_DIR/data"
+ACTIVE_JSON="$SCRIPT_DIR/data/osrm_active.json"
 {
     printf '{\n  "updated": "%s",\n  "states": {\n    "us": {' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     PORT=5001

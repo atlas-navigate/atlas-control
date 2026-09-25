@@ -36,8 +36,9 @@ logger = logging.getLogger("ai_manager")
 # entire install cycle while Ray hallucinated city names from bare lat/lon.
 # ---------------------------------------------------------------------------
 
-_DATA_DIR     = _os.path.join(_os.path.dirname(__file__), "data")
-_STATIC_DATA  = _os.path.join(_os.path.dirname(__file__), "static", "data")
+import atlas_paths as _atlas_paths
+_DATA_DIR     = _atlas_paths.DATA_DIR
+_STATIC_DATA  = _atlas_paths.STATIC_DATA_DIR
 _US_CITIES_DB = _os.path.join(_STATIC_DATA, "us_cities.db")  # primary (install.sh)
 _US_ZIP       = _os.path.join(_DATA_DIR, "US.txt")           # GeoNames US postal codes
 _GEO_TSV      = _os.path.join(_DATA_DIR, "cities5000.txt")   # world cities w/ population

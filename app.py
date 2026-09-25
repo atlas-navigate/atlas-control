@@ -87,6 +87,7 @@ from flask_socketio import SocketIO
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
+import atlas_paths
 import database as db
 import meshtastic
 import meshtastic.util
@@ -137,7 +138,7 @@ _LOCAL_NETWORKS_CACHE = {"fetched_at": 0.0, "nets": [], "addrs": []}
 
 # LAN hint IPs — remember the last IP Atlas had per SSID so Android can skip
 # mDNS and dial the IP directly after a LAN switch.
-_LAN_HINTS_PATH = os.path.join(os.path.dirname(__file__), "data", "wifi_hints.json")
+_LAN_HINTS_PATH = os.path.join(atlas_paths.DATA_DIR, "wifi_hints.json")
 _LAN_HINTS_LOCK = threading.Lock()
 
 def _load_lan_hints() -> dict:
@@ -182,7 +183,7 @@ app = Flask(__name__, static_folder="static", template_folder="templates")
 # the atlas service user can read it.
 def _load_secret_key():
     import secrets as _sec
-    key_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", ".secret_key")
+    key_path = os.path.join(atlas_paths.DATA_DIR, ".secret_key")
     try:
         with open(key_path) as _f:
             k = _f.read().strip()
@@ -200,12 +201,7 @@ def _load_secret_key():
 
 
 def _nps_trails_db_path():
-    return os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        "static",
-        "data",
-        "nps_trails.db",
-    )
+    return os.path.join(atlas_paths.STATIC_DATA_DIR, "nps_trails.db")
 
 
 def _hiking_db_mtime(db_path):
@@ -440,7 +436,7 @@ def _sanitize_text(s, max_len=None):
 
 
 # ------------------------------------------------------------------ tile cache
-_TILE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "tiles")
+_TILE_DIR = atlas_paths.TILES_DIR
 
 # Pre-decoded 1×1 transparent PNG — returned for any missing topo tile so
 # Leaflet shows the base map cleanly instead of broken-tile icons.
@@ -451,7 +447,7 @@ _TRANSPARENT_PNG = _b64.b64decode(
     "AABjkB6QAAAABJRU5ErkJggg=="
 )
 
-_FONTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "fonts")
+_FONTS_DIR = atlas_paths.FONTS_DIR
 
 @app.route("/fonts/<path:fontstack>/<range>.pbf")
 def serve_glyph(fontstack, range):
@@ -595,6 +591,13 @@ def _precompile_jsx():
                     _MOBILE_HTML = _build_mobile_html()
                 return
 
+        # A release directory is read-only and ships its bundle prebuilt;
+        # only a developer checkout compiles at runtime.
+        if not atlas_paths.code_is_writable():
+            logger.warning("JSX pre-compile: bundle missing or stale and the code "
+                           "directory is read-only; serving in-browser Babel")
+            return
+
         # Extract JSX from index.html
         with open(_INDEX_HTML, "r", encoding="utf-8") as fh:
             html = fh.read()
@@ -654,7 +657,7 @@ def index():
     if html:
         resp = Response(html, mimetype="text/html")
     else:
-        resp = send_file(os.path.join(os.path.dirname(__file__), "templates", "index.html"))
+        resp = send_file(os.path.join(_BASE_DIR, "templates", "index.html"))
     resp.headers["Cache-Control"] = "no-store"
     return resp
 
@@ -735,7 +738,7 @@ def mobile():
 
 @app.route("/tracker")
 def tracker_page():
-    return send_file(os.path.join(os.path.dirname(__file__), "templates", "tracker.html"))
+    return send_file(os.path.join(_BASE_DIR, "templates", "tracker.html"))
 
 
 # ------------------------------------------------------------------ API: device
@@ -1501,8 +1504,7 @@ def api_gps_share():
 # Searches street addresses and points of interest (gas, food, shops, ATMs,
 # hospitals, hotels, …) extracted from the local OSM .pbf state files. 100%
 # offline. Absent until build_places_index.py has run.
-_PLACES_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                          "static", "data", "places.db")
+_PLACES_DB = os.path.join(atlas_paths.STATIC_DATA_DIR, "places.db")
 
 # "<thing> near me" → coarse category column in places.db.
 # _CATEGORY_SYNONYMS / _CAT_STOPWORDS / _detect_category live in ai_manager (see
@@ -1691,8 +1693,7 @@ def api_nav_geocode():
         logger.debug(f"Node geocode: {_e}")
 
     # ── Source 0.5: offline US cities DB (GeoNames, always available) ────────
-    _CITIES_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                              "static", "data", "us_cities.db")
+    _CITIES_DB = os.path.join(atlas_paths.STATIC_DATA_DIR, "us_cities.db")
     if os.path.exists(_CITIES_DB):
         try:
             import sqlite3 as _sq
@@ -1737,10 +1738,8 @@ def api_nav_geocode():
 
     # ── Source 0.6: offline trail / trailhead DB (nps_trails.db preferred) ──────
     import sqlite3 as _sq3
-    _NPS_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                           "static", "data", "nps_trails.db")
-    _LEGACY_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                              "static", "data", "trailheads.db")
+    _NPS_DB = os.path.join(atlas_paths.STATIC_DATA_DIR, "nps_trails.db")
+    _LEGACY_DB = os.path.join(atlas_paths.STATIC_DATA_DIR, "trailheads.db")
     _trail_results = []
     if os.path.exists(_NPS_DB):
         try:
@@ -2195,8 +2194,8 @@ def api_nav_favorite_item(fav_id):
 # endpoints below.  start_routing.sh still works and populates osrm_active.json;
 # RoutingNode reads that file for pre-loaded containers.
 
-_ACTIVE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "osrm_active.json")
-_STATES_DIR  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "osrm-data", "states")
+_ACTIVE_PATH = atlas_paths.data_file("osrm_active.json")
+_STATES_DIR  = atlas_paths.OSRM_STATES_DIR
 
 
 # ── Legacy helpers (kept so start_routing.sh / osrm_active.json still work) ──
@@ -2398,8 +2397,7 @@ def api_trails():
     features = []
 
     # ── Primary: nps_trails.db (line geometries) ──────────────────────────────
-    nps_db = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                          "static", "data", "nps_trails.db")
+    nps_db = os.path.join(atlas_paths.STATIC_DATA_DIR, "nps_trails.db")
     if os.path.exists(nps_db):
         try:
             con = _sq.connect(f"file:{nps_db}?mode=ro", uri=True)
@@ -2464,8 +2462,7 @@ def api_trails():
             logger.debug(f"NPS trailheads query: {_e}")
 
     # ── Legacy fallback: trailheads.db (points only) ──────────────────────────
-    legacy_db = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                             "static", "data", "trailheads.db")
+    legacy_db = os.path.join(atlas_paths.STATIC_DATA_DIR, "trailheads.db")
     if not features and os.path.exists(legacy_db):
         try:
             con = _sq.connect(f"file:{legacy_db}?mode=ro", uri=True)
@@ -2512,8 +2509,7 @@ def api_nav_reverse():
             return name
         import sqlite3 as _sq
         deg = 0.5   # ~55 km bounding box each side
-        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                               "static", "data", "trailheads.db")
+        db_path = os.path.join(atlas_paths.STATIC_DATA_DIR, "trailheads.db")
         if not os.path.exists(db_path):
             return None
         try:
@@ -2706,7 +2702,7 @@ def api_device_owner_put():
 # ------------------------------------------------------------------ API: Software update
 import re as _update_re
 
-_UPDATE_LOG_PATH = os.path.join(_BASE_DIR, "logs", "update.log")
+_UPDATE_LOG_PATH = os.path.join(atlas_paths.LOG_DIR, "update.log")
 _UPDATE_LAUNCHER = "/usr/local/sbin/atlas-update"
 _UPDATE_UNIT = "atlas-update.service"
 _UPDATE_CHECK_INTERVAL_SECONDS = 30 * 60
@@ -2749,7 +2745,7 @@ def _update_local_info():
         "installed_at": None,
     }
     try:
-        with open(os.path.join(_BASE_DIR, ".atlas_installed"), encoding="utf-8") as f:
+        with open(atlas_paths.state(".atlas_installed"), encoding="utf-8") as f:
             parts = f.read().split()
             if len(parts) >= 2:
                 info["installed_at"] = parts[1]
@@ -3439,7 +3435,7 @@ def api_toggle_job(job_id):
 
 # ── WiFi & Hotspot ─────────────────────────────────────────────────────────
 
-_HOTSPOT_CFG_PATH = os.path.join(os.path.dirname(__file__), "hotspot_config.json")
+_HOTSPOT_CFG_PATH = atlas_paths.data_file("hotspot_config.json")
 
 def _load_hotspot_cfg():
     try:
@@ -3450,9 +3446,12 @@ def _load_hotspot_cfg():
 
 def _save_hotspot_cfg(ssid, password):
     try:
-        with open(_HOTSPOT_CFG_PATH, "w") as f:
+        # Created 0600 from the first byte: the file holds the Wi-Fi password.
+        tmp = _HOTSPOT_CFG_PATH + ".tmp"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
             json.dump({"ssid": ssid, "password": password}, f)
-        os.chmod(_HOTSPOT_CFG_PATH, 0o600)
+        os.replace(tmp, _HOTSPOT_CFG_PATH)
     except Exception as e:
         logging.warning("Could not save hotspot config: %s", e)
 
@@ -4400,7 +4399,7 @@ def main():
     # Per-subsystem kill switches so we can bisect what's pinning CPU.
     # Touch the corresponding file under data/ to disable, remove to re-enable.
     def _kill(name: str) -> bool:
-        return os.path.exists(os.path.join(_BASE_DIR, "data", name))
+        return os.path.exists(os.path.join(atlas_paths.DATA_DIR, name))
 
     _minimal       = _kill("minimal_mode")
     _disable_ai    = _minimal or _kill("ai_disabled")
@@ -4450,7 +4449,7 @@ def main():
     # frames; the library's reader thread then pulls those bytes one at a time
     # in a tight Python loop and pins a core, starving the gevent WSGI worker.
     # Touch the file to disable, remove it to re-enable, then restart.
-    _mesh_kill = os.path.join(_BASE_DIR, "data", "mesh_disabled")
+    _mesh_kill = os.path.join(atlas_paths.DATA_DIR, "mesh_disabled")
     if args.demo:
         mesh.port = "DEMO"
         mesh._load_demo_data()
@@ -4469,7 +4468,7 @@ def main():
         interval     = int(settings.get("gps_share_interval", "30")),
         channels_str = settings.get("gps_share_channels", ""),
     )
-    _gps_kill = os.path.join(_BASE_DIR, "data", "gps_disabled")
+    _gps_kill = os.path.join(atlas_paths.DATA_DIR, "gps_disabled")
     if os.path.exists(_gps_kill):
         logger.warning("GPS disabled via kill switch (%s); skipping reader.", _gps_kill)
     else:

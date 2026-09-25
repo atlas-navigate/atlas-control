@@ -5,7 +5,9 @@ import os
 import re
 import threading
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "data", "meshtastic.db")
+import atlas_paths
+
+DB_PATH = atlas_paths.DB_PATH
 
 # Per-thread sqlite connection. We use threading.local (not gevent.local)
 # because the hot writers (gps-reader, mesh reader, nav loop, ai worker) are
