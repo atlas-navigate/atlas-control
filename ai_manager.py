@@ -11,6 +11,7 @@ import threading
 import logging
 import urllib.request
 import atlas_blocking
+import safe_math as _safe_math
 
 import csv
 import os as _os
@@ -916,32 +917,33 @@ def _kg_to_lbs(v):   return round(v / 0.453592, 4)
 def _c_to_f(v):      return round(v * 9/5 + 32, 2)
 def _f_to_c(v):      return round((v - 32) * 5/9, 2)
 
-_CALC_SAFE_NAMES = {
-    "abs": abs, "round": round, "min": min, "max": max,
-    "int": int, "float": float, "pow": pow,
-    "sqrt": _math_mod.sqrt, "ceil": _math_mod.ceil, "floor": _math_mod.floor,
-    "log": _math_mod.log, "log2": _math_mod.log2, "log10": _math_mod.log10,
-    "exp": _math_mod.exp,
-    "sin": _math_mod.sin, "cos": _math_mod.cos, "tan": _math_mod.tan,
-    "asin": _math_mod.asin, "acos": _math_mod.acos, "atan": _math_mod.atan,
-    "atan2": _math_mod.atan2,
-    "sinh": _math_mod.sinh, "cosh": _math_mod.cosh, "tanh": _math_mod.tanh,
-    "degrees": _math_mod.degrees, "radians": _math_mod.radians,
-    "hypot": _math_mod.hypot, "factorial": _math_mod.factorial,
-    "pi": _math_mod.pi, "e": _math_mod.e, "tau": _math_mod.tau, "inf": _math_mod.inf,
-    # Physics constants
-    "g": 9.80665,   # standard gravity m/s²
-    "G": 6.674e-11, # gravitational constant
-    "c": 299792458, # speed of light m/s
-    # Ballistics
-    "ballistic_drop": _ballistic_drop,   # (range_m, zero_m, v0_mps, bc_g1) → drop in cm
-    # Unit conversions
-    "mps_to_fps": _mps_to_fps, "fps_to_mps": _fps_to_mps,
-    "cm_to_inches": _cm_to_inches,
-    "m_to_yards": _m_to_yards, "yards_to_m": _yards_to_m,
-    "km_to_miles": _km_to_miles, "miles_to_km": _miles_to_km,
-    "lbs_to_kg": _lbs_to_kg, "kg_to_lbs": _kg_to_lbs,
-    "c_to_f": _c_to_f, "f_to_c": _f_to_c,
+# Everything Ray's [CALC: …] tags may call. Model output is steerable by
+# whatever is in the prompt (mesh messages, documents), so tags are evaluated
+# by safe_math's allowlisted AST evaluator — never eval() — and every function
+# declares its argument count and, where cost depends on input, its ranges.
+def _check_ballistic(range_m, zero_m=100.0, v0_mps=975.0, bc_g1=0.269):
+    if not (0 < range_m <= 3000 and 1 <= zero_m <= 1500
+            and 50 <= v0_mps <= 1600 and 0.05 <= bc_g1 <= 1.5):
+        raise _safe_math.MathError(
+            "ballistic_drop needs range 0-3000 m, zero 1-1500 m, "
+            "velocity 50-1600 m/s, BC 0.05-1.5")
+
+
+_CALC_FUNCTIONS = {
+    "ballistic_drop": _safe_math.Func(
+        lambda r, z=100.0, v=975.0, bc=0.269: _ballistic_drop(r, z, v, bc),
+        1, 4, check=_check_ballistic),
+    "mps_to_fps": _safe_math.Func(_mps_to_fps), "fps_to_mps": _safe_math.Func(_fps_to_mps),
+    "cm_to_inches": _safe_math.Func(_cm_to_inches),
+    "m_to_yards": _safe_math.Func(_m_to_yards), "yards_to_m": _safe_math.Func(_yards_to_m),
+    "km_to_miles": _safe_math.Func(_km_to_miles), "miles_to_km": _safe_math.Func(_miles_to_km),
+    "lbs_to_kg": _safe_math.Func(_lbs_to_kg), "kg_to_lbs": _safe_math.Func(_kg_to_lbs),
+    "c_to_f": _safe_math.Func(_c_to_f), "f_to_c": _safe_math.Func(_f_to_c),
+}
+_CALC_CONSTANTS = {
+    "g": 9.80665,    # standard gravity m/s²
+    "G": 6.674e-11,  # gravitational constant
+    "c": 299792458,  # speed of light m/s
 }
 
 # ---------------------------------------------------------------------------
@@ -5887,22 +5889,16 @@ class AIManager:
 
     # ------------------------------------------------------------------
     def _eval_expr(self, expr):
-        """Safely evaluate a single math expression. Returns (result_str, error_str)."""
-        try:
-            raw = eval(compile(expr.strip(), "<calc>", "eval"),
-                       {"__builtins__": {}}, _CALC_SAFE_NAMES)
-            if not isinstance(raw, (int, float)):
-                return None, "not a number"
-            if _math_mod.isnan(raw):
-                return None, "NaN"
-            if _math_mod.isinf(raw):
-                return str(raw), None
-            formatted = f"{raw:.6g}" if isinstance(raw, float) else str(raw)
-            return formatted, None
-        except ZeroDivisionError:
-            return None, "division by zero"
-        except Exception as ex:
-            return None, str(ex)
+        """Evaluate one math expression safely. Returns (result_str, error_str)."""
+        raw, err = _safe_math.try_evaluate(expr, _CALC_FUNCTIONS, _CALC_CONSTANTS)
+        if err:
+            return None, err
+        if isinstance(raw, float) and _math_mod.isnan(raw):
+            return None, "NaN"
+        if isinstance(raw, float) and _math_mod.isinf(raw):
+            return str(raw), None
+        formatted = f"{raw:.6g}" if isinstance(raw, float) else str(raw)
+        return formatted, None
 
     # ------------------------------------------------------------------
     def _process_calc_tags(self, text):

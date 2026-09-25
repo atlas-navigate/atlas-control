@@ -278,7 +278,15 @@ def init_db():
     # (v2 = title+tags-prefixed whole-doc vector. v3 = passage-level chunks. v4 =
     # passage-level chunks with the section-aware chunker that no longer lets a
     # short intro swallow the first labeled section — re-chunk every doc.)
-    if not c.execute("SELECT 1 FROM ai_settings WHERE key='embed_format_v' AND value='4'").fetchone():
+    # "Less than", never "not equal": after a rollback to an older release a
+    # newer marker must not be clobbered, or every rollback and re-upgrade pair
+    # would wipe and re-embed the whole knowledge base.
+    _row = c.execute("SELECT value FROM ai_settings WHERE key='embed_format_v'").fetchone()
+    try:
+        _embed_v = int(_row[0]) if _row else 0
+    except (TypeError, ValueError):
+        _embed_v = 0
+    if _embed_v < 4:
         c.execute("UPDATE ai_documents SET embedding=NULL")
         c.execute(
             "INSERT INTO ai_settings (key, value) VALUES ('embed_format_v', '4') "
@@ -439,6 +447,112 @@ def init_db():
 
     conn.commit()
     conn.close()
+    apply_migrations()
+
+
+# ── Schema migrations ─────────────────────────────────────────────────────
+#
+# init_db() above creates the baseline schema idempotently. Every change after
+# the baseline is a numbered migration recorded in PRAGMA user_version and run
+# exactly once, each in its own transaction.
+#
+# Rules (see docs/UPDATES.md — rollback depends on them):
+#   * Migrations are additive: new tables, new nullable columns, new indexes.
+#     An older release must still be able to read and write the database.
+#   * A migration that an older release cannot tolerate must raise
+#     COMPAT_FLOOR to its own number. The update engine then restores the
+#     pre-migration backup if it ever rolls back past that point.
+#   * A consistent copy of the database is taken with VACUUM INTO before any
+#     pending migration runs.
+
+def _migration_baseline(conn):
+    """Schema as created by init_db() at the first versioned release."""
+
+
+MIGRATIONS = [
+    (1, "baseline", _migration_baseline),
+]
+SCHEMA_VERSION = MIGRATIONS[-1][0]
+# Oldest schema version whose code can still use a database at SCHEMA_VERSION.
+COMPAT_FLOOR = 0
+_BACKUPS_KEPT = 3
+
+
+def schema_version(conn=None):
+    own = conn is None
+    conn = conn or sqlite3.connect(DB_PATH, timeout=10)
+    try:
+        return conn.execute("PRAGMA user_version").fetchone()[0]
+    finally:
+        if own:
+            conn.close()
+
+
+def get_meta(key, default=None):
+    try:
+        row = get_db().execute("SELECT value FROM atlas_meta WHERE key=?", (key,)).fetchone()
+    except sqlite3.OperationalError:
+        return default
+    return row[0] if row else default
+
+
+def _backup_before_migration(conn, from_version):
+    """VACUUM INTO a timestamped copy; keep the newest few. Returns the path."""
+    os.makedirs(atlas_paths.BACKUP_DIR, mode=0o700, exist_ok=True)
+    dest = os.path.join(atlas_paths.BACKUP_DIR,
+                        f"meshtastic-v{from_version}-{int(time.time())}.db")
+    old_umask = os.umask(0o077)
+    try:
+        conn.execute("VACUUM INTO ?", (dest,))
+    finally:
+        os.umask(old_umask)
+    backups = sorted(
+        (f for f in os.listdir(atlas_paths.BACKUP_DIR)
+         if f.startswith("meshtastic-v") and f.endswith(".db")),
+        key=lambda f: os.path.getmtime(os.path.join(atlas_paths.BACKUP_DIR, f)))
+    for stale in backups[:-_BACKUPS_KEPT]:
+        try:
+            os.remove(os.path.join(atlas_paths.BACKUP_DIR, stale))
+        except OSError:
+            pass
+    return dest
+
+
+def apply_migrations(db_path=None):
+    """Bring the database up to SCHEMA_VERSION. Returns the list applied.
+
+    A database newer than this release (after a rollback) is left untouched:
+    additive migrations guarantee this code can still use it.
+    """
+    conn = sqlite3.connect(db_path or DB_PATH, timeout=30, isolation_level=None)
+    applied = []
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS atlas_meta (key TEXT PRIMARY KEY, value TEXT)")
+        current = schema_version(conn)
+        pending = [m for m in MIGRATIONS if m[0] > current]
+        if not pending:
+            return applied
+        backup = _backup_before_migration(conn, current)
+        for number, name, fn in pending:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                fn(conn)
+                conn.execute(f"PRAGMA user_version = {int(number)}")
+                conn.execute(
+                    "INSERT INTO atlas_meta (key, value) VALUES ('compat_floor', ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    (str(COMPAT_FLOOR),))
+                conn.execute(
+                    "INSERT INTO atlas_meta (key, value) VALUES ('last_backup', ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (backup,))
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+            applied.append(name)
+        return applied
+    finally:
+        conn.close()
 
 # --- Node operations ---
 def upsert_node(node_data):

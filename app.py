@@ -89,6 +89,7 @@ from flask_limiter.util import get_remote_address
 
 import atlas_paths
 import atlas_blocking
+import safe_math
 import database as db
 import meshtastic
 import meshtastic.util
@@ -3197,90 +3198,23 @@ def handle_send(data):
 
 # ------------------------------------------------------------------ calculator
 
-_CALC_SAFE_FUNCS = {
-    "abs": abs, "round": round, "pow": pow,
-    "sqrt": math.sqrt, "ceil": math.ceil, "floor": math.floor,
-    "log": math.log, "log2": math.log2, "log10": math.log10,
-    "exp": math.exp,
-    "sin": math.sin, "cos": math.cos, "tan": math.tan,
-    "asin": math.asin, "acos": math.acos, "atan": math.atan, "atan2": math.atan2,
-    "sinh": math.sinh, "cosh": math.cosh, "tanh": math.tanh,
-    "degrees": math.degrees, "radians": math.radians,
-    "hypot": math.hypot, "factorial": math.factorial,
-    "pi": math.pi, "e": math.e, "tau": math.tau, "inf": math.inf,
-}
-
-_CALC_BINOPS = {
-    ast.Add: operator.add, ast.Sub: operator.sub,
-    ast.Mult: operator.mul, ast.Div: operator.truediv,
-    ast.Mod: operator.mod, ast.Pow: operator.pow,
-    ast.FloorDiv: operator.floordiv,
-}
-
-def _calc_eval_node(node):
-    """Recursively evaluate an AST node using only allowed math operations."""
-    if isinstance(node, ast.Constant):
-        if not isinstance(node.value, (int, float)):
-            raise ValueError("Only numeric literals allowed")
-        return node.value
-    if isinstance(node, ast.Name):
-        val = _CALC_SAFE_FUNCS.get(node.id)
-        if val is None:
-            raise ValueError(f"Unknown name: {node.id!r}")
-        return val
-    if isinstance(node, ast.BinOp):
-        op = _CALC_BINOPS.get(type(node.op))
-        if op is None:
-            raise ValueError("Unsupported operator")
-        return op(_calc_eval_node(node.left), _calc_eval_node(node.right))
-    if isinstance(node, ast.UnaryOp):
-        if isinstance(node.op, ast.USub):
-            return -_calc_eval_node(node.operand)
-        if isinstance(node.op, ast.UAdd):
-            return +_calc_eval_node(node.operand)
-        raise ValueError("Unsupported unary operator")
-    if isinstance(node, ast.Call):
-        func = _calc_eval_node(node.func)
-        if not callable(func):
-            raise ValueError("Not callable")
-        if node.keywords:
-            raise ValueError("Keyword arguments not allowed")
-        return func(*[_calc_eval_node(a) for a in node.args])
-    raise ValueError(f"Unsupported expression: {type(node).__name__}")
-
 def safe_calc(expression):
-    """Evaluate a math expression safely via AST parsing (no eval/exec)."""
-    expr = str(expression).strip()
-    if not expr:
-        return None, "Empty expression"
-    if len(expr) > 256:
-        return None, "Expression too long (max 256 characters)"
-    expr = expr.replace("^", "**")  # user convenience
-    try:
-        tree = ast.parse(expr, mode="eval")
-    except SyntaxError as e:
-        return None, f"Syntax error: {e}"
-    try:
-        result = _calc_eval_node(tree.body)
-    except (ValueError, TypeError, OverflowError) as e:
-        return None, str(e)
-    except ZeroDivisionError:
-        return None, "Division by zero"
-    except Exception as e:
-        return None, f"Calculation error: {e}"
-    if not isinstance(result, (int, float)):
-        return None, "Expression must return a number"
-    if math.isnan(result):
-        return None, "Result is NaN"
-    if math.isinf(result):
-        return str(result), None
+    """Evaluate a calculator expression; returns (result, error)."""
+    result, err = safe_math.try_evaluate(expression)
+    if err:
+        return None, err
+    if isinstance(result, float):
+        if math.isnan(result):
+            return None, "Result is NaN"
+        if math.isinf(result):
+            return str(result), None
     return result, None
 
 
 @app.route("/api/calculator", methods=["POST"])
 @limiter.limit("60 per minute")
 def api_calculator():
-    data = request.get_json(force=True)
+    data = request.get_json(silent=True) or {}
     expr = data.get("expression", "")
     result, err = safe_calc(expr)
     if err:
