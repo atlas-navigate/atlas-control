@@ -132,12 +132,11 @@ def _get_disk_extended():
     # SMART health + temperature via sudo smartctl on /dev/nvme0n1
     smart_data = {}
     try:
-        proc = subprocess.run(
-            ['sudo', 'smartctl', '-A', '-H', '--json', '/dev/nvme0n1'],
-            capture_output=True, text=True, timeout=2
-        )
-        if proc.returncode in (0, 4):  # 4 = SMART warnings but data available
-            data = json.loads(proc.stdout)
+        # smartctl needs root; atlas-helper runs exactly this read for us.
+        import atlas_helper
+        out, rc = atlas_helper.run("smart.read", timeout=15)
+        if rc in (0, 4):  # 4 = SMART warnings but data available
+            data = json.loads(out)
 
             health = data.get('smart_status', {})
             if 'passed' in health:

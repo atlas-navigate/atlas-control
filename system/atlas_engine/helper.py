@@ -55,7 +55,7 @@ def v_net_wifi_list(args):
 
 def v_net_wifi_connect(args):
     return netctl.wifi_connect(args.get("ssid"), args.get("password"), args.get("iface"),
-                               timeout=min(int(args.get("timeout") or 35), 60))
+                               timeout=min(int(args.get("timeout_s") or 35), 60))
 
 
 def v_net_disconnect(args):

@@ -90,6 +90,7 @@ from flask_limiter.util import get_remote_address
 import atlas_paths
 import atlas_blocking
 import safe_math
+import atlas_helper
 import database as db
 import meshtastic
 import meshtastic.util
@@ -3903,19 +3904,9 @@ def _avahi_reload_quiet():
     avahi may not be installed in dev environments and the apps still have
     subnet-scan fallback in that case."""
     def _run():
-        for cmd in (
-            ["sudo", "-n", "systemctl", "reload-or-restart", "avahi-daemon"],
-            ["systemctl", "--user", "reload-or-restart", "avahi-daemon"],
-            ["sudo", "-n", "avahi-daemon", "--reload"],
-            ["avahi-daemon", "--reload"],
-        ):
-            try:
-                r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-                if r.returncode == 0:
-                    return
-            except Exception:
-                continue
-        logging.info("avahi reload skipped — daemon unavailable or no privileges")
+        out, rc = atlas_helper.run("avahi.reload", timeout=15)
+        if rc != 0:
+            logging.info("avahi reload skipped: %s", out[:120])
     threading.Thread(target=_run, daemon=True, name="avahi-reload").start()
 
 def _candidate_mobile_hosts():
@@ -3976,50 +3967,70 @@ def _mobile_bootstrap_manifest():
         "generatedAt": int(time.time()),
     }
 
+_NMCLI_MUTATING = {"connect", "hotspot", "disconnect", "down", "delete", "modify", "up", "add"}
+_WIFI_LIST_PREFIX = ["--escape", "yes", "-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY", "dev", "wifi", "list"]
+
+
+def _nmcli_privileged(arg_list, timeout):
+    """Map the few privileged nmcli invocations Atlas makes onto atlas-helper
+    verbs. Returns (output, rc), or None when the command is read-only.
+
+    The service account has no sudo; the helper validates every argument and
+    receives passwords in the request body, never on a command line.
+    """
+    a = arg_list
+    if a[:2] == ["con", "modify"] and len(a) == 5 and a[3] == "connection.autoconnect":
+        return atlas_helper.run("net.set_autoconnect", name=a[2], enabled=(a[4] == "yes"))
+    if a == ["con", "down", "Hotspot"]:
+        return atlas_helper.run("net.hotspot_down")
+    if a == ["con", "delete", "Hotspot"]:
+        return "", 0          # net.hotspot_up replaces the profile itself
+    if a[:3] == ["dev", "wifi", "hotspot"]:
+        opts = dict(zip(a[3::2], a[4::2]))
+        return atlas_helper.run("net.hotspot_up", timeout=timeout + 10, iface=opts.get("ifname"),
+                                ssid=opts.get("ssid"), password=opts.get("password"))
+    if a[:2] == ["dev", "disconnect"] and len(a) == 3:
+        return atlas_helper.run("net.disconnect", iface=a[2])
+    if a[:3] == ["dev", "wifi", "connect"] and len(a) >= 4:
+        opts = dict(zip(a[4::2], a[5::2]))
+        return atlas_helper.run("net.wifi_connect", timeout=timeout + 15, ssid=a[3],
+                                password=opts.get("password"), iface=opts.get("ifname"),
+                                timeout_s=timeout)
+    if a[:len(_WIFI_LIST_PREFIX)] == _WIFI_LIST_PREFIX:
+        rest = a[len(_WIFI_LIST_PREFIX):]
+        opts = dict(zip(rest[::2], rest[1::2]))
+        out, rc = atlas_helper.run("net.wifi_list", timeout=timeout + 10, iface=opts.get("ifname"),
+                                   rescan=opts.get("--rescan") == "yes")
+        if rc != 126:          # helper present: its answer stands
+            return out, rc
+        return None            # developer checkout: try an unprivileged scan
+    if any(x in _NMCLI_MUTATING for x in a):
+        logging.warning("_nmcli: refusing unrecognised privileged nmcli call %s", a[:3])
+        return "operation not permitted", 1
+    return None
+
+
 def _nmcli(*args, timeout=20):
     """Run nmcli without stalling the gevent hub.
 
-    subprocess is NOT monkey-patched (see the patch_all() call at the top of
-    this file), so a bare subprocess.run() from a request greenlet froze every
-    client for as long as nmcli took — up to 20 s for a scan. atlas_blocking
-    runs it on gevent's native thread pool when called from the hub, and
-    inline from native worker threads such as the Wi-Fi failover loop.
-
-    Mutating commands (connect, hotspot, disconnect, con down/delete) require
-    NetworkManager authorization. We run those via sudo (requires NOPASSWD entry
-    in /etc/sudoers.d/atlas-control-nm) to bypass polkit session restrictions.
+    Read-only queries run as the service account. The handful of changes Atlas
+    makes (join Wi-Fi, run the hotspot, disconnect, autoconnect) go through
+    atlas-helper — see _nmcli_privileged(). subprocess is NOT monkey-patched
+    (see the patch_all() call at the top of this file), so atlas_blocking runs
+    nmcli on gevent's native thread pool when called from the hub.
     """
-    _NEEDS_SUDO = {"connect", "hotspot", "disconnect", "down", "delete", "modify"}
     arg_list = list(args)
-    use_sudo = any(a in _NEEDS_SUDO for a in arg_list)
-    # On the Atlas service account, NetworkManager may deny Wi-Fi scans even for
-    # read-only list operations unless nmcli runs with sudo. Without this, the
-    # UI quietly receives an empty network list and looks broken.
-    if arg_list[:3] == ["dev", "wifi", "list"]:
-        use_sudo = True
-    cmds = [(["sudo"] + ["nmcli"] + arg_list) if use_sudo else (["nmcli"] + arg_list)]
-    # Wi-Fi scans can work either with elevated NetworkManager access or as a
-    # normal user, depending on the host's polkit/sudoers setup. Try sudo
-    # first for service contexts, but fall back to plain nmcli before failing.
-    if use_sudo and arg_list[:3] == ["dev", "wifi", "list"]:
-        cmds.append(["nmcli"] + arg_list)
-    last_out = ""
-    last_rc = -1
-    for cmd in cmds:
-        try:
-            r = atlas_blocking.run(cmd, capture_output=True, text=True, timeout=timeout)
-            out = r.stdout.strip()
-            err = r.stderr.strip()
-            merged = (out + ("\n" + err if err else "")).strip()
-            if r.returncode == 0:
-                return merged, 0
-            last_out = merged
-            last_rc = r.returncode
-        except Exception as e:
-            logging.warning("_nmcli exception (%s): %s", args[:3], e)
-            last_out = str(e)
-            last_rc = -1
-    return last_out, last_rc
+    privileged = _nmcli_privileged(arg_list, timeout)
+    if privileged is not None:
+        return privileged
+    try:
+        r = atlas_blocking.run(["nmcli"] + arg_list, capture_output=True, text=True, timeout=timeout)
+        out = r.stdout.strip()
+        err = r.stderr.strip()
+        return (out + ("\n" + err if err else "")).strip(), r.returncode
+    except Exception as e:
+        logging.warning("_nmcli exception (%s): %s", args[:3], e)
+        return str(e), -1
 
 def _wifi_iface():
     """Return the first active WiFi interface name."""
