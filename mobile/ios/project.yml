@@ -38,16 +38,15 @@ targets:
         INFOPLIST_FILE: AtlasMobile/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CURRENT_PROJECT_VERSION: 1
-        MARKETING_VERSION: "1.0.0"
+        MARKETING_VERSION: "2.0.0"
         ENABLE_BITCODE: NO
         SWIFT_VERSION: "5.9"
         IPHONEOS_DEPLOYMENT_TARGET: "17.0"
         TARGETED_DEVICE_FAMILY: "1,2"
-        # WKWebView + iOS 17 crash if mixed-content blocking is left at default
-        # for self-signed local hosts.  We allow it explicitly in Info.plist
-        # via NSAllowsLocalNetworking + NSAllowsArbitraryLoadsInWebContent.
+        # Atlas's self-signed certificate is accepted only after its public
+        # key matches the pin stored at pairing (Network/AtlasTrust.swift).
     dependencies:
-      - sdk: CoreBluetooth.framework
+      - sdk: AVFoundation.framework
       - sdk: NetworkExtension.framework
       - sdk: WebKit.framework
       - sdk: UserNotifications.framework

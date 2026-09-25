@@ -2,28 +2,25 @@ import SwiftUI
 
 @main
 struct AtlasMobileApp: App {
-    @StateObject private var appVm: AppViewModel
-    @StateObject private var setupVm: SetupViewModel
+    @StateObject private var model: ConnectionModel
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
-        // SwiftUI calls App.init() on the main thread, but the protocol
-        // requirement is non-isolated.  Constructing @MainActor view models
-        // inline (`@StateObject private var x = X()`) trips strict-concurrency
-        // checks on Swift 6 and can crash at runtime on Swift 5 if the model
-        // touches CoreLocation / NWPathMonitor before the main actor is
-        // confirmed.  `MainActor.assumeIsolated` makes the isolation explicit
-        // without changing semantics.
-        let (app, setup): (AppViewModel, SetupViewModel) = MainActor.assumeIsolated {
-            (AppViewModel(), SetupViewModel())
-        }
-        _appVm   = StateObject(wrappedValue: app)
-        _setupVm = StateObject(wrappedValue: setup)
+        let m = MainActor.assumeIsolated { ConnectionModel() }
+        _model = StateObject(wrappedValue: m)
         AtlasNotificationManager.requestAuthorizationIfNeeded()
     }
 
     var body: some Scene {
         WindowGroup {
-            MainView(appVm: appVm, setupVm: setupVm)
+            MainView(model: model)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .active: model.appBecameActive()
+            case .background: model.appWentToBackground()
+            default: break
+            }
         }
     }
 }

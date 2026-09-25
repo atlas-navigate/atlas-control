@@ -52,45 +52,33 @@
     <key>UIStatusBarStyle</key>
     <string>UIStatusBarStyleLightContent</string>
 
-    <!-- ── Bluetooth (BLE pairing with Atlas Jetson) ──────────────────── -->
-    <key>NSBluetoothAlwaysUsageDescription</key>
-    <string>Atlas Control uses Bluetooth to pair with your Atlas Jetson and read its initial connection manifest.</string>
-    <key>NSBluetoothPeripheralUsageDescription</key>
-    <string>Atlas Control uses Bluetooth to pair with your Atlas Jetson and read its initial connection manifest.</string>
-
-    <!-- ── Local network (HTTP/HTTPS to Atlas + mDNS browsing) ───────── -->
+    <!-- ── Local network (HTTPS to Atlas + Bonjour discovery) ──────────── -->
     <key>NSLocalNetworkUsageDescription</key>
-    <string>Atlas Control connects to your Atlas Jetson over the local network — both the on-device hotspot and any LAN that Atlas joins.</string>
+    <string>Atlas finds and connects to your Atlas device on your Wi-Fi network or on Atlas's own Wi-Fi.</string>
     <key>NSBonjourServices</key>
     <array>
+        <string>_atlas._tcp</string>
         <string>_https._tcp</string>
-        <string>_http._tcp</string>
     </array>
 
-    <!-- ── Location (NEHotspotNetwork SSID + optional phone-tracker) ── -->
+    <!-- ── Camera: scanning the QR code on the Atlas label ──────────────── -->
+    <key>NSCameraUsageDescription</key>
+    <string>Scan the code on your Atlas's label to connect this iPhone to it.</string>
+
+    <!-- ── Location (only if the owner chooses to show this iPhone on Atlas's map) -->
     <key>NSLocationWhenInUseUsageDescription</key>
-    <string>Atlas Control needs your location to detect which Wi-Fi network you're on (so the app can switch between the Atlas hotspot and your home/office LAN) and to plot your phone on the Atlas map while connected.</string>
-    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-    <string>Atlas Control sends your location to the Atlas tracker only while you are actively using the app and connected to your Atlas Jetson.</string>
+    <string>If you choose to, Atlas shows where this iPhone is on its offline map while the Atlas app is open.</string>
 
-    <!-- ── Microphone / camera disabled ──────────────────────────────── -->
-
-    <!-- ── Allow cleartext HTTP to Atlas (self-signed cert / port 5000) ── -->
+    <!-- ── App Transport Security ──────────────────────────────────────────
+         No arbitrary loads. Atlas uses a per-device self-signed certificate
+         that the app accepts only after pinning its public key
+         (Network/AtlasTrust.swift); local addresses are allowed so that pinned
+         HTTPS to an IP address or .local name is possible. -->
     <key>NSAppTransportSecurity</key>
     <dict>
-        <key>NSAllowsArbitraryLoads</key>
-        <true/>
         <key>NSAllowsLocalNetworking</key>
         <true/>
-        <key>NSAllowsArbitraryLoadsInWebContent</key>
-        <true/>
     </dict>
-
-    <key>UIBackgroundModes</key>
-    <array>
-        <string>bluetooth-central</string>
-        <string>fetch</string>
-    </array>
 
     <!-- iOS shows our user-facing app name on the lock screen / banner -->
     <key>CFBundleLocalizations</key>
