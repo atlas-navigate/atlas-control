@@ -23,11 +23,37 @@ def engine_main(argv):
         return firewall.down()
     elif cmd == "version":
         result = str(ENGINE_VERSION)
+    elif cmd == "verify" and len(argv) == 2:
+        return verify_release_dir(argv[1])
     else:
-        print("usage: atlas-engine run|recover|prune|version", file=sys.stderr)
+        print("usage: atlas-engine run|recover|prune|version|verify RELEASE_DIR", file=sys.stderr)
         return 2
     print(result)
     return 0 if result not in ("failed", "recovery_failed") else 1
+
+
+def verify_release_dir(release_dir):
+    """Check a release directory (manifest, signature, bundle) against the keys
+    this unit trusts — e.g. before a golden unit copies it onto the
+    manufacturing drive. Prints the version; exit status 1 if untrusted."""
+    import os
+    from . import engine, paths, verify
+    try:
+        with open(os.path.join(release_dir, engine.MANIFEST_NAME), "rb") as f:
+            manifest_bytes = f.read()
+        with open(os.path.join(release_dir, engine.SIG_NAME), "rb") as f:
+            sig = f.read()
+        keys = verify.load_keyring(paths.KEYRING, paths.DEV_KEYS, paths.dev_mode())
+        manifest, kid = verify.verify_manifest(manifest_bytes, sig, keys, arch="aarch64")
+        bad = verify.verify_bundle_file(os.path.join(release_dir, manifest["bundle"]["name"]), manifest["bundle"])
+        if bad is not None:
+            raise verify.VerifyError("bundle does not match the signed manifest")
+    except (OSError, ValueError, verify.VerifyError) as exc:
+        print(f"not trusted: {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps({"version": manifest["version"], "seq": manifest["seq"], "key": kid,
+                      "bundle": manifest["bundle"]["name"]}))
+    return 0
 
 
 def helper_main(argv):

@@ -109,6 +109,13 @@ def install(release_dir, backup_dir, runner):
         changed.add(entry.get("kind") or "plain")
     for i, dst_abs in enumerate(spec.get("remove", [])):
         dst = paths.p(dst_abs)
+        if os.path.islink(dst) and dst not in done:
+            # e.g. nginx's sites-enabled/default: restore() puts the link back.
+            record["symlinks"].append({"link": dst, "old": os.readlink(dst)})
+            fsutil.atomic_write_json(record_path, record, mode=0o600)
+            os.unlink(dst)
+            changed.add("nginx" if "/nginx/" in dst else "plain")
+            continue
         if not os.path.isfile(dst) or dst in done:
             continue
         saved = os.path.join(backup_dir, f"removed-{i}")
@@ -117,7 +124,7 @@ def install(release_dir, backup_dir, runner):
                                 "mode": os.lstat(dst).st_mode & 0o7777, "kind": "removed"})
         fsutil.atomic_write_json(record_path, record, mode=0o600)
         os.unlink(dst)
-        changed.add("avahi" if "/avahi/" in dst else "plain")
+        changed.add("avahi" if "/avahi/" in dst else "nginx" if "/nginx/" in dst else "plain")
     for link in spec.get("symlinks", []):
         dst = paths.p(link["link"])
         target = link["target"]

@@ -1,51 +1,40 @@
 #!/usr/bin/env bash
 # ╔══════════════════════════════════════════════════════════════════════════╗
-# ║              ATLAS CONTROL — MASTER INSTALLATION SCRIPT                 ║
+# ║              ATLAS CONTROL — UNIT INSTALLER                              ║
 # ║              Jetson Orin Nano (ARM64) · Ubuntu 22.04 / 24.04             ║
 # ║                                                                          ║
-# ║  Usage:  sudo ./install.sh             fresh install (or prompts to      ║
-# ║                                        update if Atlas is already here)  ║
-# ║          sudo ./install.sh --update    quick update: pull latest code,   ║
-# ║                                        refresh deps/configs, restart —   ║
-# ║                                        no prompts, safe to automate      ║
-# ║          sudo ./install.sh --full      force the full install flow       ║
+# ║  The technician's step after the data payload is on /atlas_data          ║
+# ║  (tools/manufacturing/atlas-provision.sh runs it):                       ║
 # ║                                                                          ║
-# ║  What this does:                                                         ║
-# ║    1.  Detect & mount NVMe drive at /atlas_data                          ║
-# ║    2.  Download / update Atlas Control source (GitHub)                   ║
-# ║    3.  Install system dependencies                                        ║
-# ║    4.  Set up Python environment                                          ║
-# ║    5.  Install Ollama (AI / LLM engine)                                  ║
-# ║    6.  Build OSRM routing engine from source                             ║
-# ║    7.  Download vector basemap  (126GB)                                  ║
-# ║    8.  Download topographic overlay                                       ║
-# ║    9.  Download city & trail databases                                    ║
-# ║   10.  Download & process US state routing data                           ║
-# ║   11.  Configure HTTPS / nginx reverse proxy                              ║
-# ║   12.  Install systemd services + udev hardware rules                     ║
+# ║  Usage:  sudo ./install.sh --bundle DIR [--labels DIR] [--dev-key PUB]   ║
+# ║            --bundle DIR   a signed Atlas release (atlas-release.json,    ║
+# ║                           its .sig and the bundle)                       ║
+# ║            --labels DIR   where to write this unit's label files         ║
+# ║            --dev-key PUB  developer unit: trust this key, keep SSH,      ║
+# ║                           skip retail lock-down (never for sold units)   ║
+# ║                                                                          ║
+# ║  What this does (every data step is skipped when its data is present):   ║
+# ║    1.  /atlas_data storage and system packages                            ║
+# ║    2.  Python environment for the dataset builders                       ║
+# ║    3.  Ollama, OSRM, basemap, topo, cities/trails/places, state routing  ║
+# ║    4.  The Atlas software from the signed release, through its update   ║
+# ║        engine: services, nginx, firewall, udev, mDNS — no git, no sudo   ║
+# ║    5.  This unit's own identity (name, TLS key, hotspot, setup code)     ║
+# ║        and its printable label                                           ║
+# ║    6.  Retail lock-down (tools/manufacturing/finalize-retail.sh)         ║
+# ║                                                                          ║
+# ║  Software updates never use this script: Atlas installs signed releases ║
+# ║  itself (Settings → Software Update).                                    ║
 # ╚══════════════════════════════════════════════════════════════════════════╝
 set -euo pipefail
-# A bare `set -e` death is invisible in logs/update.log; report it.  The [✗]
-# marker is what /api/update/status keys on to surface a failed update.
+# A bare `set -e` death is easy to miss in a long log; report it. The [✗]
+# marker is what atlas-provision.sh and a technician look for.
 set -E
 # Subshell filter: $(...) substitution failures fire ERR too but don't kill
 # the script — only report the top-level failure that actually aborts.
 trap '(( BASH_SUBSHELL == 0 )) && echo -e "\033[0;31m[✗]\033[0m install.sh aborted (line $LINENO: $BASH_COMMAND)" >&2 || true' ERR
 
-# ── Self-update safety ──────────────────────────────────────────────────────
-# Section 2 may `git pull` the directory this script lives in, rewriting
-# install.sh while bash is still reading it incrementally — which corrupts the
-# running script.  Re-exec from a temp copy first; the original location is
-# preserved in ATLAS_INSTALL_SELF so source-dir detection still works.
-if [[ -z "${ATLAS_INSTALL_SELF:-}" ]]; then
-    _self_tmp="$(mktemp /tmp/atlas-install.XXXXXX.sh)"
-    cp "${BASH_SOURCE[0]}" "$_self_tmp"
-    export ATLAS_INSTALL_SELF
-    ATLAS_INSTALL_SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    export ATLAS_INSTALL_TMP="$_self_tmp"
-    exec bash "$_self_tmp" "$@"
-fi
-trap '[[ -n "${ATLAS_INSTALL_TMP:-}" ]] && rm -f "$ATLAS_INSTALL_TMP"' EXIT
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ── Protomaps basemap source ────────────────────────────────────────────────
 # Atlas resolves the latest published PMTiles build at install time from
@@ -64,22 +53,6 @@ ROUTING_PROFILES=("car" "hiking")
 # Ollama models pulled on first run (also checked after updates)
 OLLAMA_CHAT_MODEL="qwen2.5:3b"
 OLLAMA_EMBED_MODEL="qwen3-embedding:0.6b"
-
-# ── Atlas Control source repository ─────────────────────────────────────────
-# install.sh fetches the current version of Atlas Control from here, so a
-# box can be provisioned from nothing but this script:
-#   curl -fsSLO https://raw.githubusercontent.com/atlas-navigate/atlas-control/main/install.sh
-#   sudo bash install.sh
-# Three modes (handled in section 2):
-#   • standalone — only install.sh present → shallow-clones the repo
-#   • git checkout — fast-forwards to the latest published commit first
-#   • offline / dirty checkout — warns and installs the local copy as-is
-ATLAS_REPO_URL="https://github.com/atlas-navigate/atlas-control.git"
-ATLAS_REPO_BRANCH="main"
-# The repo is public, so no auth is needed.  If it is ever made private,
-# pass a GitHub personal-access token (repo read scope):
-#   sudo ATLAS_REPO_TOKEN=ghp_xxxx ./install.sh
-ATLAS_REPO_TOKEN="${ATLAS_REPO_TOKEN:-}"
 
 # ── Colors & helpers ────────────────────────────────────────────────────────
 RED='\033[0;31m'; GRN='\033[0;32m'; YLW='\033[1;33m'
@@ -121,6 +94,17 @@ PYEOF
     fi
 }
 
+# Datasets belong to the setup account; data/ logs/ updates/ cache/ belong to
+# the 'atlas' service account once Atlas is installed — never take them back.
+own_datasets() {
+    if id -u atlas >/dev/null 2>&1; then
+        find "$APP_DIR" \( -path "$APP_DIR/data" -o -path "$APP_DIR/logs" -o -path "$APP_DIR/updates" \
+             -o -path "$APP_DIR/cache" \) -prune -o -exec chown -h "$ATLAS_USER:$ATLAS_USER" {} +
+    else
+        chown -R "$ATLAS_USER:$ATLAS_USER" "$APP_DIR"
+    fi
+}
+
 confirm() {
     local prompt="$1"
     local default="${2:-n}"
@@ -134,31 +118,34 @@ confirm() {
     fi
 }
 
-# ── Install mode: full | update ─────────────────────────────────────────────
-# full   — everything: storage, packages, Ollama, OSRM build, maps, routing
-# update — pull latest code, refresh Python deps / configs / services, restart.
-#          Non-interactive, so it can run unattended (cron, remote update).
-INSTALL_MODE=""
-for arg in "$@"; do
-    case "$arg" in
-        --update|update)  INSTALL_MODE="update" ;;
-        --full|--fresh)   INSTALL_MODE="full" ;;
+# ── Options ─────────────────────────────────────────────────────────────────
+BUNDLE=""
+LABELS_DIR=""
+DEV_KEY=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --bundle)  BUNDLE="${2:-}"; shift 2 ;;
+        --labels)  LABELS_DIR="${2:-}"; shift 2 ;;
+        --dev-key) DEV_KEY="${2:-}"; shift 2 ;;
+        --full|--fresh) shift ;;
+        --update|update)
+            die "Atlas updates itself from signed releases (Settings → Software Update);
+    install.sh only sets up units. On a developer unit use tools/dev/deploy." ;;
         -h|--help)
-            echo "Usage: sudo ./install.sh [--update | --full]"
-            echo "  (no flag)  fresh install; offers a quick update if Atlas is already installed"
-            echo "  --update   quick update: pull latest code, refresh deps/configs, restart services"
-            echo "  --full     force the full install flow (storage, maps, routing data, ...)"
+            sed -n '3,30p' "$SCRIPT_DIR/install.sh" | sed 's/^# ║ \{0,2\}//; s/ *║$//'
             exit 0 ;;
-        *) die "Unknown option: $arg  (try --help)" ;;
+        *) die "Unknown option: $1  (try --help)" ;;
     esac
 done
+[[ -n "$BUNDLE" && -f "$BUNDLE/atlas-release.json" ]] \
+    || die "Give the signed Atlas release to install:  sudo ./install.sh --bundle DIR"
+BUNDLE="$(cd "$BUNDLE" && pwd)"
+[[ -z "$DEV_KEY" || -f "$DEV_KEY" ]] || die "Developer key not found: $DEV_KEY"
 
 # ── Must run as root ────────────────────────────────────────────────────────
 [[ $EUID -eq 0 ]] || die "Run with sudo:  sudo ./install.sh"
-# In-app updates arrive via systemd-run: no SUDO_USER and no login session
-# (logname fails), so fall back to the owner of the existing install rather
-# than a hardcoded guess — getent on a nonexistent user exits 2, which under
-# `set -eo pipefail` killed the updater before its first line of output.
+# The setup account (admin): owns the datasets and the dataset builders.
+# Atlas itself runs as the unprivileged 'atlas' account created in step 4.
 ATLAS_USER="${SUDO_USER:-$(logname 2>/dev/null || true)}"
 if [[ -z "$ATLAS_USER" ]] || ! getent passwd "$ATLAS_USER" > /dev/null; then
     ATLAS_USER="$(stat -c %U /atlas_data/atlas-control 2>/dev/null || echo ubuntu)"
@@ -167,25 +154,6 @@ ATLAS_HOME="$(getent passwd "$ATLAS_USER" | cut -d: -f6)" \
     || die "Cannot resolve home directory for user '$ATLAS_USER'"
 # systemd-run units have no $HOME; tools like the ollama CLI panic without it.
 export HOME="${HOME:-/root}"
-SCRIPT_DIR="$ATLAS_INSTALL_SELF"
-
-# Auto-detect an existing installation and offer the quick-update path.
-if [[ -z "$INSTALL_MODE" ]]; then
-    if [[ -f /atlas_data/atlas-control/.atlas_installed || -f /etc/systemd/system/atlas-control.service ]]; then
-        if confirm "Existing Atlas Control installation detected — run a quick update instead of a full install?" y; then
-            INSTALL_MODE="update"
-        else
-            INSTALL_MODE="full"
-        fi
-    else
-        INSTALL_MODE="full"
-    fi
-fi
-# Update mode needs something to update.
-if [[ "$INSTALL_MODE" == "update" && ! -d /atlas_data/atlas-control ]]; then
-    warn "No existing install at /atlas_data/atlas-control — switching to full install"
-    INSTALL_MODE="full"
-fi
 
 echo -e "${BLD}${CYN}"
 echo "  ╔══════════════════════════════════════════════════════╗"
@@ -193,7 +161,8 @@ echo "  ║          ATLAS CONTROL — INSTALLER                  ║"
 echo "  ║          Offline GPS Nav + Mesh Communications      ║"
 echo "  ╚══════════════════════════════════════════════════════╝"
 echo -e "${NC}"
-echo -e "  Mode               : ${BLD}$([[ "$INSTALL_MODE" == "update" ]] && echo "UPDATE (quick)" || echo "FULL INSTALL")${NC}"
+echo -e "  Release            : ${BLD}$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$BUNDLE/atlas-release.json")${NC}"
+echo -e "  Unit type          : ${BLD}$([[ -n "$DEV_KEY" ]] && echo "developer" || echo "retail")${NC}"
 echo -e "  Installing for user: ${BLD}${ATLAS_USER}${NC}"
 echo -e "  Source directory   : ${BLD}${SCRIPT_DIR}${NC}"
 echo ""
@@ -222,14 +191,12 @@ else
 fi
 
 # Free-space advisory only (never blocks): the full dataset — basemap + all-state
-# OSRM + topo/DBs + scratch — is large, but a partial state selection or a quick
-# update needs far less, so we warn rather than refuse.
-if [[ "$INSTALL_MODE" != "update" ]]; then
-    FREE_GB=$(df -BG --output=avail "$ATLAS_DATA" 2>/dev/null | tail -1 | tr -dc '0-9')
-    if [[ -n "$FREE_GB" && "$FREE_GB" -lt "$RECOMMENDED_FREE_GB" ]]; then
-        warn "Only ${FREE_GB} GB free on $ATLAS_DATA (~${RECOMMENDED_FREE_GB} GB recommended for the full basemap + all 50 states)."
-        warn "You can still proceed — install fewer states when prompted, or free space and re-run."
-    fi
+# OSRM + topo/DBs + scratch — is large, but a partial state selection needs far
+# less, so we warn rather than refuse.
+FREE_GB=$(df -BG --output=avail "$ATLAS_DATA" 2>/dev/null | tail -1 | tr -dc '0-9')
+if [[ -n "$FREE_GB" && "$FREE_GB" -lt "$RECOMMENDED_FREE_GB" ]]; then
+    warn "Only ${FREE_GB} GB free on $ATLAS_DATA (~${RECOMMENDED_FREE_GB} GB recommended for the full basemap + all 50 states)."
+    warn "You can still proceed — install fewer states when prompted, or free space and re-run."
 fi
 
 APP_DIR="$ATLAS_DATA/atlas-control"
@@ -251,113 +218,12 @@ chown "$ATLAS_USER:$ATLAS_USER" "$ATLAS_DATA" "$APP_DIR"
 # ════════════════════════════════════════════════════════════════════════════
 section "App Files"
 
-# Obtain the current Atlas Control source.
-#   • Standalone install.sh (curl'd; no app files beside it): shallow-clone
-#     the current version into a temp dir and install from there.
-#   • Run from a git checkout (including APP_DIR itself on update re-runs):
-#     fast-forward to the latest published commit first.  Being offline or
-#     having local changes is non-fatal — the local copy installs as-is.
+# The Atlas software comes only from the signed release (step 4, below) and
+# runs from /opt/atlas. This directory holds Atlas's state and datasets; the
+# dataset builders further down run from here when data must be (re)built,
+# so the kit's copies of them are placed alongside the data.
 SRC_DIR="$SCRIPT_DIR"
-# Never let git hang on a credential prompt during an unattended install.
-export GIT_TERMINAL_PROMPT=0
-# Token-authenticated URL for private-repo access.  Used for network
-# operations only and never echoed, so the token stays out of the log.
-GIT_FETCH_URL="$ATLAS_REPO_URL"
-if [[ -n "$ATLAS_REPO_TOKEN" ]]; then
-    GIT_FETCH_URL="${ATLAS_REPO_URL/https:\/\//https://x-access-token:${ATLAS_REPO_TOKEN}@}"
-fi
-if [[ ! -f "$SCRIPT_DIR/app.py" ]]; then
-    BOOTSTRAP_PKGS=()
-    command_exists git   || BOOTSTRAP_PKGS+=(git)
-    command_exists rsync || BOOTSTRAP_PKGS+=(rsync)
-    if [[ ${#BOOTSTRAP_PKGS[@]} -gt 0 ]]; then
-        info "Installing bootstrap packages: ${BOOTSTRAP_PKGS[*]} ..."
-        apt-get update -qq
-        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${BOOTSTRAP_PKGS[@]}" > /dev/null 2>&1
-    fi
-    CLONE_DIR="$(mktemp -d /tmp/atlas-control-src.XXXXXX)"
-    trap 'rm -rf "$CLONE_DIR"; [[ -n "${ATLAS_INSTALL_TMP:-}" ]] && rm -f "$ATLAS_INSTALL_TMP"' EXIT
-    info "No app files beside install.sh — downloading current version ..."
-    info "  ${ATLAS_REPO_URL} (branch: ${ATLAS_REPO_BRANCH})"
-    if ! git clone --depth 1 --branch "$ATLAS_REPO_BRANCH" "$GIT_FETCH_URL" "$CLONE_DIR" 2>/dev/null; then
-        die "Could not download Atlas Control from $ATLAS_REPO_URL
-    Possible causes:
-      • machine is offline — restore connectivity and re-run
-      • the repo is private — re-run with a GitHub token:
-          sudo ATLAS_REPO_TOKEN=ghp_xxxx bash install.sh
-      • or clone the repo manually and run its install.sh instead"
-    fi
-    # Detach the credentialed URL from the on-disk clone config.
-    git -C "$CLONE_DIR" remote set-url origin "$ATLAS_REPO_URL"
-    SRC_DIR="$CLONE_DIR"
-    log "Downloaded $(git -C "$CLONE_DIR" rev-parse --short HEAD) ($ATLAS_REPO_BRANCH)"
-elif [[ -d "$SCRIPT_DIR/.git" ]] && command_exists git; then
-    info "Checking for a newer version of Atlas Control ..."
-    REPO_OWNER="$(stat -c %U "$SCRIPT_DIR" 2>/dev/null || echo "$ATLAS_USER")"
-    if sudo -u "$REPO_OWNER" GIT_TERMINAL_PROMPT=0 \
-        git -C "$SCRIPT_DIR" pull --ff-only "$GIT_FETCH_URL" "$ATLAS_REPO_BRANCH" 2>/dev/null; then
-        log "Source at $(sudo -u "$REPO_OWNER" git -C "$SCRIPT_DIR" rev-parse --short HEAD) ($ATLAS_REPO_BRANCH)"
-        # If the pull brought a newer install.sh, hand off to it so the update
-        # runs with the latest install logic (we're executing a pre-pull temp
-        # copy).  The relaunched script pulls again, finds itself current, and
-        # passes this check — no loop.
-        if ! cmp -s "$SCRIPT_DIR/install.sh" "$ATLAS_INSTALL_TMP"; then
-            warn "install.sh itself was updated — relaunching the new installer ..."
-            rm -f "$ATLAS_INSTALL_TMP"
-            ATLAS_INSTALL_SELF= ATLAS_INSTALL_TMP= exec bash "$SCRIPT_DIR/install.sh" "--$INSTALL_MODE"
-        fi
-    else
-        warn "Could not update from $ATLAS_REPO_URL (offline, private repo without ATLAS_REPO_TOKEN, or local changes) — installing the local copy as-is"
-    fi
-elif [[ ! -d "$SCRIPT_DIR/.git" ]]; then
-    # App files are here but this is NOT a git checkout — the box was provisioned
-    # by copying files in rather than via the curl-standalone or git-clone path.
-    # Without a .git, app.py's update check reports "Not a git checkout" and the
-    # version shows "unknown". Turn the directory into a real checkout tracking
-    # origin/main so in-app updates + version reporting work. This section runs
-    # before the package install (§3), so bootstrap git first if it's missing
-    # (mirrors the standalone bootstrap above).
-    command_exists git || {
-        info "Installing git to enable software updates ..."
-        apt-get update -qq || true
-        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git > /dev/null 2>&1 || true
-    }
-    if command_exists git; then
-        info "App files present but not a git checkout — linking to $ATLAS_REPO_URL for updates ..."
-        REPO_OWNER="$(stat -c %U "$SCRIPT_DIR" 2>/dev/null || echo "$ATLAS_USER")"
-        _asgit() { sudo -u "$REPO_OWNER" GIT_TERMINAL_PROMPT=0 git -C "$SCRIPT_DIR" "$@"; }
-        # -b needs git >= 2.28; fall back to init + symbolic-ref on older gits.
-        _asgit init -q -b "$ATLAS_REPO_BRANCH" 2>/dev/null || {
-            _asgit init -q
-            _asgit symbolic-ref HEAD "refs/heads/$ATLAS_REPO_BRANCH"
-        }
-        _asgit remote remove origin 2>/dev/null || true
-        _asgit remote add origin "$GIT_FETCH_URL"
-        if _asgit fetch --depth 1 origin "$ATLAS_REPO_BRANCH" 2>/dev/null; then
-            # Detach the credentialed URL from the on-disk clone config.
-            _asgit remote set-url origin "$ATLAS_REPO_URL"
-            # Every per-device file (certs, DBs, hotspot config, osrm-data/, venv/,
-            # tiles/, .secret_key) is gitignored, so syncing tracked app code to
-            # origin/main is safe — it can't touch device state — and it also
-            # brings a stale file-copied box up to the latest published release.
-            _asgit reset --hard "origin/$ATLAS_REPO_BRANCH" 2>/dev/null || true
-            _asgit branch --set-upstream-to="origin/$ATLAS_REPO_BRANCH" "$ATLAS_REPO_BRANCH" 2>/dev/null || true
-            log "Git checkout initialized at $(_asgit rev-parse --short HEAD 2>/dev/null || echo '?') — updates + version reporting enabled"
-            # If the sync brought a newer install.sh, hand off to it so the rest of
-            # the run uses the latest install logic (mirrors the git-pull path).
-            if ! cmp -s "$SCRIPT_DIR/install.sh" "$ATLAS_INSTALL_TMP"; then
-                warn "install.sh itself was updated by the sync — relaunching the new installer ..."
-                rm -f "$ATLAS_INSTALL_TMP"
-                ATLAS_INSTALL_SELF= ATLAS_INSTALL_TMP= exec bash "$SCRIPT_DIR/install.sh" "--$INSTALL_MODE"
-            fi
-        else
-            _asgit remote set-url origin "$ATLAS_REPO_URL" 2>/dev/null || true
-            warn "Could not reach $ATLAS_REPO_URL to initialize updates (offline?) — repo linked; updates enable once online"
-        fi
-    else
-        warn "git unavailable — software-update support not enabled; re-run install.sh to enable it"
-    fi
-fi
+[[ -f "$SRC_DIR/app.py" ]] || die "install.sh must sit in an Atlas release kit or checkout (app files beside it)."
 
 if [[ "$SRC_DIR" != "$APP_DIR" ]]; then
     info "Copying app files to $APP_DIR ..."
@@ -373,22 +239,12 @@ if [[ "$SRC_DIR" != "$APP_DIR" ]]; then
               --exclude='venv/' --exclude='__pycache__/' \
               --exclude='*.pyc' --exclude='*.log' --exclude='logs/' \
               --exclude='osrm-data/' --exclude='static/tiles/' \
-              --exclude='data/atlas.db*' --exclude='data/meshtastic.db*' \
+              --exclude='/data/' --exclude='/updates/' --exclude='/cache/' \
               --exclude='atlas.db' \
-              --exclude='data/US.txt' --exclude='data/cities5000.txt' \
-              --exclude='data/.secret_key' \
               --exclude='hotspot_config.json' \
               --exclude='osrm_active.json' \
               "$SRC_DIR/" "$APP_DIR/"
-    log "App files copied"
-    # Keep the source checkout's .git in APP_DIR so future re-runs of
-    # $APP_DIR/install.sh can fast-forward to the current version. Covers the
-    # standalone clone AND a file-copied source that the §2 branch above just
-    # turned into a checkout (rsync excludes .git/, so it must be moved here).
-    if [[ -d "$SRC_DIR/.git" && ! -d "$APP_DIR/.git" ]]; then
-        mv "$SRC_DIR/.git" "$APP_DIR/.git"
-        log "Install directory linked to $ATLAS_REPO_URL for future updates"
-    fi
+    log "Dataset builders copied"
 else
     log "Running from install location — no copy needed"
 fi
@@ -412,7 +268,7 @@ mkdir -p "$APP_DIR/data" \
          "$APP_DIR/logs" \
          "$OLLAMA_DATA_DIR/models"
 
-chown -R "$ATLAS_USER:$ATLAS_USER" "$APP_DIR"
+own_datasets
 chown -R "$OLLAMA_SERVICE_USER:$OLLAMA_SERVICE_GROUP" "$OLLAMA_DATA_DIR"
 chmod 755 "$ATLAS_DATA" "$OLLAMA_DATA_DIR" "$OLLAMA_DATA_DIR/models"
 
@@ -470,136 +326,49 @@ PKGS=(
     nodejs
 )
 
-if [[ "$INSTALL_MODE" == "update" ]]; then
-    # Only fetch packages an update introduced — keeps the quick path quick
-    # while still letting new releases add system dependencies.
-    MISSING_PKGS=()
-    for p in "${PKGS[@]}"; do
-        dpkg -s "$p" >/dev/null 2>&1 || MISSING_PKGS+=("$p")
-    done
-    if [[ ${#MISSING_PKGS[@]} -gt 0 ]]; then
-        info "Installing new packages: ${MISSING_PKGS[*]} ..."
-        apt-get update -qq
-        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${MISSING_PKGS[@]}" > /dev/null 2>&1
-        log "New system packages installed"
-    else
-        log "System packages already present"
-    fi
-else
-    info "Updating package lists ..."
+# Only fetch what is missing: a re-run (or a unit whose packages came with the
+# OS image) needs no network here.
+MISSING_PKGS=()
+for p in "${PKGS[@]}"; do
+    dpkg -s "$p" >/dev/null 2>&1 || MISSING_PKGS+=("$p")
+done
+if [[ ${#MISSING_PKGS[@]} -gt 0 ]]; then
+    info "Installing packages: ${MISSING_PKGS[*]} ..."
     apt-get update -qq
-    info "Installing packages ..."
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${PKGS[@]}" > /dev/null 2>&1
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${MISSING_PKGS[@]}" > /dev/null 2>&1
     log "System packages installed"
+else
+    log "System packages already present"
 fi
 
-for cmd in rsync visudo nmcli osmium smartctl systemctl bluetoothctl; do
+for cmd in rsync nmcli osmium smartctl systemctl bluetoothctl; do
     command_exists "$cmd" || die "Required command missing after apt install: $cmd"
 done
 log "Required system commands verified"
 
-# Serial port access for ATLAS_USER
-if ! groups "$ATLAS_USER" | grep -q dialout; then
-    usermod -a -G dialout "$ATLAS_USER"
-    log "Added $ATLAS_USER to dialout group"
-fi
+# Device access (serial, I2C, GPIO, Bluetooth), Wi-Fi control and drive
+# health belong to the 'atlas' service account and the root helper that the
+# release installs in step 4 — the setup account gets no sudo rules and no
+# device groups, and the hostname comes from this unit's own identity.
 
-# I2C access for optional Waveshare UPS telemetry
-if getent group i2c >/dev/null 2>&1 && ! groups "$ATLAS_USER" | grep -q '\bi2c\b'; then
-    usermod -a -G i2c "$ATLAS_USER"
-    log "Added $ATLAS_USER to i2c group"
-fi
-
-# NVMe smartctl sudo rule
-SUDOERS_ATLAS="/etc/sudoers.d/atlas-smartctl"
-echo "$ATLAS_USER ALL=(ALL) NOPASSWD: /usr/sbin/smartctl" > "$SUDOERS_ATLAS"
-chmod 440 "$SUDOERS_ATLAS"
-visudo -c -f "$SUDOERS_ATLAS" > /dev/null
-log "sudoers: smartctl access granted for NVMe monitoring"
-
-# nmcli sudo rule — required for WiFi connect / hotspot management
-SUDOERS_NM="/etc/sudoers.d/atlas-nmcli"
-echo "$ATLAS_USER ALL=(ALL) NOPASSWD: /usr/bin/nmcli" > "$SUDOERS_NM"
-chmod 440 "$SUDOERS_NM"
-visudo -c -f "$SUDOERS_NM" > /dev/null
-log "sudoers: nmcli access granted for WiFi management"
-
-# avahi sudo rule — Atlas reloads avahi-daemon after a WiFi switch so mDNS
-# announcements are re-broadcast on the new interface immediately rather
-# than at the next periodic refresh (which can leave mobile apps unable to
-# rediscover Atlas on a brand-new LAN for 30+ seconds).
-SUDOERS_AVAHI="/etc/sudoers.d/atlas-avahi"
-{
-    echo "$ATLAS_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl reload avahi-daemon"
-    echo "$ATLAS_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl reload-or-restart avahi-daemon"
-    echo "$ATLAS_USER ALL=(ALL) NOPASSWD: /usr/sbin/avahi-daemon --reload"
-} > "$SUDOERS_AVAHI"
-chmod 440 "$SUDOERS_AVAHI"
-visudo -c -f "$SUDOERS_AVAHI" > /dev/null
-log "sudoers: avahi reload access granted for mDNS refresh after WiFi switch"
-
-# Atlas needs a stable hostname so atlas.local resolves consistently via mDNS
-if [[ "$(hostnamectl --static 2>/dev/null || hostname)" != "atlas" ]]; then
-    hostnamectl set-hostname atlas
-    log "System hostname set to atlas"
-fi
-
-# mDNS hygiene — by default avahi advertises atlas.local on EVERY interface,
-# including docker0 (172.17.0.1) and the USB-gadget link-locals.  A phone that
-# resolves atlas.local then gets handed one of those unreachable addresses and
-# the connection silently fails ("worked earlier" = before docker0 / USB came
-# up).  Restrict announcements to the real client-facing interfaces (WiFi +
-# the L4T USB-ethernet bridge) and force IPv4 so clients don't latch onto a
-# rotating privacy IPv6 either.
+# mDNS hygiene — by default avahi advertises on EVERY interface, including
+# docker0 (172.17.0.1): a phone that resolves Atlas's name then gets an
+# unreachable address and the connection silently fails. Deny that bridge
+# rather than pinning one Wi-Fi interface name (a unit whose module enumerates
+# differently would silently stop being discoverable), and use IPv4 so clients
+# don't latch onto a rotating privacy address. The DNS-SD advert itself
+# (_atlas._tcp with this unit's id and key pin) comes with the release.
 AVAHI_CONF="/etc/avahi/avahi-daemon.conf"
-WIFI_IF=$(for w in /sys/class/net/*/wireless; do basename "$(dirname "$w")"; done 2>/dev/null | head -1)
-AVAHI_IFACES="${WIFI_IF:-wlan0}"
-[[ -d /sys/class/net/l4tbr0 ]] && AVAHI_IFACES="${AVAHI_IFACES},l4tbr0"
 sed -i 's/^[#[:space:]]*use-ipv6=.*/use-ipv6=no/' "$AVAHI_CONF"
-if grep -q '^[#[:space:]]*allow-interfaces=' "$AVAHI_CONF"; then
-    sed -i "s/^[#[:space:]]*allow-interfaces=.*/allow-interfaces=${AVAHI_IFACES}/" "$AVAHI_CONF"
+sed -i -E 's/^[#[:space:]]*allow-interfaces=.*/#allow-interfaces=/' "$AVAHI_CONF"
+if grep -q '^[#[:space:]]*deny-interfaces=' "$AVAHI_CONF"; then
+    sed -i -E 's/^[#[:space:]]*deny-interfaces=.*/deny-interfaces=docker0/' "$AVAHI_CONF"
 else
-    sed -i "/^\[server\]/a allow-interfaces=${AVAHI_IFACES}" "$AVAHI_CONF"
+    sed -i '/^\[server\]/a deny-interfaces=docker0' "$AVAHI_CONF"
 fi
-log "avahi restricted to ${AVAHI_IFACES} (IPv4) — atlas.local won't resolve to docker0/USB"
-
 systemctl enable --now avahi-daemon
-log "avahi-daemon enabled (atlas.local via mDNS)"
-
-# Advertise Atlas via mDNS / DNS-SD so Android NSD and iOS Bonjour can discover
-# Atlas on any LAN it joins without knowing the IP in advance.  We advertise
-# BOTH the nginx HTTPS endpoint (443) AND the Flask direct endpoint (5000) so
-# either lookup short-circuits — apps that browse `_https._tcp` get a hit
-# immediately instead of waiting the full 8 s service-browse timeout for
-# nothing and falling back to `_http._tcp`.
-mkdir -p /etc/avahi/services
-cat > /etc/avahi/services/atlas-http.service << 'AVAHI_EOF'
-<?xml version="1.0" standalone='no'?>
-<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
-<service-group>
-  <name replace-wildcards="yes">Atlas Control on %h</name>
-  <service>
-    <type>_https._tcp</type>
-    <port>443</port>
-    <txt-record>path=/api/device</txt-record>
-    <txt-record>app=atlas-control</txt-record>
-  </service>
-  <service>
-    <type>_http._tcp</type>
-    <port>5000</port>
-    <txt-record>path=/api/device</txt-record>
-    <txt-record>app=atlas-control</txt-record>
-  </service>
-</service-group>
-AVAHI_EOF
-log "avahi service file created (_https._tcp:443 + _http._tcp:5000 — DNS-SD discovery)"
-
-# Avahi normally re-announces on interface change, but on a brand-new LAN the
-# initial announcement timing is non-deterministic — sometimes it lands in the
-# 3 s gap between mobile discovery passes and the apps miss it.  Reload now so
-# the service files above take effect even on existing installs without a
-# full systemd restart.
 systemctl reload-or-restart avahi-daemon || true
+log "avahi-daemon enabled (IPv4, every interface but docker0)"
 
 systemctl enable --now bluetooth
 log "bluetooth service enabled"
@@ -612,8 +381,7 @@ log "bluetooth service enabled"
 # index — plus long-range routing at runtime drive it into the OOM killer.
 # zram (compressed RAM) helps but is NOT extra capacity, so we set up BOTH a
 # zram device AND a real disk swapfile HERE, before any heavy provisioning
-# (OSRM build in §6, state processing in §8). Runs in update mode too, so
-# existing boxes gain the persistent runtime swap on --update.
+# (OSRM build in §6, state processing in §8).
 section "Swap / Memory Headroom"
 
 # ── zram (compressed RAM, high priority) ─────────────────────────────────────
@@ -680,7 +448,9 @@ fi
 # ════════════════════════════════════════════════════════════════════════════
 # 4.  PYTHON VIRTUAL ENVIRONMENT
 # ════════════════════════════════════════════════════════════════════════════
-section "Python Environment"
+section "Python Environment (dataset builders)"
+# Only the dataset builders below use this environment. Atlas itself runs
+# from the release's own environment, built offline from its signed wheels.
 
 VENV="$APP_DIR/venv"
 VENV_CFG="$VENV/pyvenv.cfg"
@@ -752,58 +522,12 @@ print("Bluetooth bootstrap dependency verification passed")
 PYEOF
 log "Python environment ready"
 
-# ── Pre-compile the mobile JSX bundle ────────────────────────────────────────
-# app.py serves a lightweight precompiled page to the mobile WebView via
-# /static/app.compiled.js (the in-browser Babel fallback can blank Android
-# WebView).  app.py rebuilds this on demand at runtime whenever index.html
-# changes, but compiling it now means the bundle is warm before the first
-# mobile client connects.  Mirrors app.py._precompile_jsx exactly.  Non-fatal:
-# if node/compile fails, the runtime rebuild path still covers it.
-# Some apt nodejs packages ship only `nodejs` (no `node`); compile_jsx.js calls
-# `node`. Alias it so the bundle precompiles here instead of deferring to runtime.
-if ! command_exists node && command_exists nodejs; then
-    ln -sf "$(command -v nodejs)" /usr/local/bin/node
-    hash -r
-fi
-if command_exists node && [[ -f "$APP_DIR/compile_jsx.js" ]]; then
-    info "Pre-compiling mobile JSX bundle ..."
-    if sudo -u "$ATLAS_USER" "$VENV/bin/python3" - "$APP_DIR" <<'PYEOF'
-import os, re, subprocess, sys, tempfile
-base = sys.argv[1]
-html = open(os.path.join(base, "templates", "index.html"), encoding="utf-8").read()
-m = re.search(r'<script type="text/babel">(.*?)</script>', html, re.DOTALL)
-if not m:
-    print("no JSX block found; runtime rebuild will handle it")
-    sys.exit(0)
-with tempfile.NamedTemporaryFile(suffix=".jsx", mode="w", encoding="utf-8", delete=False) as t:
-    t.write(m.group(1)); tmp = t.name
-out = os.path.join(base, "static", "app.compiled.js")
-r = subprocess.run(["node", os.path.join(base, "compile_jsx.js"), tmp, out],
-                   capture_output=True, text=True, timeout=180)
-os.unlink(tmp)
-print((r.stdout or r.stderr).strip()[:300])
-sys.exit(r.returncode)
-PYEOF
-    then
-        log "Mobile JSX bundle compiled (static/app.compiled.js)"
-    else
-        warn "JSX pre-compile failed — app.py will retry at runtime"
-    fi
-else
-    warn "node or compile_jsx.js missing — mobile bundle will build at runtime"
-fi
-
 # ════════════════════════════════════════════════════════════════════════════
-# 5–8.  PROVISIONING (full install only)
-#       Ollama · OSRM build · map data · state routing data
-#       These are one-time provisioning steps; quick updates leave the
-#       existing AI engine, maps, and routing data untouched.
+# 5–8.  PROVISIONING
+#       Ollama · OSRM build · map data · state routing data — each skipped
+#       when the payload already holds it.
 # ════════════════════════════════════════════════════════════════════════════
 STATE_INPUT="keep"
-if [[ "$INSTALL_MODE" == "update" ]]; then
-    section "Provisioning (Ollama / OSRM / Map & Routing Data)"
-    log "Update mode — existing Ollama, OSRM, map and routing data left untouched"
-else
 
 # ════════════════════════════════════════════════════════════════════════════
 # 5.  OLLAMA (AI / LLM)
@@ -1258,7 +982,6 @@ else
     fi
 fi
 
-fi  # end full-install-only provisioning (sections 5–8)
 
 # ════════════════════════════════════════════════════════════════════════════
 # 8c.  OFFLINE GEOCODER FALLBACK DATA  (GeoNames)
@@ -1270,11 +993,6 @@ fi  # end full-install-only provisioning (sections 5–8)
 #
 # Nothing in this repo fetched them until now, so both tiers silently loaded
 # zero rows on every install and Ray hallucinated city names from bare lat/lon.
-#
-# Deliberately placed OUTSIDE the full-install-only block above: these are ~9 MB
-# and every existing box updates via `atlas-update` → `install.sh --update`, so
-# gating them behind a full install would leave every deployed device broken.
-# Same reasoning as the §3b swap and the §12 Ollama model pull.
 #
 # Non-fatal by design — these are fallback tiers; us_cities.db keeps the primary
 # path working, so a failed download must never abort an install or an update.
@@ -1306,12 +1024,9 @@ fi
 # a straight line — a well-formed response, so it presents as "routing is
 # broken" rather than as a missing command-line option.
 #
-# Deliberately placed OUTSIDE the full-install-only block above: §6 never runs
-# on --update, so an updated box pairs freshly-copied code that passes --mmap=1
-# with whatever osrm-routed it already had. §6's first two branches (already on
-# PATH / prebuilt binaries from $OSRM_PREBUILT_DIR) accept any vintage without a
-# version check, so a full install can land here too. Same reasoning as the §8c
-# GeoNames download and the §3b swap.
+# §6's first two branches (already on PATH / prebuilt binaries from
+# $OSRM_PREBUILT_DIR) accept any vintage without a version check, so an older
+# osrm-routed can land here.
 #
 # Probe --help rather than comparing version strings: the binary itself is the
 # authority on what it accepts, and the check costs milliseconds.
@@ -1320,7 +1035,7 @@ fi
 # `set -o pipefail` (top of file), so `osrm-routed --help | grep -q --mmap`
 # reports failure whenever EITHER side fails — and plenty of CLIs print help
 # then exit non-zero. That would read a perfectly capable binary as lacking the
-# flag: a needless 20–40 min rebuild on --full, a false alarm on --update.
+# flag and start a needless 20–40 min rebuild.
 # v5.27.1 happens to exit 0, but this check exists for binaries we have not seen.
 _osrm_has_mmap() {
     local help
@@ -1335,7 +1050,7 @@ if ! command_exists osrm-routed; then
     warn "osrm-routed not on PATH — skipping --mmap capability check"
 elif _osrm_has_mmap; then
     log "OSRM supports --mmap — Ray and long-distance routing can run together"
-elif [[ "$INSTALL_MODE" == "full" ]]; then
+else
     warn "Installed osrm-routed predates --mmap — rebuilding from source (20–40 min) ..."
     # Guarded: unlike §6 (where no OSRM exists at all and dying is correct), a
     # working-but-older binary is already installed here. Under `set -e` + the
@@ -1355,101 +1070,28 @@ elif [[ "$INSTALL_MODE" == "full" ]]; then
         warn "OSRM rebuild failed — keeping the existing binary and continuing."
         warn "Routing stays in high-memory mode; see the summary at the end."
     fi
-else
-    # Update mode: warn, but never start a 20–40 minute build the user did not
-    # ask for. Non-fatal either way — a box without --mmap still routes short
-    # trips, so aborting the update would be worse than shipping this warning.
-    OSRM_MMAP_OK=false
-    warn "Installed osrm-routed does not support --mmap."
-    warn "Long-distance routes will degrade to straight lines while Ray is loaded."
-    warn "Fix (rebuilds OSRM v5.27.1, 20–40 min):  sudo $APP_DIR/install.sh --full"
 fi
 
 # ════════════════════════════════════════════════════════════════════════════
-# 9.  HTTPS / NGINX
+# 10.  OLLAMA SERVICE
 # ════════════════════════════════════════════════════════════════════════════
-section "HTTPS / Nginx"
+section "Ollama Service"
 
-SSL_DIR="/etc/ssl/atlas"
-CERT="$SSL_DIR/cert.pem"
-KEY="$SSL_DIR/key.pem"
-mkdir -p "$SSL_DIR"
-
-if [[ ! -f "$CERT" ]]; then
-    info "Generating self-signed TLS certificate ..."
-    LAN_IP=$(hostname -I | tr ' ' '\n' | grep -v '^10\.' | grep -v '^127\.' | head -1 || echo "127.0.0.1")
-    openssl req -x509 -newkey rsa:2048 -nodes \
-        -keyout "$KEY" -out "$CERT" -days 3650 \
-        -subj "/CN=atlas" \
-        -addext "subjectAltName=DNS:atlas.local,DNS:localhost,IP:${LAN_IP},IP:10.42.0.1,IP:127.0.0.1" \
-        2>/dev/null
-    chmod 600 "$KEY"
-    chmod 644 "$CERT"
-    # Copy back to app dir so setup_https.sh finds them if re-run
-    cp "$CERT" "$APP_DIR/cert.pem"
-    cp "$KEY"  "$APP_DIR/key.pem"
-    log "TLS certificate generated (valid 10 years)"
-else
-    log "TLS certificate already present"
-fi
-
-# Install nginx config (symlink to the repo file so updates apply immediately)
-NGINX_SITE="/etc/nginx/sites-available/atlas"
-cp "$APP_DIR/nginx_atlas.conf" "$NGINX_SITE"
-# Patch the tile root paths to the actual install location
-sed -i "s|/atlas_data/atlas-control/static|$APP_DIR/static|g" "$NGINX_SITE"
-
-ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/atlas
-rm -f /etc/nginx/sites-enabled/default
-nginx -t && systemctl enable --now nginx
-# enable --now is a no-op when nginx is already running — reload so config
-# changes shipped by an update actually take effect.
-systemctl reload-or-restart nginx
-log "Nginx configured (HTTPS :443 → Flask :5000)"
-
-# ════════════════════════════════════════════════════════════════════════════
-# 10.  SYSTEMD SERVICES
-# ════════════════════════════════════════════════════════════════════════════
-section "Systemd Services"
-
-# Generate service files from the repo templates by substituting placeholders
-sed "s|ATLAS_USER|$ATLAS_USER|g; s|APP_DIR|$APP_DIR|g" \
-    "$APP_DIR/atlas-control.service" > /etc/systemd/system/atlas-control.service
-
+# Atlas's own units, nginx site, firewall, udev and mDNS files come from the
+# signed release (step 4); Ollama is part of the base system.
 sed "s|OLLAMA_USER|$OLLAMA_SERVICE_USER|g; s|OLLAMA_GROUP|$OLLAMA_SERVICE_GROUP|g; s|OLLAMA_DATA_DIR|$OLLAMA_DATA_DIR|g" \
     "$APP_DIR/ollama.service" > /etc/systemd/system/ollama.service
 
 systemctl daemon-reload
-systemctl enable atlas-control ollama
-log "Services enabled: atlas-control, ollama"
-
-# ── Swap ─────────────────────────────────────────────────────────────────────
-# zram + the persistent disk swapfile are configured earlier in §3b so they are
-# live before the heavy OSRM/places provisioning (and on --update too). Nothing
-# to do here.
-
-# Web-app-triggered updates: install the root-owned launcher the Flask app
-# invokes via sudo.  It starts install.sh --update as a transient systemd
-# unit so the update survives atlas-control restarting itself mid-update.
-sed "s|__APP_DIR__|$APP_DIR|g" "$APP_DIR/atlas_update_launcher.sh" > /usr/local/sbin/atlas-update
-chown root:root /usr/local/sbin/atlas-update
-chmod 755 /usr/local/sbin/atlas-update
-SUDOERS_UPDATE="/etc/sudoers.d/atlas-update"
-echo "$ATLAS_USER ALL=(ALL) NOPASSWD: /usr/local/sbin/atlas-update" > "$SUDOERS_UPDATE"
-chmod 440 "$SUDOERS_UPDATE"
-visudo -c -f "$SUDOERS_UPDATE" > /dev/null
-log "Update launcher installed (/usr/local/sbin/atlas-update — used by the web UI)"
-log "Atlas UPS defaults: I2C bus 7, address 0x41 (Waveshare UPS Power Module C)"
+systemctl enable ollama
+log "Service enabled: ollama"
 
 # ════════════════════════════════════════════════════════════════════════════
 # 11.  UDEV HARDWARE DEVICE RULES
 # ════════════════════════════════════════════════════════════════════════════
 section "Hardware Device Rules"
-
-cp "$APP_DIR/99-atlas-devices.rules" /etc/udev/rules.d/
-udevadm control --reload-rules
-udevadm trigger
-log "udev rules installed (Meshtastic → /dev/meshtastic, GPS → /dev/gps)"
+# The udev rules (radio/GPS symlinks, group dialout, mode 0660) come from the
+# signed release in step 4.
 
 # ── 11b. Jetson Orin UART1 DMA fix (40-pin header /dev/ttyTHS1) ───────────────
 # JetPack 6.2.2+ has a serial-tegra RX-DMA kernel bug that returns received
@@ -1518,134 +1160,10 @@ if [[ -f /etc/nv_tegra_release && -d /proc/device-tree/bus@0/serial@3100000 \
 fi
 
 # ════════════════════════════════════════════════════════════════════════════
-# 12.  FIRST-RUN INITIALIZATION
+# 12.  OLLAMA MODELS
 # ════════════════════════════════════════════════════════════════════════════
-section "First-Run Initialization"
+section "Ollama Models"
 
-# Generate Flask secret key
-SECRET="$APP_DIR/data/.secret_key"
-if [[ ! -f "$SECRET" ]]; then
-    python3 -c "import secrets; print(secrets.token_hex(32))" > "$SECRET"
-    chmod 600 "$SECRET"
-    chown "$ATLAS_USER:$ATLAS_USER" "$SECRET"
-    log "Flask secret key generated"
-fi
-
-# Seed a default hotspot config so the WiFi→hotspot failover works out of the
-# box.  Without a saved SSID + >=8-char password, _start_hotspot_with_saved_config
-# refuses to start the AP, leaving Atlas unreachable when it can't join a LAN.
-# Only create it if absent so we never clobber the user's chosen credentials.
-HOTSPOT_CFG="$APP_DIR/hotspot_config.json"
-if [[ ! -f "$HOTSPOT_CFG" ]]; then
-    printf '{"ssid": "Atlas-Hotspot", "password": "AtlasControl"}\n' > "$HOTSPOT_CFG"
-    chmod 600 "$HOTSPOT_CFG"
-    chown "$ATLAS_USER:$ATLAS_USER" "$HOTSPOT_CFG"
-    log "Default hotspot seeded (SSID: Atlas-Hotspot / pass: AtlasControl — change in the app)"
-else
-    log "Hotspot config already present — leaving as-is"
-fi
-
-# Initialize SQLite database
-sudo -u "$ATLAS_USER" "$VENV/bin/python3" -c "
-import sys; sys.path.insert(0, '$APP_DIR')
-import database; database.init_db()
-print('Database initialized')
-"
-log "SQLite database initialized"
-
-sudo -u "$ATLAS_USER" "$VENV/bin/python3" -c "
-import sys; sys.path.insert(0, '$APP_DIR')
-import database
-s = database.get_app_settings()
-updates = {}
-if s.get('serial_port') in (None, '', '/dev/ttyACM1', '/dev/ttyTHS1'):
-    # /dev/ttyTHS1 was pinned while the Heltec rode the 40-pin UART (Jun 2026);
-    # the radio is back on USB-C. AUTO covers both: it prefers the USB symlink
-    # and still probes the UART when no USB radio is present.
-    updates['serial_port'] = 'AUTO'
-if s.get('gps_port') in (None, '', '/dev/ttyACM0'):
-    updates['gps_port'] = 'AUTO'
-if updates:
-    database.set_app_settings(updates)
-    print(f'Updated legacy port defaults: {updates}')
-else:
-    print('Port defaults already normalized')
-"
-log "Serial port settings normalized"
-
-# NOTE: run via a quoted heredoc (<<'PYEOF'), not python3 -c "...". The inline
-# -c form is a double-quoted shell string, so the inner double quotes in the SQL
-# (e.g. the INSERT...ON CONFLICT below) closed it early and bash choked on the
-# parentheses — a syntax error that aborted the whole install at this step. A
-# quoted heredoc passes the body to Python verbatim; APP_DIR comes via the env.
-sudo -u "$ATLAS_USER" APP_DIR="$APP_DIR" "$VENV/bin/python3" - <<'PYEOF'
-import os, sys
-sys.path.insert(0, os.environ["APP_DIR"])
-import database
-s = database.ai_get_settings()
-updates = {}
-if s.get('model') in (None, '', 'llama3.2:3b', 'qwen3:4b', 'qwen3.5:2b', 'qwen3.5:4b'):
-    updates['model'] = 'qwen2.5:3b'
-    # Qwen2.5 sampling: old low-temp values cause repetition loops
-    updates['temperature'] = '0.7'
-    updates['top_p'] = '0.8'
-    updates['top_k'] = '20'
-    updates['num_gpu'] = '-1'
-# Stale 2048-token context truncates the system prompt once RAG + history land
-if s.get('num_ctx') == '2048':
-    updates['num_ctx'] = '4096'
-# Stale 512-token limit causes mid-sentence truncation; raise to 1024
-if s.get('num_predict') in (None, '', '512'):
-    updates['num_predict'] = '1024'
-# rag_top_k 3->5: retrieve more docs per query so border-case docs aren't missed
-if s.get('rag_top_k') in (None, '', '3'):
-    updates['rag_top_k'] = '5'
-# system_prompt: old default caused "As Ray, I am..." self-intros and verbose
-# multi-option replies. Delete the stale row so AI_DEFAULTS takes effect.
-old_prompt = s.get('system_prompt', '')
-if 'Try to provide several options' in old_prompt:
-    conn = database.get_db()
-    conn.execute("DELETE FROM ai_settings WHERE key='system_prompt'")
-    conn.commit()
-    print('Removed stale system_prompt -- AI_DEFAULTS will apply')
-# Migrate the embedder to qwen3-embedding:0.6b. nomic (768-dim) and qwen3
-# (1024-dim) vectors are incompatible, so any change wipes stored doc
-# embeddings -- the app re-embeds them on next startup.
-if s.get('embed_model') in (None, '', 'nomic-embed-text'):
-    if s.get('embed_model') != 'qwen3-embedding:0.6b':
-        updates['embed_model'] = 'qwen3-embedding:0.6b'
-        conn = database.get_db()
-        n = conn.execute('UPDATE ai_documents SET embedding=NULL').rowcount
-        conn.commit()
-        print(f'Cleared {n} stale doc embedding(s) for re-embed')
-# embed_format_v: init_db() (database.py) owns this migration -- it wipes stored
-# vectors and stamps the current format whenever the marker is stale, and it ran
-# a moment ago. Report only; do NOT wipe or write the version here.
-#
-# This block used to pin the marker back to '3' while init_db() advanced it to
-# '4', so the two fought on every single run: init_db wiped and set 4, this block
-# wiped and set 3, then the atlas-control restart at the end of the install ran
-# init_db again and wiped a third time. One update re-embedded the entire
-# knowledge base three times over, forever, because the marker could never settle.
-# Hard-coding '4' here would just reset the trap at the next format bump -- the
-# version belongs in exactly one place, and that place is init_db().
-pending = database.get_db().execute(
-    "SELECT COUNT(*) FROM ai_documents WHERE embedding IS NULL").fetchone()[0]
-if pending:
-    print(f'{pending} doc(s) queued for re-embed (embed format v{s.get("embed_format_v", "?")}) '
-          f'-- the app re-embeds them in the background on startup')
-if updates:
-    database.ai_set_settings(updates)
-    print(f'Updated AI defaults: {updates}')
-else:
-    print('AI defaults already normalized')
-PYEOF
-log "AI settings normalized"
-
-# Fix all ownership
-chown -R "$ATLAS_USER:$ATLAS_USER" "$APP_DIR"
-
-# Start services (restart so an update re-run replaces the running code)
 systemctl restart ollama || true
 if systemctl is-active --quiet ollama; then
     info "Waiting for Ollama API ..."
@@ -1679,73 +1197,120 @@ else
     warn "Ollama service did not start; skipping model pull"
 fi
 
-systemctl restart atlas-control
-log "Services started"
 
-# Record the installed version — re-runs of install.sh use this marker to
-# offer the quick-update path, and the app can surface it as a version string.
-ATLAS_REV="$(sudo -u "$ATLAS_USER" git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
-echo "${ATLAS_REV} $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$APP_DIR/.atlas_installed"
-chown "$ATLAS_USER:$ATLAS_USER" "$APP_DIR/.atlas_installed"
+# ════════════════════════════════════════════════════════════════════════════
+# 13.  ATLAS SOFTWARE  (the signed release, through its update engine)
+# ════════════════════════════════════════════════════════════════════════════
+section "Atlas Software (signed release)"
+
+BUNDLE_SEQ=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["seq"])' "$BUNDLE/atlas-release.json")
+if [[ -e /opt/atlas/current ]]; then
+    INSTALLED_SEQ=$(python3 -c 'import json,sys
+try: print(json.load(open(sys.argv[1])).get("seq", 0))
+except Exception: print(0)' /var/lib/atlas-update/installed.json)
+    if (( INSTALLED_SEQ >= BUNDLE_SEQ )); then
+        log "This release (or a newer one) is already installed"
+    else
+        # Already on the signed layout: a normal verified update, with the
+        # engine's health check and automatic rollback.
+        info "Handing the release to Atlas's update engine ..."
+        READY="$APP_DIR/updates/ready"
+        install -d -o atlas -g atlas -m 2770 "$READY"
+        rm -f "$READY"/*
+        install -o atlas -g atlas -m 0640 "$BUNDLE"/atlas-release.json "$BUNDLE"/atlas-release.json.sig \
+            "$BUNDLE"/*.tar.xz "$READY/"
+        /usr/bin/python3 -I - <<'PY'
+import json, socket, sys, time
+s = socket.socket(socket.AF_UNIX)
+s.connect("/run/atlas/helper.sock")
+s.sendall(b'{"verb": "update.apply", "args": {}}\n')
+s.recv(4096)
+last = None
+for _ in range(1800):
+    try:
+        st = json.load(open("/run/atlas-update/status.json"))
+    except Exception:
+        st = {}
+    line = f"{st.get('stage')}: {st.get('message') or ''}"
+    if line != last:
+        print("   ", line, flush=True)
+        last = line
+    if st.get("engine_state") == "IDLE" and st.get("stage") in ("success", "rolled_back", "failed", "cancelled", "interrupted"):
+        sys.exit(0 if st["stage"] == "success" else 1)
+    time.sleep(1)
+sys.exit("timed out waiting for the update engine")
+PY
+        log "Release installed by the update engine"
+    fi
+else
+    # First install on this unit: service account, engine, this unit's own
+    # identity, the release, system files — verified and health-checked, and
+    # undone automatically if the new Atlas does not come up healthy.
+    /usr/bin/python3 -I "$SRC_DIR/tools/migrate/migrate.py" apply --bundle "$BUNDLE" --provision \
+        ${DEV_KEY:+--dev-key "$DEV_KEY"}
+fi
+systemctl start atlas-firewall.service || warn "Firewall did not start — check: journalctl -u atlas-firewall"
+own_datasets
+
+# ════════════════════════════════════════════════════════════════════════════
+# 14.  IDENTITY & LABEL
+# ════════════════════════════════════════════════════════════════════════════
+section "Identity & Label"
+
+UNIT_NAME=$(/usr/local/lib/atlas/bin/atlas-identity show | python3 -c 'import json,sys; print(json.load(sys.stdin)["name"])')
+UNIT_HOST=$(/usr/local/lib/atlas/bin/atlas-identity show | python3 -c 'import json,sys; print(json.load(sys.stdin)["hostname"])')
+log "This unit: $UNIT_NAME ($UNIT_HOST.local)"
+if [[ -n "$LABELS_DIR" ]]; then
+    /usr/local/lib/atlas/bin/atlas-identity label-json \
+        | /opt/atlas/current/venv/bin/python3 "$SRC_DIR/tools/manufacturing/make_label.py" --out "$LABELS_DIR" >/dev/null
+    log "Label files written to $LABELS_DIR/ (print $UNIT_NAME.png and attach it to this unit)"
+else
+    info "No --labels DIR: print the label later with"
+    echo "    sudo /usr/local/lib/atlas/bin/atlas-identity label-json | /opt/atlas/current/venv/bin/python3 $SRC_DIR/tools/manufacturing/make_label.py --out DIR"
+fi
+
+# ════════════════════════════════════════════════════════════════════════════
+# 15.  RETAIL LOCK-DOWN
+# ════════════════════════════════════════════════════════════════════════════
+section "Retail Lock-down"
+
+if [[ -n "$DEV_KEY" ]]; then
+    warn "Developer unit — not locked down (SSH stays on, developer key trusted)"
+else
+    bash "$SRC_DIR/tools/manufacturing/finalize-retail.sh"
+fi
 
 # ════════════════════════════════════════════════════════════════════════════
 # DONE
 # ════════════════════════════════════════════════════════════════════════════
 echo ""
 echo -e "${BLD}${GRN}══════════════════════════════════════════════════════════${NC}"
-if [[ "$INSTALL_MODE" == "update" ]]; then
-    echo -e "${BLD}${GRN}  Atlas Control updated to ${ATLAS_REV}!${NC}"
-else
-    echo -e "${BLD}${GRN}  Atlas Control installation complete! (${ATLAS_REV})${NC}"
-fi
+echo -e "${BLD}${GRN}  $UNIT_NAME is ready.${NC}"
 echo -e "${GRN}══════════════════════════════════════════════════════════${NC}"
 echo ""
-LAN_ACCESS_IP=$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -Ev '^(10\.13\.13\.|127\.)' | head -1 || true)
-[[ -z "${LAN_ACCESS_IP:-}" ]] && LAN_ACCESS_IP="127.0.0.1"
-echo -e "  ${BLD}Data storage :${NC} $APP_DIR"
 USED=$(df -h "$ATLAS_DATA" | tail -1 | awk '{print $3"/"$2" used"}')
-echo -e "  ${BLD}Disk usage   :${NC} $USED"
+echo -e "  ${BLD}Data storage :${NC} $APP_DIR  ($USED)"
 echo ""
-echo -e "  ${CYN}Access Atlas Control:${NC}"
-echo -e "    On your network : ${BLD}https://atlas.local${NC}"
-echo -e "    Direct LAN IP   : ${BLD}https://${LAN_ACCESS_IP}${NC}"
-echo -e "    Locally         : ${BLD}https://localhost${NC}"
+echo -e "  ${CYN}First use (owner):${NC} scan the label's app QR code with the Atlas app,"
+echo -e "  or join the Wi-Fi printed on the label and open ${BLD}https://$UNIT_HOST.local${NC}"
+echo -e "  (the browser warns once about Atlas's own certificate)."
 echo ""
-echo -e "  ${CYN}Service management:${NC}"
-echo -e "    sudo systemctl status  atlas-control"
-echo -e "    sudo systemctl restart atlas-control"
-echo -e "    sudo journalctl -u atlas-control -f"
-echo ""
-echo -e "  ${YLW}First visit:${NC} browser will warn about the self-signed certificate."
-echo -e "  Click 'Advanced' → 'Proceed to site' — required once per device."
-echo -e "  If ${BLD}atlas.local${NC} does not resolve on your phone or laptop, use the direct IP above."
-echo ""
-if [[ "$INSTALL_MODE" == "full" && "${STATE_INPUT,,}" == "none" ]]; then
-    echo -e "  ${YLW}Routing data not installed.${NC} Add states:"
-    echo -e "    sudo $APP_DIR/install.sh --full   (re-run and choose states)"
+if [[ "${STATE_INPUT,,}" == "none" ]]; then
+    echo -e "  ${YLW}Routing data not installed.${NC} Add states by re-running install.sh."
     echo ""
 fi
-# Re-surface the §8d result here. /api/update/status only returns the LAST 60
-# LINES of logs/update.log to the web UI, and ~75 lines of output follow §8d —
-# so the warning issued up there scrolls out of view for anyone updating from
-# the browser, which is how every deployed box updates. This banner is inside
-# the tail. ${OSRM_MMAP_OK:-true} because `set -u` is on and the very early
-# failure paths never reach §8d.
+# ${OSRM_MMAP_OK:-true} because `set -u` is on and early paths never reach §8d.
 if [[ "${OSRM_MMAP_OK:-true}" == "false" ]]; then
     echo -e "  ${YLW}Routing is in high-memory mode.${NC} This osrm-routed predates --mmap,"
     echo -e "  so each state graph costs ~1.1 GB of RAM instead of ~42 MB. Long routes"
-    echo -e "  can degrade to a straight line while Ray is loaded. To fix (20–40 min):"
-    echo -e "    sudo $APP_DIR/install.sh --full"
+    echo -e "  can degrade to a straight line while Ray is loaded. Re-run install.sh"
+    echo -e "  after removing the prebuilt OSRM binaries to rebuild them (20–40 min)."
     echo ""
 fi
 if [[ ! -f "$APP_DIR/static/data/places.db" ]]; then
-    echo -e "  ${YLW}Offline address/POI search not built yet.${NC} To enable \"<place> near me\""
-    echo -e "  and street-address geocoding from the downloaded map data (one-time, heavy —"
-    echo -e "  pauses Ray and caps memory so it can't swamp the box):"
+    echo -e "  ${YLW}Offline address/POI search not built yet.${NC} To build it (one-time, heavy):"
     echo -e "    sudo bash $APP_DIR/build_places_safe.sh"
     echo ""
 fi
-echo -e "  ${CYN}Updating later:${NC} ${BLD}sudo $APP_DIR/install.sh --update${NC}"
-echo -e "  pulls the latest Atlas Control release and restarts — data, maps,"
-echo -e "  and settings are preserved."
+echo -e "  ${CYN}Updates:${NC} Atlas installs signed releases itself — Settings → Software Update."
 echo ""

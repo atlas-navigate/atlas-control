@@ -126,8 +126,9 @@ class MigrationRehearsal(unittest.TestCase):
         from atlas_engine import health
         return health.HealthResult(self.healthy, "fake")
 
-    def apply(self, **kw):
-        args = argparse.Namespace(bundle=self.bundle, dev_key=self.dev_pub, rotate_hotspot=False, **kw)
+    def apply(self, provision=False, **kw):
+        args = argparse.Namespace(bundle=self.bundle, dev_key=self.dev_pub, rotate_hotspot=False,
+                                  provision=provision, **kw)
         return self.migrate.apply(args)
 
     def read(self, path):
@@ -208,6 +209,23 @@ class MigrationRehearsal(unittest.TestCase):
                                           manifest_overrides={"db": {"schema_target": 1, "compat_floor": 0}})
         self.assertEqual(self.apply(), 0)
         self.assertEqual(self.sb.current_version(), "1.0.1")
+
+    def test_provision_gives_a_new_unit_its_own_identity(self):
+        app = self.sb.app_state
+        for rel, text in (("data/wifi_hints.json", '{"golden": "home-wifi"}'), ("data/.secret_key", "golden")):
+            with open(os.path.join(app, rel), "w") as f:
+                f.write(text)
+        with mock.patch("atlas_engine.identity.apply_hostname") as hostname:
+            self.assertEqual(self.apply(provision=True), 0)
+        device = json.load(open(os.path.join(self.sb.paths.IDENTITY, "device.json")))
+        self.assertTrue(device["hostname"].startswith("atlas-"))
+        hostname.assert_called_once_with(device["hostname"])
+        hotspot = json.load(open(os.path.join(self.sb.paths.IDENTITY, "hotspot.json")))
+        self.assertNotEqual(hotspot["password"], "my-own-secret-pw")       # golden unit's: not kept
+        cfg = json.load(open(os.path.join(app, "data", "hotspot_config.json")))
+        self.assertEqual(cfg, {"ssid": hotspot["ssid"], "password": hotspot["password"]})
+        self.assertFalse(os.path.exists(os.path.join(app, "data", "wifi_hints.json")))
+        self.assertFalse(os.path.exists(os.path.join(app, "data", ".secret_key")))
 
     def test_default_hotspot_password_is_replaced(self):
         with open(os.path.join(self.sb.app_state, "hotspot_config.json"), "w") as f:

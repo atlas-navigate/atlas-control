@@ -131,6 +131,7 @@
     "atlas-control.service"
   ],
   "remove": [
-    "/etc/avahi/services/atlas-http.service"
+    "/etc/avahi/services/atlas-http.service",
+    "/etc/nginx/sites-enabled/default"
   ]
 }

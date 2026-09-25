@@ -256,3 +256,50 @@ class DiscoveryFilesTests(unittest.TestCase):
         sysfiles.restore(backup)
         self.assertTrue(os.path.exists(old))
         self.assertFalse(os.path.exists(sb.paths.p("/etc/avahi/services/atlas.service")))
+
+
+class NginxDefaultSiteTests(unittest.TestCase):
+    def test_default_site_is_disabled_and_rollback_restores_the_link(self):
+        sb = Sandbox()
+        self.addCleanup(sb.cleanup)
+        from atlas_engine import sysfiles
+        avail = sb.paths.p("/etc/nginx/sites-available/default")
+        enabled = sb.paths.p("/etc/nginx/sites-enabled/default")
+        os.makedirs(os.path.dirname(avail), exist_ok=True)
+        os.makedirs(os.path.dirname(enabled), exist_ok=True)
+        open(avail, "w").write("server { listen 80 default_server; }\n")
+        os.symlink("/etc/nginx/sites-available/default", enabled)
+        release = os.path.join(sb.root, "rel")
+        shutil.copytree(os.path.join(REPO, "system"), os.path.join(release, "system"))
+        backup = os.path.join(sb.root, "bk")
+        with mock.patch("atlas_engine.firewall.check", return_value=mock.Mock(returncode=0)):
+            changed = sysfiles.install(release, backup, sb.runner)
+        self.assertFalse(os.path.lexists(enabled))            # would clash with Atlas's default_server
+        self.assertIn("nginx", changed)
+        sysfiles.restore(backup)
+        self.assertTrue(os.path.islink(enabled))
+        self.assertEqual(os.readlink(enabled), "/etc/nginx/sites-available/default")
+
+
+class VerifyCommandTests(unittest.TestCase):
+    def test_release_is_checked_against_this_units_keys(self):
+        import base64
+        import io
+        from contextlib import redirect_stdout, redirect_stderr
+        from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+        from atlas_engine import cli
+        sb = Sandbox()
+        self.addCleanup(sb.cleanup)
+        tree = sb.release_tree("3.0.0", 30)
+        release = sb.make_bundle(tree, "3.0.0", 30)
+        out, err = io.StringIO(), io.StringIO()
+        with open(sb.paths.KEYRING, "w") as f:
+            json.dump({"keys": []}, f)
+        with redirect_stdout(out), redirect_stderr(err):
+            self.assertEqual(cli.verify_release_dir(release), 1)     # key not trusted
+        raw = sb.key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+        with open(sb.paths.KEYRING, "w") as f:
+            json.dump({"keys": [{"pub": base64.b64encode(raw).decode()}]}, f)
+        with redirect_stdout(out), redirect_stderr(err):
+            self.assertEqual(cli.verify_release_dir(release), 0)
+        self.assertIn('"version": "3.0.0"', out.getvalue())

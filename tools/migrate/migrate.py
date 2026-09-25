@@ -1,8 +1,12 @@
 """
 Move an existing (pre-release) Atlas onto the hardened layout — or back.
 
-    sudo tools/migrate/atlas-migrate apply  --bundle DIR [--dev-key PUB] [--rotate-hotspot]
+    sudo tools/migrate/atlas-migrate apply  --bundle DIR [--dev-key PUB] [--rotate-hotspot] [--provision]
     sudo tools/migrate/atlas-migrate rollback
+
+--provision is for a new unit on the production line (install.sh runs it):
+a brand-new identity — its own hostname, hotspot name and password, setup
+code — and nothing per-device is kept from the payload it was seeded from.
 
 apply, in order (each step is recorded and skipped if already done, so a
 failed or interrupted run can simply be re-run):
@@ -249,6 +253,18 @@ def step_engine(state, args):
 
 
 def step_identity(state, args):
+    if getattr(args, "provision", False):
+        # A new unit: nothing per-device may come from the golden unit's payload.
+        for rel in ("hotspot_config.json", "data/hotspot_config.json", "data/wifi_hints.json",
+                    "data/.secret_key"):
+            try:
+                os.unlink(os.path.join(APP, rel))
+            except FileNotFoundError:
+                pass
+        device = identity.ensure()
+        say(f"identity {device['name']} ({device['hostname']}, TLS pin {device['tls_spki_sha256'][:12]}…)")
+        mark(state, "identity", hotspot_rotated=True, provision=True)
+        return
     adopt = None
     if not args.rotate_hotspot:
         cfg = fsutil.read_json(os.path.join(APP, "hotspot_config.json"), {}) or \
@@ -352,6 +368,7 @@ def step_cutover(state, args):
     spec = sysfiles.load_spec(target)
     sysfiles.reload_changed(changed, spec, RUNNER)
     RUNNER.run(["systemctl", "enable", "--now", "atlas-helper.socket"])
+    RUNNER.run(["systemctl", "start", "atlas-firewall.service"], timeout=60)   # enabled above; on now, not at next boot
     RUNNER.run(["systemctl", "start", "atlas-control.service"])
     RUNNER.run(["systemctl", "reload-or-restart", "nginx"])
     say(f"cut over to {m['version']} (changed: {', '.join(changed)})")
@@ -406,7 +423,9 @@ def apply(args):
     hs = fsutil.read_json(os.path.join(paths.IDENTITY, "hotspot.json"), {})
     say("done. Atlas now runs as the unprivileged 'atlas' account from "
         f"{os.path.realpath(paths.CURRENT)}.")
-    if state.get("hotspot_rotated"):
+    if state.get("provision"):
+        say("label details: sudo /usr/local/lib/atlas/bin/atlas-identity label-json")
+    elif state.get("hotspot_rotated"):
         say(f"NEW hotspot network: {hs.get('ssid')}  password: {hs.get('password')}")
     return 0
 
@@ -456,6 +475,8 @@ def main():
     a.add_argument("--bundle", required=True, help="directory with atlas-release.json(.sig) and the bundle")
     a.add_argument("--dev-key", help="developer public key to trust (makes this a developer unit)")
     a.add_argument("--rotate-hotspot", action="store_true", help="give the hotspot a new random password")
+    a.add_argument("--provision", action="store_true",
+                   help="new unit on the production line: fresh identity, nothing per-device kept")
     r = sub.add_parser("rollback")
     r.add_argument("--purge", action="store_true")
     args = ap.parse_args()
