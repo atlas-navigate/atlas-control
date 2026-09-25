@@ -114,6 +114,10 @@ logging.basicConfig(
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s"
 )
 logger = logging.getLogger("atlas-control")
+# Coordinates, secrets and channel keys never reach the journal at any level
+# this filter sees; see sensitive_log.py.
+import sensitive_log
+sensitive_log.install()
 
 _HIKING_CACHE_LOCK = threading.Lock()
 _HIKING_PARKS_CACHE = {"db_mtime": None, "data": None}

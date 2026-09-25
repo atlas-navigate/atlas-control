@@ -5990,7 +5990,7 @@ class AIManager:
             )
             resp = urllib.request.urlopen(req, timeout=60)
             extraction = json.loads(resp.read()).get("message", {}).get("content", "")
-            logger.info(f"Calc agent extraction: {extraction!r}")
+            logger.debug(f"Calc agent extraction: {extraction!r}")
         except Exception as ex:
             logger.warning(f"Calc agent pass failed: {ex}")
             return "", False
@@ -6715,9 +6715,8 @@ class AIManager:
                                   gps_fix["latitude"], gps_fix["longitude"])
                     if _d > _USER_COORD_MAX_KM:
                         logger.warning(
-                            f"Discarding parsed coordinate {user_loc['lat']:.5f},"
-                            f"{user_loc['lon']:.5f} — {_d:.0f} km from the live GPS "
-                            f"fix (limit {_USER_COORD_MAX_KM:.0f} km)"
+                            f"Discarding a parsed coordinate {_d:.0f} km from the live "
+                            f"GPS fix (limit {_USER_COORD_MAX_KM:.0f} km)"
                         )
                         user_loc = None
 
@@ -6807,8 +6806,9 @@ class AIManager:
                 meta["gps_fix"] = gps_fix
                 meta["resolved_place"] = resolved_place
                 logger.info(
-                    f"Location agent injected: user_loc={user_loc}, "
-                    f"gps_available={gps_fix is not None}, place={resolved_place!r}"
+                    f"Location agent injected: user_loc="
+                    f"{(user_loc or {}).get('type') if user_loc else None}, "
+                    f"gps_available={gps_fix is not None}, place={bool(resolved_place)}"
                 )
             except Exception as e:
                 logger.warning(f"Location agent failed: {e}")
@@ -7257,7 +7257,7 @@ class AIManager:
             tier = "LOW"
 
         label = f"{tier} | Source: {source_str}"
-        logger.info(f"Confidence: {label} (rag={has_rag}, score={score:.3f}, live={has_live})")
+        logger.info(f"Confidence: {tier} (rag={has_rag}, score={score:.3f}, live={has_live})")
         return f"\n\n---\nConfidence: {label}"
 
     # ------------------------------------------------------------------

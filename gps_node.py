@@ -657,7 +657,8 @@ class GpsNode:
             self._share_nodes    = node_list
             self._share_channels = channel_list
             self._share_interval = max(10, int(interval))
-        logger.info(f"GPS share: mode={mode} nodes={node_list} channels={channel_list} interval={interval}s")
+        logger.info(f"GPS share: mode={mode} nodes={len(node_list)} channels={len(channel_list)} "
+                    f"interval={interval}s")
 
     def get_share_config(self) -> dict:
         with self._share_lock:
@@ -1118,9 +1119,11 @@ class GpsNode:
             spd_str = f"{speed:.3f}m/s" if speed is not None else "None"
             hdg_str = f"{heading:.2f}°" if heading is not None else "None"
             alt_str = f"{alt:.1f}m" if alt is not None else "None"
-            logger.info(
+            # Position is private: INFO records only the fix quality.
+            logger.info(f"GPS {fix['fix_label']}: sats={sats} acc={acc_str}")
+            logger.debug(
                 f"GPS {fix['fix_label']}: {smooth_lat:.6f},{smooth_lon:.6f} "
-                f"alt={alt_str} spd={spd_str} hdg={hdg_str} sats={sats} acc={acc_str}"
+                f"alt={alt_str} spd={spd_str} hdg={hdg_str}"
             )
 
     # ── Self dead reckoning thread ──────────────────────────────────────────

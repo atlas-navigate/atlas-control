@@ -1350,7 +1350,7 @@ class MeshManager:
                 kwargs["channelIndex"] = int(channel_index or 0)
             self.interface.sendPosition(**kwargs)
             dest = destination_id or "broadcast"
-            logger.info("Position sent → %s: lat=%.6f lon=%.6f", dest, lat, lon)
+            logger.info("Position sent → %s", dest)
             return True
         except Exception as e:
             logger.error("sendPosition failed: %s", e)
