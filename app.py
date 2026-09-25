@@ -88,6 +88,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
 import atlas_paths
+import atlas_blocking
 import database as db
 import meshtastic
 import meshtastic.util
@@ -229,7 +230,7 @@ def _discover_local_networks(cache_ttl=30):
     seen_nets = set()
     seen_addrs = set()
     try:
-        out = subprocess.check_output(["ip", "-o", "addr", "show", "up"], text=True, timeout=3)
+        out = atlas_blocking.check_output(["ip", "-o", "addr", "show", "up"], text=True, timeout=3)
         for line in out.splitlines():
             parts = line.split()
             if len(parts) < 4 or parts[2] not in ("inet", "inet6"):
@@ -256,7 +257,7 @@ def _discover_local_networks(cache_ttl=30):
 
     if not addrs:
         try:
-            out = subprocess.check_output(["hostname", "-I"], text=True, timeout=2)
+            out = atlas_blocking.check_output(["hostname", "-I"], text=True, timeout=2)
             for raw in out.split():
                 try:
                     addr = _ipaddress.ip_address(raw.strip())
@@ -1434,7 +1435,7 @@ def api_ai_knowledge_map():
 # ------------------------------------------------------------------ API: System stats
 @app.route("/api/system/stats")
 def api_system_stats():
-    return jsonify(system_stats.get_stats())
+    return jsonify(atlas_blocking.call(system_stats.get_stats))
 
 # ------------------------------------------------------------------ API: GPS
 @app.route("/api/gps")
@@ -2726,7 +2727,7 @@ _UPDATE_CHECK_STATE = {
 def _update_git(*args, timeout=10):
     """Run a git command in the app checkout; returns (rc, stdout)."""
     try:
-        r = subprocess.run(
+        r = atlas_blocking.run(
             ["git", "-C", _BASE_DIR, *args],
             capture_output=True, text=True, timeout=timeout,
             env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
@@ -2756,7 +2757,7 @@ def _update_local_info():
 
 def _update_unit_active():
     try:
-        r = subprocess.run(
+        r = atlas_blocking.run(
             ["systemctl", "is-active", _UPDATE_UNIT],
             capture_output=True, text=True, timeout=5,
         )
@@ -2975,7 +2976,7 @@ def api_update_apply():
                          "once from a terminal to enable in-app updates.",
             }), 409
         try:
-            r = subprocess.run(
+            r = atlas_blocking.run(
                 ["sudo", "-n", _UPDATE_LAUNCHER],
                 capture_output=True, text=True, timeout=30,
             )
@@ -3705,7 +3706,7 @@ def _start_hotspot_with_saved_config():
     _save_hotspot_cfg(ssid, password)
     _nmcli("con", "delete", "Hotspot")
     # Brief pause so NetworkManager can process the delete before we recreate.
-    time.sleep(0.5)
+    atlas_blocking.sleep(0.5)
     out, rc = _nmcli(
         "dev", "wifi", "hotspot",
         "ifname", iface, "ssid", ssid, "password", password,
@@ -3742,7 +3743,7 @@ def _wait_for_wifi_online(expected_ssid, timeout=20, interval=2):
         last_connectivity = connectivity
         if lan and (not expected_ssid or lan.get("ssid") == expected_ssid) and connectivity.get("online"):
             return lan, connectivity
-        time.sleep(max(1, interval))
+        atlas_blocking.sleep(max(1, interval))
     return last_lan or _current_lan_wifi_state(), last_connectivity or _network_connectivity_state()
 
 
@@ -3754,7 +3755,7 @@ def _wait_for_hotspot_release(iface=None, timeout=10, interval=1):
         connection = ((device or {}).get("connection") or "").lower()
         if not hotspot.get("active") and "hotspot" not in connection:
             return True
-        time.sleep(max(0.5, interval))
+        atlas_blocking.sleep(max(0.5, interval))
     return False
 
 
@@ -3784,7 +3785,7 @@ def _perform_wifi_connect(ssid, password="", stop_hotspot=True, require_online=T
         if attempt > 0:
             if iface:
                 _nmcli("dev", "disconnect", iface, timeout=10)
-            time.sleep(min(3, attempt + 1))
+            atlas_blocking.sleep(min(3, attempt + 1))
         out, rc = _nmcli(*args, timeout=35)
         if rc == 0:
             break
@@ -3962,13 +3963,13 @@ def _mobile_bootstrap_manifest():
     }
 
 def _nmcli(*args, timeout=20):
-    """Run nmcli cooperatively from the current gevent greenlet.
+    """Run nmcli without stalling the gevent hub.
 
-    monkey.patch_all() patches subprocess (subprocess=True by default), so
-    subprocess.run here is gevent's cooperative version — it yields the hub
-    while waiting for nmcli output. The threadpool approach was wrong: running
-    gevent's patched subprocess from a real OS thread causes it to return empty
-    output immediately because gevent's select doesn't work in non-greenlet threads.
+    subprocess is NOT monkey-patched (see the patch_all() call at the top of
+    this file), so a bare subprocess.run() from a request greenlet froze every
+    client for as long as nmcli took — up to 20 s for a scan. atlas_blocking
+    runs it on gevent's native thread pool when called from the hub, and
+    inline from native worker threads such as the Wi-Fi failover loop.
 
     Mutating commands (connect, hotspot, disconnect, con down/delete) require
     NetworkManager authorization. We run those via sudo (requires NOPASSWD entry
@@ -3992,7 +3993,7 @@ def _nmcli(*args, timeout=20):
     last_rc = -1
     for cmd in cmds:
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            r = atlas_blocking.run(cmd, capture_output=True, text=True, timeout=timeout)
             out = r.stdout.strip()
             err = r.stderr.strip()
             merged = (out + ("\n" + err if err else "")).strip()

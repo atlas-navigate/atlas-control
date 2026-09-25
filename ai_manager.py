@@ -10,6 +10,7 @@ import time
 import threading
 import logging
 import urllib.request
+import atlas_blocking
 
 import csv
 import os as _os
@@ -5291,7 +5292,7 @@ class AIManager:
         if self._startup_warmup_done.is_set():
             return
         logger.info(f"AI request waiting for startup warmup (timeout={timeout}s)")
-        self._startup_warmup_done.wait(timeout=timeout)
+        atlas_blocking.wait_event(self._startup_warmup_done, timeout=timeout)
 
     def _warmup_embed_model(self, embed_model):
         """Load the embedding model once so the first RAG query is not a cold start."""
@@ -6657,7 +6658,7 @@ class AIManager:
 
         # System stats context — only when the message asks about host telemetry
         try:
-            s = system_stats.get_stats() if wants_stats else None
+            s = atlas_blocking.call(system_stats.get_stats) if wants_stats else None
             if s:
                 lines = ["=== SYSTEM STATUS ==="]
                 if "cpu_pct" in s:
