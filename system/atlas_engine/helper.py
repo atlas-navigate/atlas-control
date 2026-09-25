@@ -100,7 +100,7 @@ def v_update_apply(args):
     state = fsutil.read_json(paths.JOURNAL, {}) or {}
     if state.get("state") not in (None, "IDLE"):
         return {"ok": True, "already_running": True}
-    os.makedirs(paths.UPDATE_STATE, mode=0o700, exist_ok=True)
+    os.makedirs(paths.UPDATE_STATE, mode=0o711, exist_ok=True)
     try:
         os.unlink(os.path.join(paths.UPDATE_STATE, "cancel"))
     except FileNotFoundError:
@@ -112,7 +112,7 @@ def v_update_apply(args):
 
 
 def v_update_cancel(args):
-    os.makedirs(paths.UPDATE_STATE, mode=0o700, exist_ok=True)
+    os.makedirs(paths.UPDATE_STATE, mode=0o711, exist_ok=True)
     fsutil.atomic_write_bytes(os.path.join(paths.UPDATE_STATE, "cancel"), b"1\n", mode=0o600)
     return {"ok": True}
 

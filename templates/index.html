@@ -7030,194 +7030,221 @@ function SettingsPage({ onSettingsSaved, themeMode, onThemeModeChange, hiddenPag
 // ═══════════════════════════════════════════════
 // Software Update Section
 // ═══════════════════════════════════════════════
+// Software Update: one live progress view driven by the backend update job
+// (update_manager.py). The job lives on Atlas, not in this page: refreshing,
+// closing or reopening the page just re-reads its state. Progress arrives as
+// Socket.IO "update_progress" events; while Atlas restarts itself the page
+// shows that and reconnects on its own.
+function fmtBytes(n) {
+  if (n == null) return '';
+  const u = ['B', 'KB', 'MB', 'GB'];
+  let i = 0; let v = n;
+  while (v >= 1000 && i < u.length - 1) { v /= 1000; i++; }
+  return `${v >= 100 || i === 0 ? v.toFixed(0) : v.toFixed(1)} ${u[i]}`;
+}
+
+function UpdateProgressBar({ percent }) {
+  const known = typeof percent === 'number';
+  return (
+    <div role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={known ? percent : undefined}
+      aria-label={known ? `${percent}%` : 'In progress'}
+      style={{height:10,borderRadius:5,background:'var(--bg-input)',border:'1px solid var(--border)',overflow:'hidden',position:'relative'}}>
+      {known ? (
+        <div style={{height:'100%',width:`${Math.max(0, Math.min(100, percent))}%`,background:'var(--accent-green)',transition:'width 0.4s ease'}}/>
+      ) : (
+        <div className="atlas-indeterminate" style={{position:'absolute',top:0,bottom:0,width:'35%',background:'var(--accent-green)',animation:'atlasIndeterminate 1.4s ease-in-out infinite'}}/>
+      )}
+    </div>
+  );
+}
+
 function SoftwareUpdateSection() {
-  const [info, setInfo] = useState(null);          // local info + background-check state
-  const [check, setCheck] = useState(null);        // latest successful remote result
-  const [checking, setChecking] = useState(false);
+  const [u, setU] = useState(null);                 // /api/update/state snapshot
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [confirming, setConfirming] = useState(false);
-  const [install, setInstall] = useState(null);    // {startVersion} while updating
-  const [status, setStatus] = useState(null);      // /api/update/status payload
-  const [unreachable, setUnreachable] = useState(0);
-  const pollRef = useRef(null);
-  const logRef = useRef(null);
+  const [restarting, setRestarting] = useState(false);
+  const installingRef = useRef(false);
+
+  const apply = (s) => {
+    if (!s) return;
+    setU(s);
+    installingRef.current = s.state === 'installing';
+    if (s.state !== 'installing') setRestarting(false);
+  };
+  const refresh = () => api.get('/api/update/state').then(apply).catch(() => {});
 
   useEffect(() => {
-    let mounted = true;
-    const loadCheckInfo = () => api.get('/api/update/check').then(i => {
-      if (!mounted) return;
-      setInfo(i);
-      if (i?.checked_at) {
-        setCheck(previous => !previous || i.checked_at > previous.checked_at ? i : previous);
+    refresh();
+    const sock = window._atlasSocket;
+    const onProgress = (s) => apply(s);
+    const onDisconnect = () => { if (installingRef.current) setRestarting(true); };
+    const onConnect = () => refresh();
+    if (sock) {
+      sock.on('update_progress', onProgress);
+      sock.on('disconnect', onDisconnect);
+      sock.on('connect', onConnect);
+    }
+    // Slow safety net in case socket events are unavailable.
+    const iv = setInterval(refresh, 15000);
+    return () => {
+      clearInterval(iv);
+      if (sock) {
+        sock.off('update_progress', onProgress);
+        sock.off('disconnect', onDisconnect);
+        sock.off('connect', onConnect);
       }
-      // Resume the progress view if an update is already running (e.g. the
-      // page reloaded mid-update, or another client started one).
-      if (i?.update_running) setInstall(current => current || { startVersion: i.version });
-    }).catch(() => {});
-
-    loadCheckInfo();
-    // GitHub checks run on the Atlas service. This lightweight local poll lets
-    // an open Settings page pick up a newly cached result without reloading.
-    const cachePoll = setInterval(loadCheckInfo, 60000);
-    return () => { mounted = false; clearInterval(cachePoll); };
+    };
   }, []);
 
-  // Poll status while an update runs. The service restarts itself partway
-  // through, so fetch failures are expected — keep polling through them.
+  // While Atlas restarts for an update, wait for it to come back.
   useEffect(() => {
-    if (!install) return;
-    pollRef.current = setInterval(async () => {
-      try {
-        const s = await api.get('/api/update/status', { timeoutMs: 8000 });
-        setUnreachable(0);
-        setStatus(s);
-        if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
-        const finished = s.state === 'success' ||
-          (!s.running && install.startVersion && s.version && s.version !== install.startVersion);
-        if (finished) {
-          clearInterval(pollRef.current);
-          setStatus(p => ({ ...p, state: 'success' }));
-          setTimeout(() => window.location.reload(), 3000);
-        } else if (s.state === 'failed') {
-          clearInterval(pollRef.current);
-        }
-      } catch {
-        setUnreachable(n => n + 1);
-      }
-    }, 2500);
-    return () => clearInterval(pollRef.current);
-  }, [install]);
+    if (!restarting) return;
+    const iv = setInterval(() => {
+      fetch('/api/health', { cache: 'no-store' }).then(r => { if (r.ok) refresh(); }).catch(() => {});
+    }, 3000);
+    return () => clearInterval(iv);
+  }, [restarting]);
 
-  async function runCheck() {
-    setChecking(true); setError('');
-    try {
-      const r = await api.post('/api/update/check', undefined, { timeoutMs: 45000 });
-      setCheck(r);
-      if (r.version) setInfo(p => ({ ...(p || {}), ...r }));
-    } catch (e) {
-      setError(e.message || 'Update check failed');
-    } finally {
-      setChecking(false);
-    }
-  }
-
-  async function startInstall() {
-    setConfirming(false); setError(''); setStatus(null); setUnreachable(0);
-    try {
-      await api.post('/api/update/apply');
-      setInstall({ startVersion: info?.version });
-    } catch (e) {
-      setError(e.message || 'Could not start the update');
-    }
-  }
+  const act = (path, data) => {
+    setBusy(true); setError('');
+    api.post(path, data, { timeoutMs: 60000 })
+      .then(apply)
+      .catch(e => setError(e.message || 'Something went wrong. Please try again.'))
+      .finally(() => setBusy(false));
+  };
 
   const SL = {fontSize:11,fontWeight:700,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:12};
   const muted = {fontSize:12,color:'var(--text-muted)'};
-  const state = status?.state;
-  const checkedAt = check?.checked_at
-    ? new Date(check.checked_at * 1000).toLocaleString()
-    : '';
+  const state = u?.state || 'idle';
+  const active = ['checking', 'downloading', 'paused', 'verifying', 'installing'].includes(state);
+  const stageIds = (u?.stages || []).map(s => s.id);
+  const currentStage = restarting ? 'reconnecting' : u?.stage;
+  const stageIndex = stageIds.indexOf(currentStage);
+  const showStages = ['downloading', 'paused', 'verifying', 'ready', 'installing'].includes(state) || restarting;
+  const lastChecked = u?.last_check ? new Date(u.last_check * 1000).toLocaleString() : '';
+
+  let title = '';
+  if (restarting) title = 'Restarting Atlas…';
+  else if (state === 'downloading' || state === 'paused') title = `Downloading Atlas ${u.version}`;
+  else if (state === 'verifying') title = 'Verifying update…';
+  else if (state === 'ready') title = `Atlas ${u.version} is ready to install`;
+  else if (state === 'installing') title = u.stage_label || 'Installing update…';
+  else if (state === 'available') title = `Atlas ${u.version} is available`;
+  else if (state === 'up_to_date') title = 'Atlas is up to date';
+  else if (state === 'checking') title = 'Checking for updates…';
 
   return (
     <div className="card" style={{marginBottom:16}}>
+      <style>{'@keyframes atlasIndeterminate { from { left: -35%; } to { left: 100%; } }'}</style>
       <div style={SL}>Software Update</div>
 
-      <div style={{display:'flex',alignItems:'center',gap:14,flexWrap:'wrap',marginBottom:10}}>
+      <div style={{display:'flex',alignItems:'flex-start',gap:14,flexWrap:'wrap',marginBottom:12}}>
         <div>
-          <div style={{fontSize:13,color:'var(--text-primary)',fontWeight:600}}>
-            Atlas Control {info?.version ? `· ${info.version}` : ''}
-          </div>
-          <div style={muted}>
-            {info?.installed_at ? `Installed ${info.installed_at.slice(0, 10)} · ` : ''}
-            Updates download from GitHub and preserve all data, maps and settings.
-            {checkedAt ? ` Last checked ${checkedAt}.` : ''}
-          </div>
+          <div style={muted}>Current version</div>
+          <div style={{fontSize:15,color:'var(--text-primary)',fontWeight:600}}>Atlas {u?.current_version || ''}</div>
+          {lastChecked && !active && <div style={muted}>Last checked {lastChecked}</div>}
         </div>
-        {!install && (
-          <button className="btn btn-sm" style={{marginLeft:'auto'}} onClick={runCheck} disabled={checking}>
-            {checking ? 'Checking…' : 'Check for Updates'}
+        {!active && state !== 'ready' && (
+          <button className="btn btn-sm" style={{marginLeft:'auto'}} disabled={busy}
+            onClick={() => act('/api/update/check')}>
+            {busy ? 'Checking…' : 'Check for Updates'}
           </button>
         )}
       </div>
 
-      {error && <div style={{color:'var(--accent-red)',fontSize:12,marginBottom:8}}>{error}</div>}
-      {!error && info?.last_check_error && (
-        <div style={{color:'var(--accent-amber)',fontSize:12,marginBottom:8}}>
-          Automatic check: {info.last_check_error}
+      {title && (
+        <div style={{fontSize:14,fontWeight:600,marginBottom:8,color: state === 'up_to_date' ? 'var(--accent-green)' : 'var(--text-primary)'}}>
+          {state === 'up_to_date' ? '✓ ' : ''}{title}
         </div>
       )}
 
-      {/* Check result */}
-      {check && !install && (
-        check.update_available ? (
-          <div style={{border:'1px solid var(--border-bright)',borderRadius:'var(--radius)',padding:'10px 12px'}}>
-            <div style={{fontSize:13,color:'var(--accent-green)',fontWeight:600,marginBottom:6}}>
-              Update available: {check.latest} ({check.behind} new {check.behind === 1 ? 'commit' : 'commits'})
-            </div>
-            <div style={{maxHeight:120,overflowY:'auto',marginBottom:10}}>
-              {(check.commits || []).map(c => (
-                <div key={c.rev} style={{fontSize:12,color:'var(--text-secondary)',padding:'2px 0'}}>
-                  <span style={{color:'var(--text-muted)',fontFamily:'monospace'}}>{c.rev}</span>
-                  <span style={{color:'var(--text-muted)'}}> {c.date} </span>{c.subject}
-                </div>
-              ))}
-            </div>
-            {check.local_changes && (
-              <div style={{...muted,color:'var(--accent-yellow, #d8b54a)',marginBottom:8}}>
-                This box has local code changes — the update keeps them and installs what it can.
-              </div>
-            )}
-            {!confirming ? (
-              <button className="btn btn-primary btn-sm" onClick={() => setConfirming(true)}>
-                Install Update
-              </button>
-            ) : (
-              <div style={{display:'flex',alignItems:'center',gap:10}}>
-                <span style={{fontSize:12,color:'var(--text-secondary)'}}>
-                  Atlas restarts when done (~1–3 min). Install now?
-                </span>
-                <button className="btn btn-primary btn-sm" onClick={startInstall}>Yes, install</button>
-                <button className="btn btn-sm" onClick={() => setConfirming(false)}>Cancel</button>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div style={{fontSize:13,color:'var(--accent-green)'}}>
-            ✓ Up to date{check.ahead > 0 ? ` (${check.ahead} local commits ahead of the release)` : ''}
-          </div>
-        )
+      {u?.message && !['available', 'up_to_date'].includes(state) && (
+        <div style={{fontSize:13,color: state === 'paused' ? 'var(--accent-amber)' : 'var(--text-secondary)',marginBottom:8}}>
+          {u.message}
+        </div>
+      )}
+      {(u?.result === 'rolled_back' || (u?.message && ['available', 'idle'].includes(state) && u?.result)) && (
+        <div style={{fontSize:13,color:'var(--accent-amber)',marginBottom:8}}>{u.message}</div>
+      )}
+      {state === 'idle' && u?.message && !u?.result && (
+        <div style={{fontSize:13,color:'var(--text-secondary)',marginBottom:8}}>{u.message}</div>
       )}
 
-      {/* Install progress */}
-      {install && (
-        <div>
-          <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:8}}>
-            {state === 'success' ? (
-              <span style={{color:'var(--accent-green)',fontSize:13,fontWeight:600}}>
-                ✓ Updated{status?.version ? ` to ${status.version}` : ''} — reloading…
-              </span>
-            ) : state === 'failed' ? (
-              <span style={{color:'var(--accent-red)',fontSize:13,fontWeight:600}}>Update failed — see log below</span>
-            ) : (
-              <>
-                <span className="spinner" style={{width:14,height:14,border:'2px solid var(--border)',borderTopColor:'var(--accent-green)',borderRadius:'50%',display:'inline-block',animation:'spin 1s linear infinite'}}/>
-                <span style={{fontSize:13,color:'var(--text-secondary)'}}>
-                  {unreachable >= 2 ? 'Atlas is restarting — reconnecting…' : 'Installing update…'}
-                </span>
-              </>
-            )}
+      {state === 'available' && (
+        <div style={{border:'1px solid var(--border-bright)',borderRadius:'var(--radius)',padding:'10px 12px',marginBottom:8}}>
+          {(u.notes || []).length > 0 && (
+            <>
+              <div style={{fontSize:12,fontWeight:600,color:'var(--text-secondary)',marginBottom:4}}>What's new</div>
+              <ul style={{margin:'0 0 10px 18px',padding:0}}>
+                {u.notes.map((n, i) => <li key={i} style={{fontSize:13,color:'var(--text-secondary)'}}>{n}</li>)}
+              </ul>
+            </>
+          )}
+          <div style={{...muted,marginBottom:10}}>
+            {u.total_bytes ? `Download size ${fmtBytes(u.total_bytes)}. ` : ''}
+            Your maps, conversations and settings are kept. Atlas restarts once when the update is installed.
           </div>
-          {status?.log && (
-            <pre ref={logRef} style={{background:'var(--bg-input)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:10,fontSize:11,lineHeight:1.5,maxHeight:200,overflowY:'auto',whiteSpace:'pre-wrap',color:'var(--text-secondary)',margin:0}}>
-              {status.log}
-            </pre>
-          )}
-          {state === 'failed' && (
-            <button className="btn btn-sm" style={{marginTop:8}} onClick={() => { setInstall(null); setStatus(null); setCheck(null); }}>
-              Dismiss
-            </button>
-          )}
+          <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => act('/api/update/start', { install: true })}>
+            Download and Install
+          </button>
         </div>
+      )}
+
+      {(state === 'downloading' || state === 'paused') && (
+        <div style={{marginBottom:10}}>
+          <UpdateProgressBar percent={u.progress_percent}/>
+          <div style={{display:'flex',gap:12,flexWrap:'wrap',marginTop:6,...muted}}>
+            {typeof u.progress_percent === 'number' && <span style={{color:'var(--text-primary)',fontWeight:600}}>{Math.floor(u.progress_percent)}%</span>}
+            {u.total_bytes != null && <span>{fmtBytes(u.downloaded_bytes || 0)} / {fmtBytes(u.total_bytes)}</span>}
+            {state === 'downloading' && u.bytes_per_second > 0 && <span>{fmtBytes(u.bytes_per_second)}/s</span>}
+          </div>
+        </div>
+      )}
+
+      {(state === 'verifying' || state === 'installing' || state === 'checking' || restarting) && (
+        <div style={{marginBottom:10}}><UpdateProgressBar/></div>
+      )}
+
+      {(state === 'installing' || restarting) && (
+        <div style={{fontSize:13,fontWeight:600,color:'var(--accent-amber)',marginBottom:8}}>
+          Do not power off Atlas.
+        </div>
+      )}
+
+      {showStages && stageIds.length > 0 && (
+        <ol style={{listStyle:'none',margin:'4px 0 10px',padding:0}}>
+          {u.stages.filter(s => s.id !== 'checking').map((s) => {
+            const idx = stageIds.indexOf(s.id);
+            const done = stageIndex > idx;
+            const now = stageIndex === idx;
+            return (
+              <li key={s.id} style={{fontSize:12,padding:'2px 0',color: now ? 'var(--text-primary)' : done ? 'var(--accent-green)' : 'var(--text-muted)',fontWeight: now ? 600 : 400}}>
+                {done ? '✓' : now ? '›' : '·'} {s.label}
+              </li>
+            );
+          })}
+        </ol>
+      )}
+
+      {state === 'ready' && (
+        <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => act('/api/update/install')}>
+          Install Now
+        </button>
+      )}
+
+      {u?.can_cancel && ['downloading', 'paused', 'verifying', 'ready'].includes(state) && (
+        <button className="btn btn-sm" style={{marginLeft: state === 'ready' ? 8 : 0}} disabled={busy}
+          onClick={() => act('/api/update/cancel')}>
+          Cancel
+        </button>
+      )}
+
+      {error && <div style={{color:'var(--accent-red)',fontSize:12,marginTop:8}}>{error}</div>}
+      {u?.error && !error && ['available', 'idle', 'ready'].includes(state) && (
+        <details style={{marginTop:6}}>
+          <summary style={{...muted,cursor:'pointer'}}>Details</summary>
+          <div style={{...muted,marginTop:4}}>{u.error}</div>
+        </details>
       )}
     </div>
   );

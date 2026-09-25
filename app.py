@@ -2779,327 +2779,81 @@ def api_device_owner_put():
     return jsonify({"ok": True})
 
 # ------------------------------------------------------------------ API: Software update
-import re as _update_re
+# Checking, downloading and handing verified releases to the root update
+# engine: see update_manager.py. The engine itself (install, health check,
+# rollback, power-loss recovery) lives in system/atlas_engine.
+import update_manager as _update_manager
 
-_UPDATE_LOG_PATH = os.path.join(atlas_paths.LOG_DIR, "update.log")
-_UPDATE_LAUNCHER = "/usr/local/sbin/atlas-update"
-_UPDATE_UNIT = "atlas-update.service"
-_UPDATE_CHECK_INTERVAL_SECONDS = 30 * 60
-_UPDATE_CHECK_RETRY_SECONDS = 5 * 60
-_UPDATE_CHECK_POLL_SECONDS = 60
-# Wall-clock of the last in-app launch; lets /api/update/status distinguish
-# "never ran" from "launched and died silently". Survives the failure case
-# (the app only restarts when an update actually progresses).
-_UPDATE_LAUNCHED_AT = [0.0]
-_ANSI_RE = _update_re.compile(r"\x1b\[[0-9;]*m")
-_UPDATE_CHECK_RUN_LOCK = threading.Lock()
-_UPDATE_CHECK_STATE_LOCK = threading.Lock()
-_UPDATE_CHECK_STATE = {
-    "checking": False,
-    "last_attempt_at": None,
-    "last_check_error": None,
-    "result": None,
-}
+updates = _update_manager.UpdateManager(
+    emit=lambda event, data: socketio.emit(event, data, namespace="/"),
+    helper_run=atlas_helper.run,
+)
+_UPDATE_AUTO_CHECK_S = _update_manager.AUTO_CHECK_INTERVAL_S
 
 
-def _update_git(*args, timeout=10):
-    """Run a git command in the app checkout; returns (rc, stdout)."""
-    try:
-        r = atlas_blocking.run(
-            ["git", "-C", _BASE_DIR, *args],
-            capture_output=True, text=True, timeout=timeout,
-            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
-        )
-        return r.returncode, r.stdout.strip()
-    except Exception as exc:
-        logging.warning("update git %s failed: %s", args[:2], exc)
-        return -1, ""
-
-
-def _update_local_info():
-    rc, head = _update_git("rev-parse", "--short", "HEAD")
-    info = {
-        "version": head if rc == 0 else None,
-        "is_git_checkout": rc == 0,
-        "installed_at": None,
-    }
-    try:
-        with open(atlas_paths.state(".atlas_installed"), encoding="utf-8") as f:
-            parts = f.read().split()
-            if len(parts) >= 2:
-                info["installed_at"] = parts[1]
-    except OSError:
-        pass
-    return info
-
-
-def _update_unit_active():
-    try:
-        r = atlas_blocking.run(
-            ["systemctl", "is-active", _UPDATE_UNIT],
-            capture_output=True, text=True, timeout=5,
-        )
-        return r.stdout.strip() in ("active", "activating")
-    except Exception:
-        return False
-
-
-def _update_check_snapshot():
-    """Return the public, immutable-enough view of the cached check state."""
-    with _UPDATE_CHECK_STATE_LOCK:
-        state = {
-            "checking": _UPDATE_CHECK_STATE["checking"],
-            "last_attempt_at": _UPDATE_CHECK_STATE["last_attempt_at"],
-            "last_check_error": _UPDATE_CHECK_STATE["last_check_error"],
-        }
-        result = _UPDATE_CHECK_STATE.get("result")
-        if result:
-            state.update(result)
-            state["commits"] = [dict(commit) for commit in result.get("commits", [])]
-    return state
-
-
-def _update_public_info():
-    """Current local version plus the most recent background check result."""
-    info = _update_local_info()
-    info.update({
-        "launcher_installed": os.path.exists(_UPDATE_LAUNCHER),
-        "update_running": _update_unit_active(),
-        "auto_check_interval_seconds": _UPDATE_CHECK_INTERVAL_SECONDS,
-    })
-    info.update(_update_check_snapshot())
-    return info
-
-
-def _finish_update_check(result=None, error=None):
-    with _UPDATE_CHECK_STATE_LOCK:
-        _UPDATE_CHECK_STATE["checking"] = False
-        _UPDATE_CHECK_STATE["last_check_error"] = error
-        if result is not None:
-            _UPDATE_CHECK_STATE["result"] = result
-
-
-def _automatic_update_check_due(snapshot, now):
-    """Whether an automatic check is due, including a shorter failure retry."""
-    if snapshot.get("last_check_error") and snapshot.get("last_attempt_at"):
-        return now - snapshot["last_attempt_at"] >= _UPDATE_CHECK_RETRY_SECONDS
-    if snapshot.get("checked_at"):
-        return now - snapshot["checked_at"] >= _UPDATE_CHECK_INTERVAL_SECONDS
-    return True
-
-
-def _run_software_update_check(automatic=False):
-    """Serialize update checks and return (payload, status)."""
-    if automatic:
-        _UPDATE_CHECK_RUN_LOCK.acquire()
-    elif not _UPDATE_CHECK_RUN_LOCK.acquire(blocking=False):
-        info = _update_public_info()
-        info["error"] = "A software update check is already in progress."
-        return info, 409
-    try:
-        return _run_software_update_check_locked(automatic=automatic)
-    except Exception as exc:
-        error = "Software update check failed unexpectedly."
-        logger.exception("%s %s", error, exc)
-        _finish_update_check(error=error)
-        info = _update_public_info()
-        info["error"] = error
-        return info, 500
-    finally:
-        _UPDATE_CHECK_RUN_LOCK.release()
-
-
-def _run_software_update_check_locked(automatic=False):
-    """Fetch and compare origin/main while the caller holds the run lock."""
-    now = int(time.time())
-    if automatic and not _automatic_update_check_due(_update_check_snapshot(), now):
-        return None, None
-
-    info = _update_local_info()
-    info.update({
-        "launcher_installed": os.path.exists(_UPDATE_LAUNCHER),
-        "update_running": _update_unit_active(),
-        "auto_check_interval_seconds": _UPDATE_CHECK_INTERVAL_SECONDS,
-    })
-    if info["update_running"]:
-        info.update(_update_check_snapshot())
-        info["error"] = "A software update is already running."
-        return info, 409
-
-    with _UPDATE_CHECK_STATE_LOCK:
-        _UPDATE_CHECK_STATE["checking"] = True
-        _UPDATE_CHECK_STATE["last_attempt_at"] = now
-        _UPDATE_CHECK_STATE["last_check_error"] = None
-
-    if not info["is_git_checkout"]:
-        error = "Not a git checkout — re-run install.sh to enable updates."
-        _finish_update_check(error=error)
-        info.update(_update_check_snapshot())
-        info["error"] = error
-        return info, 400
-
-    # Fetch the published branch, then compare locally. This works
-    # anonymously for the public repo and provides an exact changelog.
-    rc, _ = _update_git("fetch", "origin", "main", timeout=30)
-    if rc != 0:
-        error = "Could not reach GitHub — check the internet connection."
-        _finish_update_check(error=error)
-        info.update(_update_check_snapshot())
-        info["error"] = error
-        return info, 502
-
-    remote_rc, remote = _update_git("rev-parse", "--short", "FETCH_HEAD")
-    behind_rc, behind = _update_git("rev-list", "--count", "HEAD..FETCH_HEAD")
-    ahead_rc, ahead = _update_git("rev-list", "--count", "FETCH_HEAD..HEAD")
-    # Untracked files (e.g. the .atlas_installed marker) never block a
-    # fast-forward pull — only modified tracked files count as "dirty".
-    dirty_rc, dirty = _update_git("status", "--porcelain", "--untracked-files=no")
-    log_rc, log = _update_git(
-        "log", "--format=%h%x09%cs%x09%s", "--max-count=20", "HEAD..FETCH_HEAD"
-    )
-    try:
-        behind_count = int(behind)
-        ahead_count = int(ahead)
-    except (TypeError, ValueError):
-        behind_count = ahead_count = None
-    if any(rc != 0 for rc in (remote_rc, behind_rc, ahead_rc, dirty_rc, log_rc)) \
-            or not remote or behind_count is None or ahead_count is None:
-        error = "Fetched GitHub but could not compare software versions."
-        _finish_update_check(error=error)
-        info.update(_update_check_snapshot())
-        info["error"] = error
-        return info, 500
-
-    commits = [
-        dict(zip(("rev", "date", "subject"), line.split("\t", 2)))
-        for line in log.splitlines() if line.strip()
-    ]
-    result = {
-        "latest": remote,
-        "behind": behind_count,
-        "ahead": ahead_count,
-        "update_available": behind_count > 0,
-        "local_changes": bool(dirty.strip()),
-        "commits": commits,
-        "checked_at": int(time.time()),
-    }
-    _finish_update_check(result=result)
-    info.update(_update_check_snapshot())
-    return info, 200
-
-
-def _automatic_software_update_check_once():
-    """Run one due automatic check when NetworkManager confirms internet."""
-    now = int(time.time())
-    if not _automatic_update_check_due(_update_check_snapshot(), now):
-        return "not_due"
-    if _update_unit_active():
-        return "update_running"
-    if not _network_connectivity_state().get("online"):
-        return "offline"
-
-    result, status = _run_software_update_check(automatic=True)
-    if result is None:
-        return "not_due"
-    if status == 200:
-        if result.get("update_available"):
-            logger.info(
-                "Automatic software update check: %d commit(s) available at %s",
-                result.get("behind", 0), result.get("latest") or "unknown",
-            )
-        else:
-            logger.info("Automatic software update check: Atlas is up to date")
-        return "checked"
-
-    logger.warning(
-        "Automatic software update check failed: %s",
-        result.get("error") or f"HTTP {status}",
-    )
-    return "failed"
-
-
-def _software_update_check_loop():
-    """Check GitHub on startup/connection and every 30 minutes while online."""
+def _update_background_loop():
+    """Greenlet: finish/relay installs, resume interrupted downloads and check
+    for updates periodically while online. Never installs by itself."""
+    import gevent
+    updates.reconcile_after_restart()
+    if updates.state.get("state") == "paused" and updates.state.get("manifest"):
+        updates.start(install=bool(updates.state.get("install_when_ready")))
+    next_check = time.time() + 90
     while True:
         try:
-            _automatic_software_update_check_once()
+            if updates.poll_engine():
+                gevent.sleep(1)
+                continue
+            if time.time() >= next_check:
+                if _network_connectivity_state().get("online"):
+                    updates.check()
+                    next_check = time.time() + _UPDATE_AUTO_CHECK_S
+                else:
+                    next_check = time.time() + 300
         except Exception as exc:
-            logger.warning("Automatic software update check error: %s", exc)
-        time.sleep(_UPDATE_CHECK_POLL_SECONDS)
+            logger.warning("software update loop: %s", exc)
+        gevent.sleep(5)
+
+
+@app.route("/api/update/state")
+def api_update_state():
+    resp = jsonify(updates.snapshot())
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 @app.route("/api/update/check", methods=["GET", "POST"])
 def api_update_check():
-    """Return cached update info; POST forces an immediate GitHub check."""
     if request.method == "GET":
-        return jsonify(_update_public_info())
-
-    info, status = _run_software_update_check()
-    return jsonify(info), status
+        return jsonify(updates.snapshot())
+    return jsonify(updates.check(user_initiated=True))
 
 
+@app.route("/api/update/start", methods=["POST"])
+def api_update_start():
+    data = request.get_json(silent=True) or {}
+    return jsonify(updates.start(install=data.get("install", True) is not False))
+
+
+@app.route("/api/update/install", methods=["POST"])
+def api_update_install():
+    return jsonify(updates.install())
+
+
+@app.route("/api/update/cancel", methods=["POST"])
+def api_update_cancel():
+    return jsonify(updates.cancel())
+
+
+# Older clients.
 @app.route("/api/update/apply", methods=["POST"])
 def api_update_apply():
-    """Launch install.sh --update via the root launcher (detached unit)."""
-    if not _UPDATE_CHECK_RUN_LOCK.acquire(blocking=False):
-        return jsonify({
-            "error": "A software update check is in progress — try again in a moment.",
-        }), 409
-    try:
-        if _update_unit_active():
-            return jsonify({"started": True, "already_running": True})
-        if not os.path.exists(_UPDATE_LAUNCHER):
-            return jsonify({
-                "error": "Update launcher not installed — run `sudo ./install.sh --update` "
-                         "once from a terminal to enable in-app updates.",
-            }), 409
-        try:
-            r = atlas_blocking.run(
-                ["sudo", "-n", _UPDATE_LAUNCHER],
-                capture_output=True, text=True, timeout=30,
-            )
-        except Exception as exc:
-            return jsonify({"error": f"Failed to launch update: {exc}"}), 500
-        if r.returncode != 0:
-            detail = (r.stderr or r.stdout).strip()[:300]
-            return jsonify({"error": f"Update launcher failed: {detail}"}), 500
-        logging.info("Software update launched via web UI")
-        _UPDATE_LAUNCHED_AT[0] = time.time()
-        return jsonify({"started": True})
-    finally:
-        _UPDATE_CHECK_RUN_LOCK.release()
+    return jsonify(updates.start(install=True))
 
 
 @app.route("/api/update/status")
 def api_update_status():
-    """Poll while an update runs; the UI tails the log and watches the rev."""
-    running = _update_unit_active()
-    tail = ""
-    try:
-        with open(_UPDATE_LOG_PATH, encoding="utf-8", errors="replace") as f:
-            tail = _ANSI_RE.sub("", "".join(f.readlines()[-60:]))
-    except OSError:
-        pass
-    state = "running" if running else "idle"
-    if not running and tail:
-        if "Atlas Control updated to" in tail or "installation complete" in tail:
-            state = "success"
-        elif "[✗]" in tail:
-            state = "failed"
-    elif not running and not tail.strip():
-        # The unit died before writing a single byte (it runs with --collect,
-        # so systemd forgets its exit status). Without this the UI polls an
-        # ever-"idle" state and looks hung.
-        if _UPDATE_LAUNCHED_AT[0] and time.time() - _UPDATE_LAUNCHED_AT[0] < 600:
-            state = "failed"
-            tail = ("[✗] The update process exited before producing any output.\n"
-                    "Run `sudo bash install.sh --update` in a terminal to see the error.")
-    return jsonify({
-        "state": state,
-        "running": running,
-        "log": tail,
-        "version": _update_local_info().get("version"),
-    })
+    return jsonify(updates.snapshot())
 
 
 # ------------------------------------------------------------------ API: Factory reset
@@ -4587,11 +4341,9 @@ def main():
     else:
         threading.Thread(target=_nightly_prune, daemon=True).start()
         threading.Thread(target=_scheduler_loop, daemon=True).start()
-        threading.Thread(
-            target=_software_update_check_loop,
-            daemon=True,
-            name="software-update-check",
-        ).start()
+        # Update checks use gevent sockets, so they run in a greenlet.
+        import gevent
+        gevent.spawn(_update_background_loop)
         threading.Thread(target=_wifi_failover_loop, daemon=True, name="wifi-failover").start()
 
     logger.info(f"Dashboard at http://{args.host}:{web_port}")

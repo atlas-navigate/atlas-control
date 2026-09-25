@@ -102,7 +102,6 @@ class HelperClientTests(unittest.TestCase):
 
 
 class NoSudoTests(unittest.TestCase):
-    @unittest.skip("enabled once update_manager replaces the git updater's sudo launcher (Phase D)")
     def test_app_never_invokes_sudo(self):
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         for name in ("app.py", "system_stats.py", "ai_manager.py", "mesh_manager.py", "gps_node.py"):

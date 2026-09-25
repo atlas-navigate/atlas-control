@@ -8908,102 +8908,116 @@ function SettingsPage({
 // ═══════════════════════════════════════════════
 // Software Update Section
 // ═══════════════════════════════════════════════
+// Software Update: one live progress view driven by the backend update job
+// (update_manager.py). The job lives on Atlas, not in this page: refreshing,
+// closing or reopening the page just re-reads its state. Progress arrives as
+// Socket.IO "update_progress" events; while Atlas restarts itself the page
+// shows that and reconnects on its own.
+function fmtBytes(n) {
+  if (n == null) return '';
+  const u = ['B', 'KB', 'MB', 'GB'];
+  let i = 0;
+  let v = n;
+  while (v >= 1000 && i < u.length - 1) {
+    v /= 1000;
+    i++;
+  }
+  return `${v >= 100 || i === 0 ? v.toFixed(0) : v.toFixed(1)} ${u[i]}`;
+}
+function UpdateProgressBar({
+  percent
+}) {
+  const known = typeof percent === 'number';
+  return /*#__PURE__*/React.createElement("div", {
+    role: "progressbar",
+    "aria-valuemin": 0,
+    "aria-valuemax": 100,
+    "aria-valuenow": known ? percent : undefined,
+    "aria-label": known ? `${percent}%` : 'In progress',
+    style: {
+      height: 10,
+      borderRadius: 5,
+      background: 'var(--bg-input)',
+      border: '1px solid var(--border)',
+      overflow: 'hidden',
+      position: 'relative'
+    }
+  }, known ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      height: '100%',
+      width: `${Math.max(0, Math.min(100, percent))}%`,
+      background: 'var(--accent-green)',
+      transition: 'width 0.4s ease'
+    }
+  }) : /*#__PURE__*/React.createElement("div", {
+    className: "atlas-indeterminate",
+    style: {
+      position: 'absolute',
+      top: 0,
+      bottom: 0,
+      width: '35%',
+      background: 'var(--accent-green)',
+      animation: 'atlasIndeterminate 1.4s ease-in-out infinite'
+    }
+  }));
+}
 function SoftwareUpdateSection() {
-  const [info, setInfo] = useState(null); // local info + background-check state
-  const [check, setCheck] = useState(null); // latest successful remote result
-  const [checking, setChecking] = useState(false);
+  const [u, setU] = useState(null); // /api/update/state snapshot
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [confirming, setConfirming] = useState(false);
-  const [install, setInstall] = useState(null); // {startVersion} while updating
-  const [status, setStatus] = useState(null); // /api/update/status payload
-  const [unreachable, setUnreachable] = useState(0);
-  const pollRef = useRef(null);
-  const logRef = useRef(null);
+  const [restarting, setRestarting] = useState(false);
+  const installingRef = useRef(false);
+  const apply = s => {
+    if (!s) return;
+    setU(s);
+    installingRef.current = s.state === 'installing';
+    if (s.state !== 'installing') setRestarting(false);
+  };
+  const refresh = () => api.get('/api/update/state').then(apply).catch(() => {});
   useEffect(() => {
-    let mounted = true;
-    const loadCheckInfo = () => api.get('/api/update/check').then(i => {
-      if (!mounted) return;
-      setInfo(i);
-      if (i !== null && i !== void 0 && i.checked_at) {
-        setCheck(previous => !previous || i.checked_at > previous.checked_at ? i : previous);
-      }
-      // Resume the progress view if an update is already running (e.g. the
-      // page reloaded mid-update, or another client started one).
-      if (i !== null && i !== void 0 && i.update_running) setInstall(current => current || {
-        startVersion: i.version
-      });
-    }).catch(() => {});
-    loadCheckInfo();
-    // GitHub checks run on the Atlas service. This lightweight local poll lets
-    // an open Settings page pick up a newly cached result without reloading.
-    const cachePoll = setInterval(loadCheckInfo, 60000);
+    refresh();
+    const sock = window._atlasSocket;
+    const onProgress = s => apply(s);
+    const onDisconnect = () => {
+      if (installingRef.current) setRestarting(true);
+    };
+    const onConnect = () => refresh();
+    if (sock) {
+      sock.on('update_progress', onProgress);
+      sock.on('disconnect', onDisconnect);
+      sock.on('connect', onConnect);
+    }
+    // Slow safety net in case socket events are unavailable.
+    const iv = setInterval(refresh, 15000);
     return () => {
-      mounted = false;
-      clearInterval(cachePoll);
+      clearInterval(iv);
+      if (sock) {
+        sock.off('update_progress', onProgress);
+        sock.off('disconnect', onDisconnect);
+        sock.off('connect', onConnect);
+      }
     };
   }, []);
 
-  // Poll status while an update runs. The service restarts itself partway
-  // through, so fetch failures are expected — keep polling through them.
+  // While Atlas restarts for an update, wait for it to come back.
   useEffect(() => {
-    if (!install) return;
-    pollRef.current = setInterval(async () => {
-      try {
-        const s = await api.get('/api/update/status', {
-          timeoutMs: 8000
-        });
-        setUnreachable(0);
-        setStatus(s);
-        if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
-        const finished = s.state === 'success' || !s.running && install.startVersion && s.version && s.version !== install.startVersion;
-        if (finished) {
-          clearInterval(pollRef.current);
-          setStatus(p => ({
-            ...p,
-            state: 'success'
-          }));
-          setTimeout(() => window.location.reload(), 3000);
-        } else if (s.state === 'failed') {
-          clearInterval(pollRef.current);
-        }
-      } catch {
-        setUnreachable(n => n + 1);
-      }
-    }, 2500);
-    return () => clearInterval(pollRef.current);
-  }, [install]);
-  async function runCheck() {
-    setChecking(true);
+    if (!restarting) return;
+    const iv = setInterval(() => {
+      fetch('/api/health', {
+        cache: 'no-store'
+      }).then(r => {
+        if (r.ok) refresh();
+      }).catch(() => {});
+    }, 3000);
+    return () => clearInterval(iv);
+  }, [restarting]);
+  const act = (path, data) => {
+    setBusy(true);
     setError('');
-    try {
-      const r = await api.post('/api/update/check', undefined, {
-        timeoutMs: 45000
-      });
-      setCheck(r);
-      if (r.version) setInfo(p => ({
-        ...(p || {}),
-        ...r
-      }));
-    } catch (e) {
-      setError(e.message || 'Update check failed');
-    } finally {
-      setChecking(false);
-    }
-  }
-  async function startInstall() {
-    setConfirming(false);
-    setError('');
-    setStatus(null);
-    setUnreachable(0);
-    try {
-      await api.post('/api/update/apply');
-      setInstall({
-        startVersion: info === null || info === void 0 ? void 0 : info.version
-      });
-    } catch (e) {
-      setError(e.message || 'Could not start the update');
-    }
-  }
+    api.post(path, data, {
+      timeoutMs: 60000
+    }).then(apply).catch(e => setError(e.message || 'Something went wrong. Please try again.')).finally(() => setBusy(false));
+  };
   const SL = {
     fontSize: 11,
     fontWeight: 700,
@@ -9016,177 +9030,189 @@ function SoftwareUpdateSection() {
     fontSize: 12,
     color: 'var(--text-muted)'
   };
-  const state = status === null || status === void 0 ? void 0 : status.state;
-  const checkedAt = check !== null && check !== void 0 && check.checked_at ? new Date(check.checked_at * 1000).toLocaleString() : '';
+  const state = (u === null || u === void 0 ? void 0 : u.state) || 'idle';
+  const active = ['checking', 'downloading', 'paused', 'verifying', 'installing'].includes(state);
+  const stageIds = ((u === null || u === void 0 ? void 0 : u.stages) || []).map(s => s.id);
+  const currentStage = restarting ? 'reconnecting' : u === null || u === void 0 ? void 0 : u.stage;
+  const stageIndex = stageIds.indexOf(currentStage);
+  const showStages = ['downloading', 'paused', 'verifying', 'ready', 'installing'].includes(state) || restarting;
+  const lastChecked = u !== null && u !== void 0 && u.last_check ? new Date(u.last_check * 1000).toLocaleString() : '';
+  let title = '';
+  if (restarting) title = 'Restarting Atlas…';else if (state === 'downloading' || state === 'paused') title = `Downloading Atlas ${u.version}`;else if (state === 'verifying') title = 'Verifying update…';else if (state === 'ready') title = `Atlas ${u.version} is ready to install`;else if (state === 'installing') title = u.stage_label || 'Installing update…';else if (state === 'available') title = `Atlas ${u.version} is available`;else if (state === 'up_to_date') title = 'Atlas is up to date';else if (state === 'checking') title = 'Checking for updates…';
   return /*#__PURE__*/React.createElement("div", {
     className: "card",
     style: {
       marginBottom: 16
     }
-  }, /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("style", null, '@keyframes atlasIndeterminate { from { left: -35%; } to { left: 100%; } }'), /*#__PURE__*/React.createElement("div", {
     style: SL
   }, "Software Update"), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
-      alignItems: 'center',
+      alignItems: 'flex-start',
       gap: 14,
       flexWrap: 'wrap',
-      marginBottom: 10
+      marginBottom: 12
     }
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: muted
+  }, "Current version"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 13,
+      fontSize: 15,
       color: 'var(--text-primary)',
       fontWeight: 600
     }
-  }, "Atlas Control ", info !== null && info !== void 0 && info.version ? `· ${info.version}` : ''), /*#__PURE__*/React.createElement("div", {
+  }, "Atlas ", (u === null || u === void 0 ? void 0 : u.current_version) || ''), lastChecked && !active && /*#__PURE__*/React.createElement("div", {
     style: muted
-  }, info !== null && info !== void 0 && info.installed_at ? `Installed ${info.installed_at.slice(0, 10)} · ` : '', "Updates download from GitHub and preserve all data, maps and settings.", checkedAt ? ` Last checked ${checkedAt}.` : '')), !install && /*#__PURE__*/React.createElement("button", {
+  }, "Last checked ", lastChecked)), !active && state !== 'ready' && /*#__PURE__*/React.createElement("button", {
     className: "btn btn-sm",
     style: {
       marginLeft: 'auto'
     },
-    onClick: runCheck,
-    disabled: checking
-  }, checking ? 'Checking…' : 'Check for Updates')), error && /*#__PURE__*/React.createElement("div", {
+    disabled: busy,
+    onClick: () => act('/api/update/check')
+  }, busy ? 'Checking…' : 'Check for Updates')), title && /*#__PURE__*/React.createElement("div", {
     style: {
-      color: 'var(--accent-red)',
-      fontSize: 12,
+      fontSize: 14,
+      fontWeight: 600,
+      marginBottom: 8,
+      color: state === 'up_to_date' ? 'var(--accent-green)' : 'var(--text-primary)'
+    }
+  }, state === 'up_to_date' ? '✓ ' : '', title), (u === null || u === void 0 ? void 0 : u.message) && !['available', 'up_to_date'].includes(state) && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: state === 'paused' ? 'var(--accent-amber)' : 'var(--text-secondary)',
       marginBottom: 8
     }
-  }, error), !error && (info === null || info === void 0 ? void 0 : info.last_check_error) && /*#__PURE__*/React.createElement("div", {
+  }, u.message), ((u === null || u === void 0 ? void 0 : u.result) === 'rolled_back' || (u === null || u === void 0 ? void 0 : u.message) && ['available', 'idle'].includes(state) && (u === null || u === void 0 ? void 0 : u.result)) && /*#__PURE__*/React.createElement("div", {
     style: {
+      fontSize: 13,
       color: 'var(--accent-amber)',
-      fontSize: 12,
       marginBottom: 8
     }
-  }, "Automatic check: ", info.last_check_error), check && !install && (check.update_available ? /*#__PURE__*/React.createElement("div", {
+  }, u.message), state === 'idle' && (u === null || u === void 0 ? void 0 : u.message) && !(u !== null && u !== void 0 && u.result) && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: 'var(--text-secondary)',
+      marginBottom: 8
+    }
+  }, u.message), state === 'available' && /*#__PURE__*/React.createElement("div", {
     style: {
       border: '1px solid var(--border-bright)',
       borderRadius: 'var(--radius)',
-      padding: '10px 12px'
+      padding: '10px 12px',
+      marginBottom: 8
     }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 13,
-      color: 'var(--accent-green)',
-      fontWeight: 600,
-      marginBottom: 6
-    }
-  }, "Update available: ", check.latest, " (", check.behind, " new ", check.behind === 1 ? 'commit' : 'commits', ")"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      maxHeight: 120,
-      overflowY: 'auto',
-      marginBottom: 10
-    }
-  }, (check.commits || []).map(c => /*#__PURE__*/React.createElement("div", {
-    key: c.rev,
+  }, (u.notes || []).length > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 12,
+      fontWeight: 600,
       color: 'var(--text-secondary)',
-      padding: '2px 0'
+      marginBottom: 4
     }
-  }, /*#__PURE__*/React.createElement("span", {
+  }, "What's new"), /*#__PURE__*/React.createElement("ul", {
     style: {
-      color: 'var(--text-muted)',
-      fontFamily: 'monospace'
+      margin: '0 0 10px 18px',
+      padding: 0
     }
-  }, c.rev), /*#__PURE__*/React.createElement("span", {
+  }, u.notes.map((n, i) => /*#__PURE__*/React.createElement("li", {
+    key: i,
     style: {
-      color: 'var(--text-muted)'
+      fontSize: 13,
+      color: 'var(--text-secondary)'
     }
-  }, " ", c.date, " "), c.subject))), check.local_changes && /*#__PURE__*/React.createElement("div", {
+  }, n)))), /*#__PURE__*/React.createElement("div", {
     style: {
       ...muted,
-      color: 'var(--accent-yellow, #d8b54a)',
-      marginBottom: 8
+      marginBottom: 10
     }
-  }, "This box has local code changes \u2014 the update keeps them and installs what it can."), !confirming ? /*#__PURE__*/React.createElement("button", {
+  }, u.total_bytes ? `Download size ${fmtBytes(u.total_bytes)}. ` : '', "Your maps, conversations and settings are kept. Atlas restarts once when the update is installed."), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-primary btn-sm",
-    onClick: () => setConfirming(true)
-  }, "Install Update") : /*#__PURE__*/React.createElement("div", {
+    disabled: busy,
+    onClick: () => act('/api/update/start', {
+      install: true
+    })
+  }, "Download and Install")), (state === 'downloading' || state === 'paused') && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement(UpdateProgressBar, {
+    percent: u.progress_percent
+  }), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
-      alignItems: 'center',
-      gap: 10
+      gap: 12,
+      flexWrap: 'wrap',
+      marginTop: 6,
+      ...muted
     }
-  }, /*#__PURE__*/React.createElement("span", {
+  }, typeof u.progress_percent === 'number' && /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 12,
-      color: 'var(--text-secondary)'
-    }
-  }, "Atlas restarts when done (~1\u20133 min). Install now?"), /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-primary btn-sm",
-    onClick: startInstall
-  }, "Yes, install"), /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-sm",
-    onClick: () => setConfirming(false)
-  }, "Cancel"))) : /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 13,
-      color: 'var(--accent-green)'
-    }
-  }, "\u2713 Up to date", check.ahead > 0 ? ` (${check.ahead} local commits ahead of the release)` : '')), install && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: 10,
-      marginBottom: 8
-    }
-  }, state === 'success' ? /*#__PURE__*/React.createElement("span", {
-    style: {
-      color: 'var(--accent-green)',
-      fontSize: 13,
+      color: 'var(--text-primary)',
       fontWeight: 600
     }
-  }, "\u2713 Updated", status !== null && status !== void 0 && status.version ? ` to ${status.version}` : '', " \u2014 reloading\u2026") : state === 'failed' ? /*#__PURE__*/React.createElement("span", {
+  }, Math.floor(u.progress_percent), "%"), u.total_bytes != null && /*#__PURE__*/React.createElement("span", null, fmtBytes(u.downloaded_bytes || 0), " / ", fmtBytes(u.total_bytes)), state === 'downloading' && u.bytes_per_second > 0 && /*#__PURE__*/React.createElement("span", null, fmtBytes(u.bytes_per_second), "/s"))), (state === 'verifying' || state === 'installing' || state === 'checking' || restarting) && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement(UpdateProgressBar, null)), (state === 'installing' || restarting) && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      fontWeight: 600,
+      color: 'var(--accent-amber)',
+      marginBottom: 8
+    }
+  }, "Do not power off Atlas."), showStages && stageIds.length > 0 && /*#__PURE__*/React.createElement("ol", {
+    style: {
+      listStyle: 'none',
+      margin: '4px 0 10px',
+      padding: 0
+    }
+  }, u.stages.filter(s => s.id !== 'checking').map(s => {
+    const idx = stageIds.indexOf(s.id);
+    const done = stageIndex > idx;
+    const now = stageIndex === idx;
+    return /*#__PURE__*/React.createElement("li", {
+      key: s.id,
+      style: {
+        fontSize: 12,
+        padding: '2px 0',
+        color: now ? 'var(--text-primary)' : done ? 'var(--accent-green)' : 'var(--text-muted)',
+        fontWeight: now ? 600 : 400
+      }
+    }, done ? '✓' : now ? '›' : '·', " ", s.label);
+  })), state === 'ready' && /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary btn-sm",
+    disabled: busy,
+    onClick: () => act('/api/update/install')
+  }, "Install Now"), (u === null || u === void 0 ? void 0 : u.can_cancel) && ['downloading', 'paused', 'verifying', 'ready'].includes(state) && /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-sm",
+    style: {
+      marginLeft: state === 'ready' ? 8 : 0
+    },
+    disabled: busy,
+    onClick: () => act('/api/update/cancel')
+  }, "Cancel"), error && /*#__PURE__*/React.createElement("div", {
     style: {
       color: 'var(--accent-red)',
-      fontSize: 13,
-      fontWeight: 600
-    }
-  }, "Update failed \u2014 see log below") : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", {
-    className: "spinner",
-    style: {
-      width: 14,
-      height: 14,
-      border: '2px solid var(--border)',
-      borderTopColor: 'var(--accent-green)',
-      borderRadius: '50%',
-      display: 'inline-block',
-      animation: 'spin 1s linear infinite'
-    }
-  }), /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 13,
-      color: 'var(--text-secondary)'
-    }
-  }, unreachable >= 2 ? 'Atlas is restarting — reconnecting…' : 'Installing update…'))), (status === null || status === void 0 ? void 0 : status.log) && /*#__PURE__*/React.createElement("pre", {
-    ref: logRef,
-    style: {
-      background: 'var(--bg-input)',
-      border: '1px solid var(--border)',
-      borderRadius: 'var(--radius)',
-      padding: 10,
-      fontSize: 11,
-      lineHeight: 1.5,
-      maxHeight: 200,
-      overflowY: 'auto',
-      whiteSpace: 'pre-wrap',
-      color: 'var(--text-secondary)',
-      margin: 0
-    }
-  }, status.log), state === 'failed' && /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-sm",
-    style: {
+      fontSize: 12,
       marginTop: 8
-    },
-    onClick: () => {
-      setInstall(null);
-      setStatus(null);
-      setCheck(null);
     }
-  }, "Dismiss")));
+  }, error), (u === null || u === void 0 ? void 0 : u.error) && !error && ['available', 'idle', 'ready'].includes(state) && /*#__PURE__*/React.createElement("details", {
+    style: {
+      marginTop: 6
+    }
+  }, /*#__PURE__*/React.createElement("summary", {
+    style: {
+      ...muted,
+      cursor: 'pointer'
+    }
+  }, "Details"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...muted,
+      marginTop: 4
+    }
+  }, u.error)));
 }
 
 // ═══════════════════════════════════════════════

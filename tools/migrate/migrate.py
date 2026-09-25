@@ -320,7 +320,8 @@ def step_cutover(state, args):
     fsutil.atomic_write_json(paths.INSTALLED, {"version": m["version"], "seq": m["seq"], "release": target,
                                                "schema_target": m["db"]["schema_target"],
                                                "installed": time.time(), "txid": "migration"})
-    os.makedirs(paths.UPDATE_STATE, mode=0o700, exist_ok=True)
+    os.makedirs(paths.UPDATE_STATE, mode=0o711, exist_ok=True)
+    os.chmod(paths.UPDATE_STATE, 0o711)
     fsutil.atomic_write_json(paths.JOURNAL, {"state": "IDLE", "last_txid": "migration"}, mode=0o600)
     RUNNER.run(["systemctl", "daemon-reload"])
     spec = sysfiles.load_spec(target)

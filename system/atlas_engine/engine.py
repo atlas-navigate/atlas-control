@@ -253,7 +253,7 @@ class Engine:
             "engine_version": ENGINE_VERSION,
             "started": time.time(),
         }
-        os.makedirs(paths.UPDATE_STATE, mode=0o700, exist_ok=True)
+        os.makedirs(paths.UPDATE_STATE, mode=0o711, exist_ok=True)
         self.save("ACCEPTED", message="Verifying download")
 
     def _drive(self):
