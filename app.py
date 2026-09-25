@@ -322,7 +322,9 @@ import request_guard
 import pairing
 import device_identity
 import audit_log
+import perf_metrics
 import retention
+import vector_store
 app.wsgi_app = request_guard.EdgeMiddleware(
     app.wsgi_app,
     host_policy=request_guard.HostPolicy(extra_names=_extra_hostnames),
@@ -1515,29 +1517,6 @@ def _km_category_for(tags_str: str, title: str = ""):
             return slug, meta["color"], meta["label"]
     return "other", "#94a3b8", "Other"
 
-def _km_doc_passage_vectors(raw_embedding):
-    """Extract the list of passage vectors from a stored document embedding.
-
-    Mirrors ai_manager._get_doc_embeddings: documents are now embedded
-    per-passage and stored as {"v":3,"chunks":[{"e":vector},…]}, but a legacy
-    flat whole-doc vector (a bare JSON list) is still accepted so the knowledge
-    map keeps drawing links across the embed-format migration. Returns a list of
-    float vectors (one per passage), or [] if the embedding is missing/unusable.
-    """
-    if not raw_embedding:
-        return []
-    try:
-        parsed = json.loads(raw_embedding)
-    except Exception:
-        return []
-    if isinstance(parsed, dict) and isinstance(parsed.get("chunks"), list):
-        return [c["e"] for c in parsed["chunks"]
-                if isinstance(c, dict) and c.get("e")]
-    if isinstance(parsed, list) and parsed and isinstance(parsed[0], (int, float)):
-        return [parsed]
-    return []
-
-
 # Curated cross-references: many knowledge docs end with a "RELATED: <Title>,
 # <Title>; …" line naming the other docs they relate to. These are
 # human-authored and far more accurate than embedding cosine alone, but the map
@@ -1603,13 +1582,11 @@ def _km_curated_edges(docs):
     return edges
 
 
-@app.route("/api/ai/knowledge-map")
-def api_ai_knowledge_map():
-    """Return nodes and high-cosine edges for the knowledge-map visualisation."""
-    docs = db.ai_get_documents_with_embeddings()
+def _knowledge_map_payload(index):
+    """Nodes and high-cosine edges for the knowledge-map visualisation."""
+    import numpy as np
+    docs = db.ai_get_documents()
     nodes = []
-    # id -> list of unit-normalised passage vectors (so cosine == plain dot product)
-    units_by_id = {}
     for doc in docs:
         slug, color, label = _km_category_for(doc.get("tags") or "", doc.get("title") or "")
         nodes.append({
@@ -1619,38 +1596,18 @@ def api_ai_knowledge_map():
             "cat_label": label,
             "color":    color,
         })
-        units = []
-        for v in _km_doc_passage_vectors(doc.get("embedding")):
-            n = math.sqrt(sum(x * x for x in v))
-            if n:
-                units.append([x / n for x in v])
-        if units:
-            units_by_id[doc["id"]] = units
 
     # Cosine similarity between two docs = their best-matching passage pair (max
-    # cosine), mirroring RAG's "a doc is scored by its single best chunk" rule.
-    # Vectors are pre-normalised above, so each passage comparison is a dot
-    # product. Every unordered pair is scored once into sim[].
-    ids = list(units_by_id.keys())
+    # cosine), mirroring RAG's "a doc is scored by its single best chunk" rule —
+    # one matrix product over every stored passage (vector_store).
+    ids, doc_sims = index.doc_similarity()
     peers = {id_: [] for id_ in ids}
     sim = {}
-    for i in range(len(ids)):
-        id1 = ids[i]
-        passages1 = units_by_id[id1]
-        for j in range(i + 1, len(ids)):
-            id2 = ids[j]
-            best = 0.0
-            for a in passages1:
-                for b in units_by_id[id2]:
-                    if len(a) != len(b):
-                        continue
-                    s = sum(x * y for x, y in zip(a, b))
-                    if s > best:
-                        best = s
-            if best >= 0.55:
-                sim[frozenset((id1, id2))] = best
-                peers[id1].append((best, id2))
-                peers[id2].append((best, id1))
+    for a, b in zip(*(x.tolist() for x in np.nonzero(np.triu(doc_sims >= 0.55, k=1)))):
+        best, id1, id2 = float(doc_sims[a, b]), ids[a], ids[b]
+        sim[frozenset((id1, id2))] = best
+        peers[id1].append((best, id2))
+        peers[id2].append((best, id1))
 
     # Symmetric k-NN: keep an edge if it is in the top-6 of EITHER endpoint, so
     # every node shows its strongest links. (The old code only emitted a pair if
@@ -1676,14 +1633,37 @@ def api_ai_knowledge_map():
         edges.append({"from": id1, "to": id2, "weight": weight,
                       "curated": is_curated})
 
-    return jsonify({"nodes": nodes, "edges": edges,
-                    "categories": {k: {"label": v["label"], "color": v["color"]}
-                                   for k, v in _KM_CATEGORIES.items()}})
+    return {"nodes": nodes, "edges": edges,
+            "categories": {k: {"label": v["label"], "color": v["color"]}
+                           for k, v in _KM_CATEGORIES.items()}}
+
+
+_knowledge_map_cache = {"index": None, "payload": None}
+
+
+@app.route("/api/ai/knowledge-map")
+def api_ai_knowledge_map():
+    """Recomputed only when the knowledge base changes, and off the event loop."""
+    index = vector_store.current()
+    cache = _knowledge_map_cache
+    if cache["index"] is not index:
+        with perf_metrics.timer("knowledge_map.build"):
+            cache["payload"] = atlas_blocking.call(_knowledge_map_payload, index)
+        cache["index"] = index
+    return jsonify(cache["payload"])
 
 # ------------------------------------------------------------------ API: System stats
 @app.route("/api/system/stats")
 def api_system_stats():
-    return jsonify(atlas_blocking.call(system_stats.get_stats))
+    with perf_metrics.timer("stats.collect"):
+        return jsonify(atlas_blocking.call(system_stats.get_stats))
+
+
+@app.route("/api/diagnostics/performance")
+def api_diagnostics_performance():
+    """Local timings (Ray stages, stats, knowledge map) and memory. Paired
+    devices only, like every /api route; nothing leaves the device."""
+    return jsonify(perf_metrics.snapshot())
 
 # ------------------------------------------------------------------ API: GPS
 @app.route("/api/gps")
@@ -3176,8 +3156,6 @@ def _factory_reset_local_state():
     out, rc = atlas_helper.run("net.forget_all", timeout=60)
     if rc != 0:
         problems.append("saved Wi-Fi networks: " + (out or "helper unavailable")[:120])
-    if ai_manager is not None:
-        ai_manager._doc_emb_cache = None
     return problems
 
 
@@ -4582,6 +4560,7 @@ def main():
             _conn = db.get_db()
             _conn.execute("UPDATE ai_documents SET embedding=NULL")
             _conn.commit()
+            db._ai_docs_changed()
     if ai_updates:
         db.ai_set_settings(ai_updates)
     # The port nginx proxies to is fixed; a stored web_port setting (writable

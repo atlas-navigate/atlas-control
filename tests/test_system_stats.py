@@ -42,14 +42,18 @@ class TegraStatsReaderTests(unittest.TestCase):
         self.assertEqual(reader.latest(), {})
         self.assertGreater(reader._unavailable_until, time.monotonic())
 
-    def test_get_stats_does_not_block_on_a_cpu_sample(self):
+    def test_get_stats_does_not_sleep_for_a_cpu_sample(self):
+        import psutil
+        calls = []
+        real = psutil.cpu_percent
         with mock.patch.object(system_stats, "_tegrastats", mock.Mock(latest=lambda: {})), \
-                mock.patch.object(system_stats, "_get_disk_extended", return_value={}):
+                mock.patch.object(system_stats, "_get_disk_extended", return_value={}), \
+                mock.patch.object(psutil, "cpu_percent",
+                                  side_effect=lambda **kw: (calls.append(kw), real(**kw))[1]):
             system_stats._cache["data"] = None
-            t = time.monotonic()
             stats = system_stats.get_stats()
-            self.assertLess(time.monotonic() - t, 0.09)
-            self.assertIn("cpu_pct", stats)
+        self.assertEqual([c.get("interval") for c in calls], [None])
+        self.assertIn("cpu_pct", stats)
 
 
 if __name__ == "__main__":

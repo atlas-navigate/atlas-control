@@ -1093,12 +1093,24 @@ def ai_add_message(chat_id, role, content, tokens=None, duration_ms=None, explai
 
 
 def ai_get_messages(chat_id):
+    """A conversation for display: every message, without the explain trace."""
     db = get_db()
     rows = db.execute(
-        "SELECT * FROM ai_messages WHERE chat_id=? ORDER BY created_at ASC",
+        "SELECT id, chat_id, role, content, created_at, tokens, duration_ms FROM ai_messages "
+        "WHERE chat_id=? ORDER BY created_at ASC, id ASC",
         (chat_id,)
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def ai_get_recent_messages(chat_id, limit):
+    """The last `limit` user/assistant messages, oldest first (prompt history)."""
+    rows = get_db().execute(
+        "SELECT role, content FROM ai_messages WHERE chat_id=? AND role IN ('user', 'assistant') "
+        "ORDER BY created_at DESC, id DESC LIMIT ?",
+        (chat_id, int(limit))
+    ).fetchall()
+    return [dict(r) for r in reversed(rows)]
 
 
 def ai_get_message(message_id):
@@ -1156,6 +1168,20 @@ def ai_get_documents():
         "SELECT id, title, content, tags, created_at, is_seed FROM ai_documents ORDER BY created_at DESC"
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+# Bumped whenever documents or their embeddings change, so in-memory search
+# structures (vector_store, the knowledge map) know to rebuild.
+_ai_docs_version = 0
+
+
+def ai_docs_version():
+    return _ai_docs_version
+
+
+def _ai_docs_changed():
+    global _ai_docs_version
+    _ai_docs_version += 1
 
 
 def ai_get_documents_with_embeddings():
@@ -1231,6 +1257,7 @@ def ai_add_document(title, content, tags="", embedding=None, is_seed=False):
     )
     _ai_fts_sync(cur.lastrowid, title, tags, content)
     db.commit()
+    _ai_docs_changed()
     return cur.lastrowid
 
 
@@ -1238,6 +1265,7 @@ def ai_update_document_embedding(doc_id, embedding_json):
     db = get_db()
     db.execute("UPDATE ai_documents SET embedding=? WHERE id=?", (embedding_json, doc_id))
     db.commit()
+    _ai_docs_changed()
 
 
 def ai_delete_document(doc_id):
@@ -1245,6 +1273,7 @@ def ai_delete_document(doc_id):
     db.execute("DELETE FROM ai_documents WHERE id=?", (doc_id,))
     _ai_fts_remove(doc_id)
     db.commit()
+    _ai_docs_changed()
 
 
 def ai_seed_documents(docs):
@@ -1281,6 +1310,7 @@ def ai_seed_documents(docs):
                 changed += 1
     if changed:
         db.commit()
+        _ai_docs_changed()
 
 
 # ── AI Settings ───────────────────────────────────────────────────────────────
@@ -1672,6 +1702,7 @@ def factory_reset_data():
         raise
     finally:
         db.execute("PRAGMA secure_delete = OFF")
+        _ai_docs_changed()
     try:
         db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         db.execute("VACUUM")

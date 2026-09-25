@@ -11,7 +11,10 @@ import threading
 import logging
 import urllib.request
 import atlas_blocking
+import perf_metrics
 import safe_math as _safe_math
+import token_budget
+import vector_store
 import untrusted as _untrusted
 
 import csv
@@ -547,6 +550,12 @@ _USER_COORD_MAX_KM = 2000.0
 # a genuinely memory-starved box still routes rather than silently degrading to
 # a straight line.
 _ROUTING_MIN_FREE_MB = 800
+
+# Below this much free RAM an embedding waits for any running generation
+# instead of computing alongside it.
+_EMBED_CONCURRENT_MIN_FREE_MB = 600
+# How long the list of installed Ollama models is trusted.
+_MODEL_LIST_TTL_S = 60
 
 
 def available_ram_mb():
@@ -1170,8 +1179,11 @@ _CALC_INSTRUCTION = (
     "  Kinetic energy: [CALC: 0.5 * 0.01 * 900**2]"
 )
 
-# Keywords that indicate the user is asking about live dashboard data —
-# no RAG embed needed, the answer is already in the injected context.
+# Words that suggest the user is asking about live dashboard data. Matched as
+# whole words (_LIVE_DATA_RE). Such questions still search the knowledge base,
+# just for fewer passages (_LIVE_QUERY_RAG_TOP_K): substring matching used to
+# skip it entirely for "apply pressure", "recovery position", "altitude
+# sickness", "signal mirror", "frame" (ram) or "state" (stat).
 _LIVE_DATA_KEYWORDS = {
     "temp", "temperature", "cpu", "gpu", "ram", "memory", "disk", "battery",
     "voltage", "power", "watt", "uptime", "node", "nodes", "online", "offline",
@@ -1181,6 +1193,9 @@ _LIVE_DATA_KEYWORDS = {
     "hop", "hops", "relay", "router", "hardware", "model", "device", "stat",
     "stats", "status",
 }
+_LIVE_DATA_RE = re.compile(
+    r"\b(?:" + "|".join(sorted((re.escape(k) for k in _LIVE_DATA_KEYWORDS), key=len, reverse=True)) + r")s?\b")
+_LIVE_QUERY_RAG_TOP_K = 2
 
 # Live "senses" (host telemetry + mesh state) are heavy, and when they are
 # ALWAYS present the small model tries to weave them into unrelated answers and
@@ -4873,30 +4888,8 @@ def _parse_explain_command(msg: str):
 
 
 # ---------------------------------------------------------------------------
-# Cosine similarity — numpy if available, otherwise pure Python
-# ---------------------------------------------------------------------------
-try:
-    import numpy as _np
-    def cosine_similarity(a, b):
-        a = _np.array(a, dtype=_np.float32)
-        b = _np.array(b, dtype=_np.float32)
-        denom = float(_np.linalg.norm(a)) * float(_np.linalg.norm(b))
-        return float(_np.dot(a, b) / denom) if denom else 0.0
-except ImportError:
-    def cosine_similarity(a, b):
-        """Pure-Python cosine similarity between two equal-length float lists."""
-        dot = sum(x * y for x, y in zip(a, b))
-        mag_a = math.sqrt(sum(x * x for x in a))
-        mag_b = math.sqrt(sum(x * x for x in b))
-        if mag_a == 0 or mag_b == 0:
-            return 0.0
-        return dot / (mag_a * mag_b)
-
-
-# ---------------------------------------------------------------------------
 # AIManager
 # ---------------------------------------------------------------------------
-_DOC_EMB_CACHE_TTL = 120  # seconds — refresh cached doc embeddings
 # Cosine similarity threshold — discard retrieved passages below this score.
 # Recalibrated for qwen3-embedding:0.6b with embedding format v3 (passage-level
 # chunks, title-prefixed): on-topic passages score ~0.45–0.67, off-topic noise
@@ -4918,6 +4911,19 @@ _BM25_GATE = 0.35
 # passage-level retrieval, five whole multi-topic docs (~3700 tokens) overflowed
 # the window and the lowest-ranked (often most relevant) docs were truncated out.
 _RAG_CONTEXT_CHAR_BUDGET = 7000
+
+# Earlier turns offered to the model (token_budget.fit_history may keep fewer).
+_HISTORY_TURNS = 8
+
+
+def _record_prompt_size(budget, prompt_eval_count):
+    """Compare the estimated prompt with what the model actually counted."""
+    perf_metrics.observe("ray.prompt_tokens", prompt_eval_count)
+    perf_metrics.observe("ray.prompt_tokens_estimated", budget.get("estimated"))
+    perf_metrics.observe("ray.history_dropped", budget.get("history_dropped"))
+    if prompt_eval_count and prompt_eval_count > budget.get("budget", 0):
+        logger.warning("Ray prompt was %s tokens, over the %s-token budget (estimated %s)",
+                       prompt_eval_count, budget.get("budget"), budget.get("estimated"))
 
 # A single doc can answer a broad "how do I X" query with several sibling
 # passages (e.g. "Emergency Shelter Construction" has LEAN-TO, QUINZHEE and a
@@ -5186,10 +5192,14 @@ class AIManager:
         self.socketio = socketio
         self.gps_manager = gps_manager
         self._lock = threading.Lock()
+        # Two slots: generation (chat, calc agent, warmup) and embedding. Both
+        # models stay resident (OLLAMA_MAX_LOADED_MODELS=2), so a RAG embed no
+        # longer waits behind someone else's whole streamed answer. Acquire
+        # order when both are needed: generation, then embedding.
         self._ollama_lock = threading.Lock()
+        self._embed_lock = threading.Lock()
+        self._model_names = (0.0, frozenset())   # cached /api/tags (monotonic ts, names)
         self._startup_warmup_done = threading.Event()
-        self._doc_emb_cache = None       # list of (doc_dict, emb_list)
-        self._doc_emb_cache_ts = 0.0
         self._thinking_caps = {}         # model name → bool ("thinking" capability)
         self._startup_state_lock = threading.Lock()
         self._startup_phase = "init"
@@ -5250,7 +5260,12 @@ class AIManager:
         keep_alive = f"{settings.get('keep_alive_hours', '10')}h"
         try:
             self._set_startup_state("warming_up", ready=False, error="")
-            with self._ollama_slot(timeout=600):
+            # Pulling a missing model can take many minutes: do it before
+            # taking any slot so Ray stays usable meanwhile.
+            for m in (embed_model, model):
+                if m:
+                    self._ensure_model_present(m, allow_pull=True)
+            with self._ollama_slot(timeout=600), self._embed_slot(timeout=600):
                 if embed_model:
                     self._warmup_embed_model(embed_model)
                 self._warmup_chat_model(model, keep_alive, settings)
@@ -5263,32 +5278,36 @@ class AIManager:
             self._startup_warmup_done.set()
 
     @contextlib.contextmanager
-    def _ollama_slot(self, timeout=300):
-        """Serialize Ollama calls without deadlocking gevent.
+    def _ollama_slot(self, timeout=300, lock=None):
+        """Serialize Ollama generation calls without deadlocking gevent.
 
-        _ollama_lock is a native lock (monkey.patch_all runs with thread=False)
-        but the HTTP sockets used while holding it are gevent-patched. If a
-        greenlet blocks on .acquire(), the whole event loop freezes and the
-        greenlet holding the lock can never be scheduled to release it. In the
-        main (gevent) thread we poll cooperatively instead; native threads
-        (e.g. _warmup) block normally.
+        The locks are native (monkey.patch_all runs with thread=False) but the
+        HTTP sockets used while holding them are gevent-patched. If a greenlet
+        blocks on .acquire(), the whole event loop freezes and the greenlet
+        holding the lock can never be scheduled to release it. In the main
+        (gevent) thread we poll cooperatively instead; native threads (e.g.
+        _warmup) block normally.
         """
+        lock = lock or self._ollama_lock
         deadline = time.monotonic() + timeout
         if threading.current_thread() is threading.main_thread():
             import gevent
-            while not self._ollama_lock.acquire(blocking=False):
+            while not lock.acquire(blocking=False):
                 if time.monotonic() >= deadline:
                     raise TimeoutError(
                         "Ray is busy with another AI request — try again in a moment.")
                 gevent.sleep(0.05)
         else:
-            if not self._ollama_lock.acquire(timeout=timeout):
+            if not lock.acquire(timeout=timeout):
                 raise TimeoutError(
                     "Ray is busy with another AI request — try again in a moment.")
         try:
             yield
         finally:
-            self._ollama_lock.release()
+            lock.release()
+
+    def _embed_slot(self, timeout=300):
+        return self._ollama_slot(timeout, lock=self._embed_lock)
 
     def _wait_for_startup_warmup(self, timeout=8):
         """Avoid racing the startup warmup on the first user request."""
@@ -5299,7 +5318,7 @@ class AIManager:
 
     def _warmup_embed_model(self, embed_model):
         """Load the embedding model once so the first RAG query is not a cold start."""
-        if not self._ensure_model_present(embed_model):
+        if not self._ensure_model_present(embed_model, refresh=True):
             logger.warning(f"AI embed warmup skipped; model not available: {embed_model}")
             return
         logger.info(f"AI warmup: loading embed model {embed_model}")
@@ -5325,7 +5344,7 @@ class AIManager:
 
     def _warmup_chat_model(self, model, keep_alive, settings):
         """Load the chat model into VRAM using the current runtime settings."""
-        if not self._ensure_model_present(model):
+        if not self._ensure_model_present(model, refresh=True):
             logger.warning(f"AI warmup skipped; model not available: {model}")
             return
         logger.info(f"AI warmup: loading model {model} with keep_alive={keep_alive}")
@@ -5686,9 +5705,13 @@ class AIManager:
             embed_model = db.ai_get_settings().get("embed_model", DEFAULT_SETTINGS["embed_model"])
         text = self._embed_input(embed_model, text, is_query)
         self._wait_for_startup_warmup()
-        with self._ollama_slot():
-            if not self._ensure_model_present(embed_model):
-                raise ValueError(f"Embedding model not available: {embed_model}")
+        if not self._ensure_model_present(embed_model):
+            raise ValueError(f"Embedding model not available: {embed_model}")
+        # Embedding normally runs beside a streaming answer. When memory is
+        # short, queue behind generation instead of running both at once.
+        free_mb = available_ram_mb()
+        tight = free_mb is not None and free_mb < _EMBED_CONCURRENT_MIN_FREE_MB
+        with (self._ollama_slot() if tight else contextlib.nullcontext()), self._embed_slot():
             # Embed on GPU (num_gpu omitted = auto-place). OLLAMA_MAX_LOADED_MODELS=2
             # keeps the chat model resident, so the embedder runs on GPU without
             # the per-message reload thrash that the old CPU pin guarded against.
@@ -5722,25 +5745,40 @@ class AIManager:
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            resp = urllib.request.urlopen(req, timeout=60)
-            data = json.loads(resp.read())
+            with perf_metrics.timer("ray.embed"):
+                resp = urllib.request.urlopen(req, timeout=60)
+                data = json.loads(resp.read())
         embeddings = data.get("embeddings", [])
         if embeddings:
             return embeddings[0]
         raise ValueError("Ollama /api/embed returned no embeddings")
 
-    def _ensure_model_present(self, model: str) -> bool:
-        """Ensure an Ollama model exists locally, pulling it if missing."""
+    def _ensure_model_present(self, model: str, allow_pull=False, refresh=False) -> bool:
+        """Is `model` installed in Ollama? The model list is cached for
+        _MODEL_LIST_TTL_S, so chat and embed calls do not each ask Ollama.
+        Only the startup warmup (allow_pull) may pull a missing model — a
+        pull can take many minutes and never runs inside a chat request."""
         if not model:
             return False
+
+        def known(names):
+            return model in names or any(name.startswith(model + ":") for name in names)
+
+        ts, names = self._model_names
+        if not refresh and time.monotonic() - ts < _MODEL_LIST_TTL_S and known(names):
+            return True
         try:
             with urllib.request.urlopen(f"{self.ollama_base}/api/tags", timeout=10) as resp:
                 data = json.loads(resp.read())
-            names = [m.get("name", "") for m in data.get("models", [])]
-            if model in names or any(name.startswith(model + ":") for name in names):
+            names = frozenset(m.get("name", "") for m in data.get("models", []))
+            self._model_names = (time.monotonic(), names)
+            if known(names):
                 return True
         except Exception as e:
             logger.warning(f"Could not query Ollama model list: {e}")
+            return False
+        if not allow_pull:
+            logger.warning(f"Ollama model {model} is not installed")
             return False
 
         logger.info(f"Ollama model missing; pulling {model}")
@@ -5753,6 +5791,7 @@ class AIManager:
                 method="POST",
             )
             urllib.request.urlopen(req, timeout=1800)
+            self._model_names = (0.0, frozenset())
             return True
         except Exception as e:
             logger.warning(f"Failed to pull Ollama model {model}: {e}")
@@ -5800,39 +5839,6 @@ class AIManager:
         return payload_dict
 
     # ------------------------------------------------------------------
-    def _get_doc_embeddings(self):
-        """Return cached list of (doc_dict, chunks) pairs; refreshed every 120 s.
-
-        chunks is a list of {'h':heading,'t':text,'e':vector}. A legacy flat
-        whole-doc vector (a bare JSON list) is wrapped as a single chunk so a
-        store that is mid-migration to the chunked v3 format keeps working.
-        """
-        import database as db
-        now = time.time()
-        if self._doc_emb_cache is not None and (now - self._doc_emb_cache_ts) < _DOC_EMB_CACHE_TTL:
-            return self._doc_emb_cache
-        docs = db.ai_get_documents_with_embeddings()
-        result = []
-        for doc in docs:
-            raw = doc.get("embedding")
-            if not raw:
-                continue
-            try:
-                parsed = json.loads(raw)
-            except Exception:
-                continue
-            if isinstance(parsed, dict) and isinstance(parsed.get("chunks"), list):
-                chunks = [c for c in parsed["chunks"] if c.get("e")]
-            elif isinstance(parsed, list) and parsed:
-                chunks = [{"h": "", "t": doc.get("content") or "", "e": parsed}]
-            else:
-                continue
-            if chunks:
-                result.append((doc, chunks))
-        self._doc_emb_cache = result
-        self._doc_emb_cache_ts = now
-        return result
-
     # ------------------------------------------------------------------
     def _is_math_query(self, user_message):
         """Return True if the user message appears to require computation.
@@ -5985,8 +5991,9 @@ class AIManager:
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            resp = urllib.request.urlopen(req, timeout=60)
-            extraction = json.loads(resp.read()).get("message", {}).get("content", "")
+            with self._ollama_slot():
+                resp = urllib.request.urlopen(req, timeout=60)
+                extraction = json.loads(resp.read()).get("message", {}).get("content", "")
             logger.debug(f"Calc agent extraction: {extraction!r}")
         except Exception as ex:
             logger.warning(f"Calc agent pass failed: {ex}")
@@ -6425,8 +6432,8 @@ class AIManager:
         unrelated doc on keyword coincidence (e.g. "temperature" in an AI-params doc
         matching a cooking question when the vector similarity is near zero).
         """
-        doc_embs = self._get_doc_embeddings()
-        if not doc_embs:
+        index = vector_store.current()
+        if not index:
             return [], 0.0
         # Only fold the location string into the embedded query when the user is
         # explicitly asking about their surroundings; otherwise it corrupts the
@@ -6461,15 +6468,13 @@ class AIManager:
         doc_chunks = {}   # doc_id -> [(cosine, heading, passage), ...] sorted desc
         doc_by_id  = {}
         dim_skips = 0
-        for doc, chunks in doc_embs:
+        for (doc, chunks), chunk_scores in zip(index.entries, index.scores(query_emb)):
             best_rank, best_v, best_c, doc_max = -2.0, -1.0, None, -1.0
             scored_chunks = []
-            for c in chunks:
-                e = c.get("e")
-                if not e or len(e) != qdim:
+            for c, v in zip(chunks, chunk_scores):
+                if v is None:
                     dim_skips += 1
                     continue
-                v = cosine_similarity(query_emb, e)
                 doc_max = max(doc_max, v)
                 scored_chunks.append((v, c.get("h", ""), c.get("t", "")))
                 # Region-scoped queries nudge passage SELECTION toward the section
@@ -6598,7 +6603,7 @@ class AIManager:
           rag_top_score  — float: highest cosine similarity (0.0 if no match)
           has_live_data  — bool: mesh node / alert context was injected
           has_system_stats — bool: CPU/RAM/temp stats were injected
-          is_live_query  — bool: query was classified as a live-data query (RAG skipped)
+          is_live_query  — bool: query mentions live data (fewer RAG passages)
         """
         import database as db
         import system_stats
@@ -7114,12 +7119,16 @@ class AIManager:
             meta["has_self_doc"] = True
             logger.info("Self-query detected: injected Ray self-architecture doc")
 
-        # RAG context — skip if the query is about live dashboard data (already injected above)
-        is_live_query = any(_kw_hit(kw, msg_lower) for kw in _LIVE_DATA_KEYWORDS)
+        # RAG context. Questions about live data (already injected above) still
+        # search the knowledge base — "signal mirror" or "altitude sickness"
+        # are survival questions — but take fewer passages.
+        is_live_query = _LIVE_DATA_RE.search(msg_lower) is not None
         meta["is_live_query"] = is_live_query
-        if settings.get("rag_enabled", "true").lower() == "true" and not is_live_query:
+        if settings.get("rag_enabled", "true").lower() == "true":
             try:
                 top_k = int(settings.get("rag_top_k", DEFAULT_SETTINGS["rag_top_k"]))
+                if is_live_query:
+                    top_k = min(top_k, _LIVE_QUERY_RAG_TOP_K)
                 embed_model = settings.get("embed_model", DEFAULT_SETTINGS["embed_model"])
                 # Location-sensitive queries get the user's resolved region
                 # appended to the embedding query so the regional passage outranks
@@ -7142,9 +7151,17 @@ class AIManager:
                     if st:
                         region = _region_for_state(st)
                         location_hint = f"{st}, {region} US" if region else st
-                relevant_docs, rag_top_score = self.rag_search(
-                    user_message, top_k=top_k, embed_model=embed_model, location_hint=location_hint
-                )
+                with perf_metrics.timer("ray.retrieve"):
+                    relevant_docs, rag_top_score = self.rag_search(
+                        user_message, top_k=top_k, embed_model=embed_model, location_hint=location_hint
+                    )
+                # Passages get what the context window has left after the
+                # system prompt, the live data above and a floor for history.
+                rag_char_budget = token_budget.rag_char_budget(
+                    settings,
+                    [settings.get("system_prompt", DEFAULT_SETTINGS["system_prompt"]), _untrusted.DATA_RULE] + parts,
+                    user_message, _RAG_CONTEXT_CHAR_BUDGET, DEFAULT_SETTINGS)
+                meta["rag_char_budget"] = rag_char_budget
                 meta["rag_top_score"] = rag_top_score
                 # Record retrieved passages for the /explain provenance trace so
                 # the user can read the exact sources Ray drew on and check the
@@ -7194,11 +7211,11 @@ class AIManager:
                             block = (f"[{_untrusted.neutralize(label, 160, single_line=True)}]\n"
                                      f"{_untrusted.neutralize(passage)}")
                             if (rag_lines["atlas"] or rag_lines["user"]) and \
-                                    used + len(block) > _RAG_CONTEXT_CHAR_BUDGET:
+                                    used + len(block) > rag_char_budget:
                                 break
                             rag_lines[tier].append(block)
                             used += len(block)
-                        if used > _RAG_CONTEXT_CHAR_BUDGET:
+                        if used > rag_char_budget:
                             break
                     rag_parts = [
                         "KNOWLEDGE BASE — use as the primary source; supplement with "
@@ -7342,7 +7359,9 @@ class AIManager:
             "confidence": confidence_label,
             "rag": {
                 "enabled": str(settings.get("rag_enabled", "true")).lower() == "true",
-                "skipped_live": bool(meta.get("is_live_query")),
+                # Live-data questions search too (fewer passages). Traces saved
+                # by older releases carry "skipped_live" instead.
+                "live_query": bool(meta.get("is_live_query")),
                 "min_score": _RAG_MIN_SCORE,
                 "top_score": round(meta.get("rag_top_score", 0.0), 3),
                 "docs": meta.get("rag_docs", []),
@@ -7401,7 +7420,7 @@ class AIManager:
         # ── RAG sources ────────────────────────────────────────────────────
         rag = trace.get("rag", {})
         docs = rag.get("docs", [])
-        if rag.get("skipped_live"):
+        if rag.get("skipped_live"):          # trace from an older release
             L.append(
                 "**Knowledge base:** skipped — this was classified as a live-data "
                 "question, so I answered from current device readings instead of "
@@ -7606,13 +7625,14 @@ class AIManager:
         if context:
             system_content = base_system + "\n\n" + context
 
-        # Load history — cap at last 8 messages to keep context tight
-        history = db.ai_get_messages(chat_id)
-        recent_history = [m for m in history if m["role"] in ("user", "assistant")][-8:]
+        # History: up to the last 8 turns, newest first while they fit the window.
+        loc_prefix = _build_location_prefix(ctx_meta)
+        recent_history, budget = token_budget.fit_history(
+            system_content, loc_prefix + user_message, db.ai_get_recent_messages(chat_id, _HISTORY_TURNS),
+            settings, DEFAULT_SETTINGS)
         messages = [{"role": "system", "content": system_content}]
         for msg in recent_history:
             messages.append({"role": msg["role"], "content": msg["content"]})
-        loc_prefix = _build_location_prefix(ctx_meta)
         messages.append({"role": "user", "content": loc_prefix + user_message})
 
         # Save user message (without the injected location prefix)
@@ -7647,6 +7667,8 @@ class AIManager:
             resp = urllib.request.urlopen(req, timeout=180)
             result = json.loads(resp.read())
         duration_ms = int((time.time() - t0) * 1000)
+        perf_metrics.record("ray.answer", duration_ms / 1000)
+        _record_prompt_size(budget, result.get("prompt_eval_count"))
 
         content = result.get("message", {}).get("content", "")
         eval_count = result.get("eval_count")
@@ -7770,13 +7792,14 @@ class AIManager:
         if context:
             system_content = base_system + "\n\n" + context
 
-        history = db.ai_get_messages(chat_id)
-        # Cap history at last 8 turns (same as non-streaming path)
-        recent_history = [m for m in history if m["role"] in ("user", "assistant")][-8:]
+        # History: up to the last 8 turns, newest first while they fit the window.
+        loc_prefix = _build_location_prefix(ctx_meta)
+        recent_history, budget = token_budget.fit_history(
+            system_content, loc_prefix + user_message, db.ai_get_recent_messages(chat_id, _HISTORY_TURNS),
+            settings, DEFAULT_SETTINGS)
         messages = [{"role": "system", "content": system_content}]
         for msg in recent_history:
             messages.append({"role": msg["role"], "content": msg["content"]})
-        loc_prefix = _build_location_prefix(ctx_meta)
         messages.append({"role": "user", "content": loc_prefix + user_message})
 
         db.ai_add_message(chat_id, "user", user_message)
@@ -7823,11 +7846,15 @@ class AIManager:
                         continue
                     token = chunk.get("message", {}).get("content", "")
                     if token:
+                        if not full_content:
+                            perf_metrics.record("ray.first_token", time.time() - t0)
                         full_content += token
                         yield token
                     if chunk.get("done"):
                         eval_count = chunk.get("eval_count")
                         eval_duration = chunk.get("eval_duration")
+                        perf_metrics.record("ray.answer", time.time() - t0)
+                        _record_prompt_size(budget, chunk.get("prompt_eval_count"))
                         break
             finally:
                 resp.close()

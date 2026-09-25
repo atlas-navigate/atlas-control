@@ -53,7 +53,7 @@ class ReleaseServer:
                     return
                 data = open(path, "rb").read()
                 if server.corrupt and path.endswith(".tar.xz"):
-                    data = data[:100] + b"X" + data[101:]
+                    data = data[:100] + bytes([data[100] ^ 0xFF]) + data[101:]   # always a change
                 start = 0
                 rng = self.headers.get("Range")
                 if rng and not server.ignore_range:
@@ -187,8 +187,8 @@ class UpdateManagerTests(unittest.TestCase):
         self.um.check()
         self.server.corrupt = True
         self.um.start(install=True)
-        self.assertEqual(self.helper_calls, [])
-        self.assertEqual(self.um.state["message"], update_manager.MSG_NOT_VERIFIED)
+        self.assertEqual(self.helper_calls, [], self.um.state)
+        self.assertEqual(self.um.state["message"], update_manager.MSG_NOT_VERIFIED, self.um.state)
 
     def test_duplicate_start_does_not_start_a_second_download(self):
         self.um.check()
