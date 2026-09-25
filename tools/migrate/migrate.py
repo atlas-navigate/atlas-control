@@ -385,6 +385,12 @@ def apply(args):
     if "verify" in state["done"]:
         say("already migrated")
         return 0
+    if (state.get("bundle") and "cutover" not in state["done"]
+            and os.path.dirname(state["bundle"]) != os.path.abspath(args.bundle)):
+        # An earlier run stopped before cutover with another bundle: check,
+        # extract and stage this one instead of the one recorded then.
+        say("different release bundle from the last attempt: starting again from preflight")
+        state["done"] = [s for s in state["done"] if s not in ("preflight", "engine", "release")]
     for name, fn in STEPS:
         if name in state["done"]:
             continue

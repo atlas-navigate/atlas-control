@@ -62,6 +62,7 @@ class MigrationRehearsal(unittest.TestCase):
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
         from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
         dev = Ed25519PrivateKey.generate()
+        self._dev_key = dev
         self.bundle = self.sb.make_bundle(tree, "1.0.0", 5, sign_key=dev,
                                           manifest_overrides={"db": {"schema_target": 1, "compat_floor": 0}})
         self.dev_pub = os.path.join(self.sb.root, "dev.pub")
@@ -191,6 +192,22 @@ class MigrationRehearsal(unittest.TestCase):
         self.assertFalse(os.path.exists(self.migrate.BACKUP))
         self.assertNotIn("preflight", self.migrate.load_state()["done"])
         self.assertEqual(self.apply(), 0)                  # fixed rules: the same command now succeeds
+
+    def test_rerun_with_a_new_bundle_after_an_early_failure_uses_the_new_bundle(self):
+        def fail(state, args):
+            raise SystemExit("disk full while staging")
+        steps = [(n, fail if n == "release" else fn) for n, fn in self.migrate.STEPS]
+        with mock.patch.object(self.migrate, "STEPS", steps):
+            self.assertEqual(self.apply(), 1)
+        self.assertIn("engine", self.migrate.load_state()["done"])
+        self.assertEqual(self.read("/etc/systemd/system/atlas-control.service"), LEGACY_UNIT)
+        tree = self.sb.release_tree("1.0.1", 6)
+        shutil.rmtree(os.path.join(tree, "system"))
+        shutil.copytree(os.path.join(REPO, "system"), os.path.join(tree, "system"))
+        self.bundle = self.sb.make_bundle(tree, "1.0.1", 6, sign_key=self._dev_key,
+                                          manifest_overrides={"db": {"schema_target": 1, "compat_floor": 0}})
+        self.assertEqual(self.apply(), 0)
+        self.assertEqual(self.sb.current_version(), "1.0.1")
 
     def test_default_hotspot_password_is_replaced(self):
         with open(os.path.join(self.sb.app_state, "hotspot_config.json"), "w") as f:
