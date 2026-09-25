@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- No cleartext and no user-installed CAs. Atlas itself uses a per-device
+     self-signed certificate that the app pins explicitly by public key
+     (network/AtlasTrust.kt); everything else uses the system trust store. -->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="true">
+    <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system" />
-            <certificates src="user" />
         </trust-anchors>
     </base-config>
 </network-security-config>
-

@@ -9422,7 +9422,6 @@ function WifiPage() {
           const hintIp = res?.hintIp || res?.lan?.ip || res?.ip || '';
           if (hintIp) {
             if (!allUrls.some(u => u.includes(hintIp))) allUrls.unshift(`https://${hintIp}`);
-            if (!allUrls.some(u => u.includes(':5000') && u.includes(hintIp))) allUrls.push(`http://${hintIp}:5000`);
           }
           window.AtlasAndroid.lanSwitchedTo(JSON.stringify(allUrls), !!res?.pending, hintIp || '');
         }

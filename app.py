@@ -3528,7 +3528,7 @@ def _preferred_local_urls(lan=None):
         ip = _normalize_ip_value(lan["ip"])
         if ip:
             urls.append(f"https://{ip}")
-    urls.append("https://atlas.local")
+    urls.append(f"https://{device_identity.device().get('hostname') or 'atlas'}.local")
     return urls
 
 
@@ -3991,7 +3991,6 @@ def api_wifi_my_ips():
     urls = []
     for ip in ips:
         urls.append(f"https://{ip}")
-        urls.append(f"http://{ip}:5000")
     return jsonify({"ips": ips, "urls": urls})
 
 

@@ -13017,7 +13017,6 @@ function WifiPage() {
         const hintIp = (res === null || res === void 0 ? void 0 : res.hintIp) || (res === null || res === void 0 || (_res$lan5 = res.lan) === null || _res$lan5 === void 0 ? void 0 : _res$lan5.ip) || (res === null || res === void 0 ? void 0 : res.ip) || '';
         if (hintIp) {
           if (!allUrls.some(u => u.includes(hintIp))) allUrls.unshift(`https://${hintIp}`);
-          if (!allUrls.some(u => u.includes(':5000') && u.includes(hintIp))) allUrls.push(`http://${hintIp}:5000`);
         }
         window.AtlasAndroid.lanSwitchedTo(JSON.stringify(allUrls), !!(res !== null && res !== void 0 && res.pending), hintIp || '');
       }

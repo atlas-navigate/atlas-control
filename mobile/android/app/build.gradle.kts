@@ -11,8 +11,8 @@ android {
         applicationId = "com.atlascontrol.mobile"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "2.0.0"
     }
 
     buildFeatures {
@@ -50,18 +50,19 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.foundation:foundation")
 
-    // HTTP / Networking
-    implementation("com.squareup.retrofit2:retrofit:2.11.0")
-    implementation("com.squareup.retrofit2:converter-gson:2.11.0")
+    // HTTP (TLS pinned to each Atlas's own key — see network/AtlasTrust.kt)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+
+    // QR code on the Atlas label: CameraX preview + on-device ZXing decoding
+    // (no Google Play services, works offline).
+    implementation("androidx.camera:camera-camera2:1.4.2")
+    implementation("androidx.camera:camera-lifecycle:1.4.2")
+    implementation("androidx.camera:camera-view:1.4.2")
+    implementation("com.google.zxing:core:3.5.3")
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
-
-    // Permissions
-    implementation("com.google.accompanist:accompanist-permissions:0.37.0")
 
     // Okio (transitive from OkHttp but declared explicitly for direct Buffer usage)
     implementation("com.squareup.okio:okio:3.9.0")
