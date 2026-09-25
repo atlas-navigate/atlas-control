@@ -1,0 +1,15 @@
+# Managed by the Atlas updater.
+[Unit]
+Description=Atlas firewall
+Wants=network-pre.target
+Before=network-pre.target
+After=local-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/lib/atlas/bin/atlas-engine firewall-up
+ExecStop=/usr/local/lib/atlas/bin/atlas-engine firewall-down
+
+[Install]
+WantedBy=multi-user.target

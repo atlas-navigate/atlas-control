@@ -1,0 +1,17 @@
+#!/bin/sh
+# atlas-launch — start the Atlas release that /opt/atlas/current points at.
+# The link is resolved exactly once, so a release switch during an update can
+# never leave the running process reading files from two releases.
+set -eu
+OPT=/opt/atlas
+R=$(readlink -f "$OPT/current" 2>/dev/null || true)
+if [ -z "$R" ] || { [ ! -f "$R/.complete" ] && [ ! -f "$R/.dev-link" ]; }; then
+    R=$(readlink -f "$OPT/previous" 2>/dev/null || true)
+fi
+if [ -z "$R" ] || [ ! -x "$R/venv/bin/python3" ]; then
+    echo "atlas-launch: no usable Atlas release" >&2
+    exit 1
+fi
+cd "$R"
+# -E: ignore PYTHON* environment variables; -s: no user site-packages.
+exec "$R/venv/bin/python3" -E -s "$R/app.py" "$@"

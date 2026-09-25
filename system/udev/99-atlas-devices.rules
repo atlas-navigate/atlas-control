@@ -1,0 +1,10 @@
+# Managed by the Atlas updater.
+# Persistent names for Atlas's radios. Access is limited to the dialout group
+# (the Atlas service account), not every local user (was MODE="0666").
+
+# Heltec WiFi LoRa 32 v4 (ESP32-S3) over USB-C: ROM USB-Serial/JTAG and TinyUSB CDC.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="1001", SYMLINK+="meshtastic", GROUP="dialout", MODE="0660"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="4001", SYMLINK+="meshtastic", GROUP="dialout", MODE="0660"
+
+# u-blox NEO-M8U / M9N GPS over USB.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1546", ATTRS{idProduct}=="01a8", SYMLINK+="gps", GROUP="dialout", MODE="0660"

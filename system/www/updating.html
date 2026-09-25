@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlas is restarting</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center;
+         background: #0a0e17; color: #e6edf3; font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 26rem; padding: 2rem; text-align: center; }
+  h1 { font-size: 1.35rem; margin: 0 0 .5rem; }
+  p { color: #9aa7b4; margin: .25rem 0; }
+  .bar { height: 6px; border-radius: 3px; background: #1d2633; overflow: hidden; margin: 1.5rem 0 1rem; }
+  .bar > span { display: block; height: 100%; width: 35%; background: #3fb950;
+                animation: slide 1.4s ease-in-out infinite; }
+  @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+  @media (prefers-reduced-motion: reduce) { .bar > span { animation: none; width: 100%; opacity: .5; } }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="title">Atlas is restarting</h1>
+  <div class="bar" role="progressbar" aria-label="Waiting for Atlas"><span></span></div>
+  <p id="detail">This page will reconnect by itself.</p>
+  <p id="warn"></p>
+</main>
+<script>
+(function () {
+  var title = document.getElementById('title');
+  var detail = document.getElementById('detail');
+  var warn = document.getElementById('warn');
+  function status() {
+    fetch('/update-status.json', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (s) {
+        if (!s || !s.stage) return;
+        if (['installing', 'restarting', 'validating', 'preparing', 'verifying'].indexOf(s.stage) >= 0) {
+          title.textContent = 'Atlas is installing an update';
+          detail.textContent = (s.label || 'Installing') + (s.version ? ' — Atlas ' + s.version : '');
+          warn.textContent = 'Do not power off Atlas.';
+        } else if (s.stage === 'rolling_back') {
+          title.textContent = 'Restoring the previous version';
+          warn.textContent = 'Do not power off Atlas.';
+        }
+      }).catch(function () {});
+  }
+  function check() {
+    fetch('/api/health', { cache: 'no-store' }).then(function (r) {
+      if (r.ok) { window.location.reload(); }
+    }).catch(function () {});
+  }
+  status(); setInterval(status, 3000); setInterval(check, 3000);
+})();
+</script>
+</body>
+</html>

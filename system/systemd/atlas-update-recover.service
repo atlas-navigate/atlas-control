@@ -1,0 +1,16 @@
+# Managed by the Atlas updater. Runs at every boot before Atlas starts and
+# after any engine failure: finishes or undoes an interrupted update.
+[Unit]
+Description=Atlas update recovery
+After=local-fs.target
+Before=atlas-control.service nginx.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/atlas/bin/atlas-engine recover
+Environment=ATLAS_STATE_DIR=@ATLAS_STATE_DIR@
+TimeoutStartSec=600
+UMask=0022
+
+[Install]
+WantedBy=multi-user.target

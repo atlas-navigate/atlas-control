@@ -1,0 +1,15 @@
+# Managed by the Atlas updater. One instance per helper connection.
+[Unit]
+Description=Atlas privileged helper request
+CollectMode=inactive-or-failed
+
+[Service]
+ExecStart=/usr/local/lib/atlas/bin/atlas-helper
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+Environment=ATLAS_STATE_DIR=@ATLAS_STATE_DIR@
+RuntimeMaxSec=120
+NoNewPrivileges=yes
+ProtectHome=yes
+PrivateTmp=yes

@@ -132,7 +132,8 @@ def validate(spec, changed, runner):
             if r.returncode != 0:
                 raise SystemFilesError(f"unit {os.path.basename(dst)} invalid: {(r.stderr or r.stdout).strip()[-400:]}")
         elif kind == "nft":
-            r = runner.run(["nft", "-c", "-f", dst], timeout=60)
+            from . import firewall
+            r = firewall.check(dst, runner)
             if r.returncode != 0:
                 raise SystemFilesError("firewall rules invalid: " + (r.stderr or r.stdout).strip()[-400:])
         elif kind == "udev":

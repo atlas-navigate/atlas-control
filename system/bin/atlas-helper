@@ -1,0 +1,28 @@
+#!/usr/bin/python3 -I
+"""atlas-helper — loads the installed engine (engine/current, falling back to
+engine/previous) from root-owned /usr/local/lib/atlas and runs it. Runs with
+-I: no PYTHONPATH, no user site, no script directory on sys.path."""
+import os
+import sys
+
+LIB = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+
+
+def _load():
+    for name in ("current", "previous"):
+        path = os.path.realpath(os.path.join(LIB, "engine", name))
+        if not os.path.isdir(os.path.join(path, "atlas_engine")):
+            continue
+        sys.path.insert(0, path)
+        try:
+            from atlas_engine import cli
+            return cli
+        except Exception as exc:  # broken engine: try the previous one
+            print(f"atlas-helper: engine at {path} unusable: {exc}", file=sys.stderr)
+            sys.path.remove(path)
+            for mod in [m for m in sys.modules if m.startswith("atlas_engine")]:
+                del sys.modules[mod]
+    sys.exit("atlas-helper: no usable engine installed")
+
+
+sys.exit(_load().helper_main(sys.argv[1:]))

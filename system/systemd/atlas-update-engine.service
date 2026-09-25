@@ -1,0 +1,16 @@
+# Managed by the Atlas updater. Installs verified releases; started by the
+# helper (update.apply) or by boot recovery to finish an interrupted update.
+[Unit]
+Description=Atlas software update engine
+After=atlas-control.service
+OnFailure=atlas-update-recover.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/atlas/bin/atlas-engine run
+Environment=ATLAS_STATE_DIR=@ATLAS_STATE_DIR@
+TimeoutStartSec=3600
+UMask=0022
+Nice=5
+ProtectHome=yes
+PrivateTmp=yes

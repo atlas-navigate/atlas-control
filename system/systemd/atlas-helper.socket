@@ -1,0 +1,16 @@
+# Managed by the Atlas updater. The Atlas app's only path to root.
+[Unit]
+Description=Atlas privileged helper socket
+
+[Socket]
+ListenStream=/run/atlas/helper.sock
+SocketUser=root
+SocketGroup=@ATLAS_SERVICE_USER@
+SocketMode=0660
+DirectoryMode=0755
+Accept=yes
+MaxConnections=16
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

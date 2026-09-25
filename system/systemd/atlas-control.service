@@ -1,0 +1,36 @@
+# Managed by the Atlas updater — replaced on every update.
+[Unit]
+Description=Atlas
+Wants=network-online.target nginx.service ollama.service atlas-helper.socket
+After=network-online.target bluetooth.service ollama.service atlas-update-recover.service atlas-firstboot.service
+
+[Service]
+Type=simple
+User=@ATLAS_SERVICE_USER@
+Group=@ATLAS_SERVICE_USER@
+SupplementaryGroups=dialout i2c gpio bluetooth
+Environment=ATLAS_STATE_DIR=@ATLAS_STATE_DIR@
+Environment=ATLAS_BIND=127.0.0.1
+Environment=PYTHONUNBUFFERED=1
+Environment=ATLAS_UPS_I2C_BUS=7
+Environment=ATLAS_UPS_I2C_ADDR=0x41
+ExecStart=/usr/local/lib/atlas/bin/atlas-launch
+Restart=always
+RestartSec=5
+UMask=0027
+StateDirectory=atlas
+CacheDirectory=atlas
+# The app reaches root only through atlas-helper; it never needs privileges.
+NoNewPrivileges=yes
+RestrictSUIDSGID=yes
+ProtectSystem=strict
+ReadWritePaths=-@ATLAS_STATE_DIR@/data -@ATLAS_STATE_DIR@/logs -@ATLAS_STATE_DIR@/updates -@ATLAS_STATE_DIR@/cache
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target
