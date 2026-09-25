@@ -16,11 +16,12 @@ failed or interrupted run can simply be re-run):
   engine      /usr/local/lib/atlas: engine, trusted keys (+ developer key)
   identity    /etc/atlas/identity in "adopt" mode: keeps hostname and a
               non-default hotspot password, new per-device TLS key
-  state       data/ logs/ updates/ cache/ owned by atlas; datasets stay
-              read-only; WAL datasets switched to a read-only-friendly mode
   release     the bundle installed as /opt/atlas/releases/<version>
-  cutover     new units/nginx/udev installed and validated, sudo rules and
-              the old update launcher removed, services restarted
+  cutover     Atlas stopped; data/ logs/ updates/ cache/ handed to atlas
+              (datasets stay read-only, WAL datasets switched to a
+              read-only-friendly mode); new units/nginx/udev installed and
+              validated; sudo rules and the old update launcher removed;
+              services restarted
   verify      health check of the running release; any failure rolls back
 
 rollback restores every backed-up file, ownership and the old service,
@@ -237,7 +238,7 @@ def step_identity(state, args):
     mark(state, "identity", hotspot_rotated=rotated)
 
 
-def step_state(state, args):
+def handoff_state(state):
     user = paths.SERVICE_USER
     uid, gid = pwd.getpwnam(user).pw_uid, grp.getgrnam(user).gr_gid
     for rel in WRITABLE_STATE:
@@ -266,7 +267,6 @@ def step_state(state, args):
         if os.path.exists(p):
             os.chmod(p, 0o600)
     say("state directories handed to the service account")
-    mark(state, "state")
 
 
 def convert_wal_datasets(state):
@@ -307,7 +307,9 @@ def step_release(state, args):
 
 def step_cutover(state, args):
     target = state["target"]
+    # With the old service stopped nothing holds the database or datasets.
     RUNNER.run(["systemctl", "stop", "atlas-control.service"], timeout=120)
+    handoff_state(state)
     convert_wal_datasets(state)
     changed = sysfiles.install(target, SYSBACKUP, RUNNER)
     for path in REMOVED_AT_CUTOVER:
@@ -352,8 +354,7 @@ def step_verify(state, args):
 
 
 STEPS = [("preflight", step_preflight), ("backup", step_backup), ("user", step_user),
-         ("engine", step_engine), ("identity", step_identity), ("state", step_state),
-         ("release", step_release), ("cutover", step_cutover), ("verify", step_verify)]
+         ("engine", step_engine), ("identity", step_identity), ("release", step_release), ("cutover", step_cutover), ("verify", step_verify)]
 
 
 def apply(args):
