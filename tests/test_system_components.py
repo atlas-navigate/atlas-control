@@ -140,16 +140,51 @@ class FirewallTests(unittest.TestCase):
         self.addCleanup(self.sb.cleanup)
         from atlas_engine import firewall
         self.firewall = firewall
-        self.template = os.path.join(REPO, "system", "nftables", "atlas.nft")
+        self.policy = firewall.load_policy(os.path.join(REPO, "system", "firewall", "policy.json"))
 
-    def test_ssh_closed_unless_dev_mode(self):
-        self.assertNotIn("tcp dport 22 accept", self.firewall.render(self.template))
-        os.makedirs(os.path.dirname(self.sb.paths.DEV_MODE_FLAG), exist_ok=True)
-        open(self.sb.paths.DEV_MODE_FLAG, "w").close()
-        self.assertIn("tcp dport 22 accept", self.firewall.render(self.template))
+    def test_uses_only_features_the_jetson_kernel_has(self):
+        # No native nft ct/reject (CONFIG_NFT_CT / CONFIG_NFT_REJECT are off on
+        # the Tegra kernel); conntrack and REJECT come from xtables.
+        v4 = self.firewall.render_iptables(self.policy, dev=False)
+        self.assertIn("-m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT", v4)
+        self.assertIn("-j REJECT --reject-with tcp-reset", v4)
+        local = self.firewall.render_nft_local(self.policy)
+        self.assertNotIn(" ct ", local)
+        self.assertNotIn("reject", local)
+        self.assertIn("meta skuid", local)
 
-    def test_all_placeholders_filled(self):
-        self.assertNotIn("@", self.firewall.render(self.template))
+    def test_ssh_and_docker_only_on_developer_units(self):
+        retail = self.firewall.render_iptables(self.policy, dev=False)
+        dev = self.firewall.render_iptables(self.policy, dev=True)
+        self.assertNotIn(",22", retail)
+        self.assertNotIn("docker0", retail)
+        self.assertIn("--dports 80,443,53,22", dev)
+        self.assertIn("-i docker0 -j ACCEPT", dev)
+
+    def test_ipv6_keeps_neighbour_discovery(self):
+        v6 = self.firewall.render_iptables(self.policy, ipv6=True, dev=False)
+        self.assertIn("-p ipv6-icmp -j ACCEPT", v6)
+        self.assertIn("546", v6)
+
+    def test_chain_is_jumped_to_first_and_ends_closed(self):
+        v4 = self.firewall.render_iptables(self.policy, dev=False).splitlines()
+        self.assertIn("-I INPUT 1 -j ATLAS-INPUT", v4)
+        rules = [l for l in v4 if l.startswith("-A ATLAS-INPUT")]
+        self.assertEqual(rules[-1], "-A ATLAS-INPUT -j DROP")
+
+    def test_invalid_rules_block_install_only_when_the_firewall_is_on(self):
+        from atlas_engine import sysfiles
+        runner = mock.Mock()
+        runner.run.side_effect = lambda cmd, **kw: mock.Mock(
+            returncode=1 if "restore" in cmd[0] else 0, stdout="disabled", stderr="bad rule")
+        spec = {"files": [{"src": "firewall/policy.json", "dst": "/etc/atlas/firewall.json", "kind": "firewall"}],
+                "enable": []}
+        os.makedirs(self.sb.paths.p("/etc/atlas"), exist_ok=True)
+        shutil.copy(os.path.join(REPO, "system", "firewall", "policy.json"), self.sb.paths.p("/etc/atlas/firewall.json"))
+        sysfiles.validate(spec, {"firewall"}, runner)                     # off: warning only
+        spec["enable"] = ["atlas-firewall.service"]
+        with self.assertRaises(sysfiles.SystemFilesError):
+            sysfiles.validate(spec, {"firewall"}, runner)
 
 
 class RealSystemFilesTests(unittest.TestCase):

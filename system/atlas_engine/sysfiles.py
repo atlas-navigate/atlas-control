@@ -24,7 +24,7 @@ KINDS_RELOAD = {
     "systemd": [["systemctl", "daemon-reload"]],
     "nginx": [["systemctl", "reload-or-restart", "nginx"]],
     "udev": [["udevadm", "control", "--reload"], ["udevadm", "trigger", "--subsystem-match=tty"]],
-    "nft": [["systemctl", "try-restart", "atlas-firewall.service"]],
+    "firewall": [["systemctl", "try-restart", "atlas-firewall.service"]],
     "avahi": [["systemctl", "try-reload-or-restart", "avahi-daemon"]],
 }
 
@@ -131,11 +131,16 @@ def validate(spec, changed, runner):
             r = runner.run(["systemd-analyze", "verify", "--man=no", dst], timeout=60)
             if r.returncode != 0:
                 raise SystemFilesError(f"unit {os.path.basename(dst)} invalid: {(r.stderr or r.stdout).strip()[-400:]}")
-        elif kind == "nft":
+        elif kind == "firewall":
             from . import firewall
             r = firewall.check(dst, runner)
             if r.returncode != 0:
-                raise SystemFilesError("firewall rules invalid: " + (r.stderr or r.stdout).strip()[-400:])
+                message = "firewall rules invalid: " + (r.stderr or r.stdout).strip()[-400:]
+                # Rules for a firewall that is switched off cannot lock anyone
+                # out; report them, but only block the install once it is on.
+                if firewall.enabled(runner) or "atlas-firewall.service" in spec.get("enable", []):
+                    raise SystemFilesError(message)
+                print(f"atlas-engine: warning: {message}", flush=True)
         elif kind == "udev":
             r = runner.run(["udevadm", "verify", dst], timeout=60)
             if r.returncode != 0:

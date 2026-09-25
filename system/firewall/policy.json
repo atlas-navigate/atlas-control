@@ -1,0 +1,11 @@
+{
+  "comment": "Managed by the Atlas updater. What Atlas accepts from the network; everything else is refused. Rendered to iptables-nft rules (the Jetson kernel provides connection tracking and REJECT only through xtables) by atlas-engine firewall-up.",
+  "tcp": [80, 443, 53],
+  "udp": [5353, 5050, 53, 67, 68],
+  "udp6": [5353, 5050, 53, 546, 547],
+  "trusted_interfaces": ["l4tbr0"],
+  "dev_tcp": [22],
+  "dev_trusted_interfaces": ["docker0"],
+  "app_port": 5000,
+  "app_port_users": ["root", "www-data", "atlas"]
+}

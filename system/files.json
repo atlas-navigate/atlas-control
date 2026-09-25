@@ -1,25 +1,125 @@
 {
   "files": [
-    {"src": "systemd/atlas-control.service", "dst": "/etc/systemd/system/atlas-control.service", "mode": "0644", "kind": "systemd", "template": true},
-    {"src": "systemd/atlas-helper.socket", "dst": "/etc/systemd/system/atlas-helper.socket", "mode": "0644", "kind": "systemd", "template": true},
-    {"src": "systemd/atlas-helper@.service", "dst": "/etc/systemd/system/atlas-helper@.service", "mode": "0644", "kind": "systemd", "template": true},
-    {"src": "systemd/atlas-update-engine.service", "dst": "/etc/systemd/system/atlas-update-engine.service", "mode": "0644", "kind": "systemd", "template": true},
-    {"src": "systemd/atlas-update-recover.service", "dst": "/etc/systemd/system/atlas-update-recover.service", "mode": "0644", "kind": "systemd", "template": true},
-    {"src": "systemd/atlas-firstboot.service", "dst": "/etc/systemd/system/atlas-firstboot.service", "mode": "0644", "kind": "systemd"},
-    {"src": "systemd/atlas-firewall.service", "dst": "/etc/systemd/system/atlas-firewall.service", "mode": "0644", "kind": "systemd"},
-    {"src": "nginx/atlas-proxy.conf", "dst": "/etc/nginx/snippets/atlas-proxy.conf", "mode": "0644", "kind": "nginx", "template": true},
-    {"src": "nginx/atlas-headers.conf", "dst": "/etc/nginx/snippets/atlas-headers.conf", "mode": "0644", "kind": "nginx"},
-    {"src": "nginx/atlas.conf", "dst": "/etc/nginx/sites-available/atlas", "mode": "0644", "kind": "nginx", "template": true},
-    {"src": "www/updating.html", "dst": "/usr/local/lib/atlas/www/updating.html", "mode": "0644", "kind": "plain"},
-    {"src": "nftables/atlas.nft", "dst": "/etc/atlas/nftables.nft", "mode": "0644", "kind": "nft"},
-    {"src": "udev/99-atlas-devices.rules", "dst": "/etc/udev/rules.d/99-atlas-devices.rules", "mode": "0644", "kind": "udev"},
-    {"src": "bin/atlas-launch", "dst": "/usr/local/lib/atlas/bin/atlas-launch", "mode": "0755", "kind": "plain"},
-    {"src": "bin/atlas-engine", "dst": "/usr/local/lib/atlas/bin/atlas-engine", "mode": "0755", "kind": "plain"},
-    {"src": "bin/atlas-helper", "dst": "/usr/local/lib/atlas/bin/atlas-helper", "mode": "0755", "kind": "plain"},
-    {"src": "bin/atlas-identity", "dst": "/usr/local/lib/atlas/bin/atlas-identity", "mode": "0755", "kind": "plain"}
+    {
+      "src": "systemd/atlas-control.service",
+      "dst": "/etc/systemd/system/atlas-control.service",
+      "mode": "0644",
+      "kind": "systemd",
+      "template": true
+    },
+    {
+      "src": "systemd/atlas-helper.socket",
+      "dst": "/etc/systemd/system/atlas-helper.socket",
+      "mode": "0644",
+      "kind": "systemd",
+      "template": true
+    },
+    {
+      "src": "systemd/atlas-helper@.service",
+      "dst": "/etc/systemd/system/atlas-helper@.service",
+      "mode": "0644",
+      "kind": "systemd",
+      "template": true
+    },
+    {
+      "src": "systemd/atlas-update-engine.service",
+      "dst": "/etc/systemd/system/atlas-update-engine.service",
+      "mode": "0644",
+      "kind": "systemd",
+      "template": true
+    },
+    {
+      "src": "systemd/atlas-update-recover.service",
+      "dst": "/etc/systemd/system/atlas-update-recover.service",
+      "mode": "0644",
+      "kind": "systemd",
+      "template": true
+    },
+    {
+      "src": "systemd/atlas-firstboot.service",
+      "dst": "/etc/systemd/system/atlas-firstboot.service",
+      "mode": "0644",
+      "kind": "systemd"
+    },
+    {
+      "src": "systemd/atlas-firewall.service",
+      "dst": "/etc/systemd/system/atlas-firewall.service",
+      "mode": "0644",
+      "kind": "systemd"
+    },
+    {
+      "src": "nginx/atlas-proxy.conf",
+      "dst": "/etc/nginx/snippets/atlas-proxy.conf",
+      "mode": "0644",
+      "kind": "nginx",
+      "template": true
+    },
+    {
+      "src": "nginx/atlas-headers.conf",
+      "dst": "/etc/nginx/snippets/atlas-headers.conf",
+      "mode": "0644",
+      "kind": "nginx"
+    },
+    {
+      "src": "nginx/atlas.conf",
+      "dst": "/etc/nginx/sites-available/atlas",
+      "mode": "0644",
+      "kind": "nginx",
+      "template": true
+    },
+    {
+      "src": "www/updating.html",
+      "dst": "/usr/local/lib/atlas/www/updating.html",
+      "mode": "0644",
+      "kind": "plain"
+    },
+    {
+      "src": "firewall/policy.json",
+      "dst": "/etc/atlas/firewall.json",
+      "mode": "0644",
+      "kind": "firewall"
+    },
+    {
+      "src": "udev/99-atlas-devices.rules",
+      "dst": "/etc/udev/rules.d/99-atlas-devices.rules",
+      "mode": "0644",
+      "kind": "udev"
+    },
+    {
+      "src": "bin/atlas-launch",
+      "dst": "/usr/local/lib/atlas/bin/atlas-launch",
+      "mode": "0755",
+      "kind": "plain"
+    },
+    {
+      "src": "bin/atlas-engine",
+      "dst": "/usr/local/lib/atlas/bin/atlas-engine",
+      "mode": "0755",
+      "kind": "plain"
+    },
+    {
+      "src": "bin/atlas-helper",
+      "dst": "/usr/local/lib/atlas/bin/atlas-helper",
+      "mode": "0755",
+      "kind": "plain"
+    },
+    {
+      "src": "bin/atlas-identity",
+      "dst": "/usr/local/lib/atlas/bin/atlas-identity",
+      "mode": "0755",
+      "kind": "plain"
+    }
   ],
   "symlinks": [
-    {"link": "/etc/nginx/sites-enabled/atlas", "target": "/etc/nginx/sites-available/atlas"}
+    {
+      "link": "/etc/nginx/sites-enabled/atlas",
+      "target": "/etc/nginx/sites-available/atlas"
+    }
   ],
-  "enable": ["atlas-helper.socket", "atlas-update-recover.service", "atlas-firstboot.service", "atlas-control.service"]
+  "enable": [
+    "atlas-helper.socket",
+    "atlas-update-recover.service",
+    "atlas-firstboot.service",
+    "atlas-control.service"
+  ]
 }
