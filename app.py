@@ -98,7 +98,8 @@ import meshtastic.util
 from mesh_manager import MeshManager
 from gps_node import GpsNode as GpsManager      # ground-up rewrite with UBX + Kalman + self-DR
 from ai_manager import (AIManager, reverse_geocode, geocoder_status,
-                        _CAT_STOPWORDS, _detect_category)
+                        _CAT_STOPWORDS, _detect_category,
+                        available_ram_mb as _available_ram_mb, _ROUTING_MIN_FREE_MB)
 from routing_node import RoutingNode, STATE_BBOX as _STATE_BBOX
 from navigation_node import NavigationNode
 from mobile_bridge import AtlasMobileBridge
@@ -2530,11 +2531,13 @@ def api_nav_start():
     unloaded_ray = False
     if ai_manager:
         try:
-            free_mb = ai_manager.available_ram_mb()
-            if free_mb is not None and free_mb < ai_manager._ROUTING_MIN_FREE_MB:
+            # Module-level helpers: the instance has neither, and calling them
+            # on it raised AttributeError, which kept this valve shut forever.
+            free_mb = _available_ram_mb()
+            if free_mb is not None and free_mb < _ROUTING_MIN_FREE_MB:
                 logger.warning(
                     f"Only {free_mb:.0f} MB RAM available (< "
-                    f"{ai_manager._ROUTING_MIN_FREE_MB} MB) — unloading Ray so the "
+                    f"{_ROUTING_MIN_FREE_MB} MB) — unloading Ray so the "
                     f"OSRM cold start can succeed; it reloads when navigation ends.")
                 ai_manager.unload_all()
                 unloaded_ray = True

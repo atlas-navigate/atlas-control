@@ -18,7 +18,7 @@ CACHE_TTL = 5  # seconds
 
 _disk_io_prev = {"data": None, "ts": 0.0}
 _smart_cache = {"data": {}, "ts": 0.0}
-SMART_TTL = 60  # seconds
+SMART_TTL = 600  # seconds — drive health changes slowly; each read wakes the root helper
 
 
 def parse_tegrastats(line):
@@ -77,25 +77,79 @@ def parse_tegrastats(line):
     return result
 
 
-def _run_tegrastats():
-    """Run tegrastats, capture first line, kill process."""
-    try:
-        proc = subprocess.Popen(
-            ['tegrastats'],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True
-        )
-        line = proc.stdout.readline()
-        proc.terminate()
+class TegraStatsReader:
+    """One long-running `tegrastats` whose latest line is always at hand.
+
+    Starting tegrastats for every refresh cost a process spawn plus up to a
+    second of waiting each time. This keeps one running while anyone is
+    looking at stats and stops it after IDLE_STOP_S without a reader, so an
+    idle Atlas spends nothing on it. Runs in a native thread (subprocess
+    and readline block)."""
+
+    INTERVAL_MS = 1000
+    IDLE_STOP_S = 120
+    STALE_S = 10
+
+    def __init__(self, command=("tegrastats",)):
+        self.command = list(command)
+        self._lock = threading.Lock()
+        self._latest = {}
+        self._latest_ts = 0.0
+        self._last_read = 0.0
+        self._thread = None
+        self._first_line = threading.Event()
+        self._unavailable_until = 0.0
+
+    def latest(self, wait=1.5):
+        """Most recent parsed sample ({} when tegrastats is unavailable)."""
+        now = time.monotonic()
+        with self._lock:
+            self._last_read = now
+            running = self._thread is not None and self._thread.is_alive()
+            if not running and now >= self._unavailable_until:
+                self._first_line.clear()
+                self._thread = threading.Thread(target=self._run, name="tegrastats", daemon=True)
+                self._thread.start()
+                running = True
+        if running and wait and time.monotonic() - self._latest_ts >= self.STALE_S:
+            self._first_line.wait(wait)
+        with self._lock:
+            fresh = time.monotonic() - self._latest_ts < self.STALE_S
+            return dict(self._latest) if fresh else {}
+
+    def _run(self):
         try:
-            proc.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-        return parse_tegrastats(line)
-    except Exception as e:
-        logger.debug(f"tegrastats error: {e}")
-        return {}
+            proc = subprocess.Popen(self.command + ["--interval", str(self.INTERVAL_MS)],
+                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        except OSError as e:
+            logger.debug(f"tegrastats unavailable: {e}")
+            with self._lock:
+                self._unavailable_until = time.monotonic() + 300
+            self._first_line.set()
+            return
+        try:
+            for line in proc.stdout:
+                parsed = parse_tegrastats(line)
+                with self._lock:
+                    if parsed:
+                        self._latest, self._latest_ts = parsed, time.monotonic()
+                    idle = time.monotonic() - self._last_read > self.IDLE_STOP_S
+                self._first_line.set()
+                if idle:
+                    break
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            with self._lock:
+                if proc.returncode not in (0, -15, None) and not self._latest:
+                    self._unavailable_until = time.monotonic() + 60
+            self._first_line.set()
+
+
+_tegrastats = TegraStatsReader()
 
 
 def _get_disk_extended():
@@ -184,10 +238,11 @@ def get_stats():
     try:
         import psutil
 
-        tegra = _run_tegrastats()
+        tegra = _tegrastats.latest()
 
-        # CPU — use psutil per-core if tegrastats didn't get it
-        cpu_percents = psutil.cpu_percent(interval=0.1, percpu=True)
+        # CPU — use psutil per-core if tegrastats didn't get it. interval=None
+        # compares with the previous call instead of sleeping for a sample.
+        cpu_percents = psutil.cpu_percent(interval=None, percpu=True)
         cpu_freq = psutil.cpu_freq(percpu=True) or []
 
         if 'cpu_cores' not in tegra:
