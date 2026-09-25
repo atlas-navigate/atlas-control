@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Build this checkout as a developer release and install it on this Atlas
+# through the real update engine (signed with the developer key, which only
+# units with /etc/atlas/dev-mode trust).
+#
+#   tools/dev/deploy [VERSION]          default: <VERSION>-dev.<UTC timestamp>
+#
+# Needs: membership of the `atlas` group (log in again after migration),
+# ~/.config/atlas-dev/dev-release.key (tools/release/keygen.py --dev).
+set -euo pipefail
+REPO=$(cd "$(dirname "$0")/../.." && pwd)
+PY=${ATLAS_BUILD_PYTHON:-/atlas_data/atlas-control/venv/bin/python3}
+STATE=${ATLAS_STATE_DIR:-/atlas_data/atlas-control}
+KEY=${ATLAS_DEV_KEY:-$HOME/.config/atlas-dev/dev-release.key}
+VERSION=${1:-$(cat "$REPO/VERSION")-dev.$(date -u +%Y%m%d%H%M%S)}
+
+id -nG | tr ' ' '\n' | grep -qx atlas || { echo "not in the atlas group yet: log in again (or run: sg atlas -c '$0 $*')" >&2; exit 1; }
+[ -f "$KEY" ] || { echo "no developer key at $KEY (tools/release/keygen.py --out ${KEY%.key} --dev)" >&2; exit 1; }
+
+OUT=$(mktemp -d)
+trap 'rm -rf "$OUT"' EXIT
+"$PY" "$REPO/tools/release/build_release.py" --version "$VERSION" --ref WORKTREE --channel dev \
+      --out "$OUT" --python "$PY" --url-base https://localhost/dev
+"$PY" "$REPO/tools/release/sign_release.py" "$OUT/$VERSION/atlas-release.json" --key "$KEY" --yes
+
+READY="$STATE/updates/ready"
+rm -f "$READY"/* 2>/dev/null || true
+cp "$OUT/$VERSION"/* "$READY/"
+chmod g+r "$READY"/*
+
+/usr/bin/python3 -I - <<'PY'
+import json, socket, sys, time
+s = socket.socket(socket.AF_UNIX)
+s.connect("/run/atlas/helper.sock")
+s.sendall(b'{"verb": "update.apply", "args": {}}\n')
+print("apply:", s.recv(4096).decode().strip())
+last = None
+for _ in range(900):
+    try:
+        st = json.load(open("/run/atlas-update/status.json"))
+    except Exception:
+        st = {}
+    line = f"{st.get('engine_state')} {st.get('stage')} {st.get('message') or ''}"
+    if line != last:
+        print("  ", line)
+        last = line
+    if st.get("engine_state") == "IDLE" and st.get("stage") in ("success", "rolled_back", "failed", "cancelled", "interrupted"):
+        sys.exit(0 if st["stage"] == "success" else 1)
+    time.sleep(1)
+sys.exit("timed out waiting for the update engine")
+PY

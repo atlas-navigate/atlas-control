@@ -1,0 +1,7 @@
+#!/bin/sh
+# Move this Atlas onto the hardened layout (or back). See migrate.py.
+#   sudo tools/migrate/atlas-migrate apply --bundle DIR [--dev-key PUB] [--rotate-hotspot]
+#   sudo tools/migrate/atlas-migrate rollback [--purge]
+set -eu
+HERE=$(cd "$(dirname "$0")" && pwd)
+exec /usr/bin/python3 -I "$HERE/migrate.py" "$@"
