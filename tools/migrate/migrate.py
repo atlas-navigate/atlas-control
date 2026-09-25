@@ -7,8 +7,9 @@ Move an existing (pre-release) Atlas onto the hardened layout — or back.
 apply, in order (each step is recorded and skipped if already done, so a
 failed or interrupted run can simply be re-run):
 
-  preflight   platform, free space, nginx config, database integrity, and the
-              release bundle's signature
+  preflight   platform, free space, nginx config, database integrity, the
+              release bundle's signature, and that this kernel can load the
+              release's firewall rules
   backup      every system file this touches, owners/modes of state paths and
               a consistent copy of the database, under /var/lib/atlas-migrate
   user        the unprivileged `atlas` service account (admin joins its group
@@ -139,7 +140,29 @@ def step_preflight(state, args):
     if verify.verify_bundle_file(bundle_path, manifest["bundle"]) is not None:
         raise SystemExit("release bundle does not match its signed manifest")
     say(f"release {manifest['version']} (seq {manifest['seq']}) signed by {kid}: OK")
+    preflight_firewall(bundle_path)
     mark(state, "preflight", manifest=manifest, bundle=bundle_path, legacy_owner=legacy_owner())
+
+
+def preflight_firewall(bundle_path):
+    """Load the release's firewall rules into this kernel — without them
+    taking effect — before anything is changed. (The first migration of a
+    real unit only found out at cutover that the kernel lacked the nftables
+    features the rules used.)"""
+    import tarfile
+    import tempfile
+    from atlas_engine import firewall
+    with tempfile.TemporaryDirectory(prefix="atlas-preflight-") as tmp:
+        with tarfile.open(bundle_path, "r:xz") as tar:
+            members = [m for m in tar.getmembers() if m.name == "system/firewall/policy.json"]
+            if not members:
+                raise SystemExit("the release bundle has no firewall policy")
+            tar.extractall(tmp, members=members, filter="data")
+        r = firewall.check(os.path.join(tmp, "system", "firewall", "policy.json"), RUNNER)
+    if r.returncode != 0:
+        raise SystemExit("this kernel cannot load the release's firewall rules; nothing was changed:\n"
+                         + (r.stderr or r.stdout).strip()[-600:])
+    say("firewall rules load on this kernel: OK")
 
 
 def step_backup(state, args):

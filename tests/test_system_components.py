@@ -172,6 +172,26 @@ class FirewallTests(unittest.TestCase):
         rules = [l for l in v4 if l.startswith("-A ATLAS-INPUT")]
         self.assertEqual(rules[-1], "-A ATLAS-INPUT -j DROP")
 
+    def test_check_loads_rules_into_an_unhooked_probe_chain_and_removes_it(self):
+        from engine_sandbox import FakeRunner
+        runner = FakeRunner()
+        inputs = []
+        original = runner.run
+        runner.run = lambda cmd, timeout=120, input=None, **kw: (inputs.append((cmd[0], input)),
+                                                                   original(cmd, timeout, input, **kw))[1]
+        path = os.path.join(REPO, "system", "firewall", "policy.json")
+        self.assertEqual(self.firewall.check(path, runner).returncode, 0)
+        restores = [text for tool, text in inputs if tool.endswith("-restore")]
+        self.assertEqual(len(restores), 2)                              # IPv4 and IPv6, really committed
+        for text in restores:
+            self.assertIn(":ATLAS-PROBE - [0:0]", text)
+            self.assertNotIn("-I INPUT", text)                          # nothing jumps to it
+            self.assertNotIn("ATLAS-INPUT", text)
+        self.assertFalse(any("--test" in c for c in runner.calls))
+        for tool in ("iptables-nft", "ip6tables-nft"):
+            self.assertEqual(runner.calls.count([tool, "-X", "ATLAS-PROBE"]), 2)   # cleared before and after
+        self.assertTrue(runner.ran("nft", "-c", "-f"))
+
     def test_invalid_rules_block_install_only_when_the_firewall_is_on(self):
         from atlas_engine import sysfiles
         runner = mock.Mock()

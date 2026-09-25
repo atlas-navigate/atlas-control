@@ -21,6 +21,7 @@ import subprocess
 from . import fsutil, paths
 
 CHAIN = "ATLAS-INPUT"
+PROBE_CHAIN = "ATLAS-PROBE"
 LOCAL_TABLE = "atlas_local"
 
 
@@ -41,31 +42,34 @@ def _ports(ports):
     return ",".join(str(int(p)) for p in ports)
 
 
-def render_iptables(policy, ipv6=False, dev=None):
+def render_iptables(policy, ipv6=False, dev=None, chain=CHAIN, hook=True):
+    """iptables-restore input for the inbound chain. hook=False leaves out
+    the jump from INPUT, so the rules exist without affecting traffic."""
     dev = paths.dev_mode() if dev is None else dev
     icmp = "ipv6-icmp" if ipv6 else "icmp"
     udp = policy.get("udp6" if ipv6 else "udp", policy.get("udp", []))
-    lines = ["*filter", f":{CHAIN} - [0:0]",
-             f"-A {CHAIN} -i lo -j ACCEPT",
-             f"-A {CHAIN} -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
-             f"-A {CHAIN} -m conntrack --ctstate INVALID -j DROP",
-             f"-A {CHAIN} -p {icmp} -j ACCEPT"]
+    lines = ["*filter", f":{chain} - [0:0]",
+             f"-A {chain} -i lo -j ACCEPT",
+             f"-A {chain} -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
+             f"-A {chain} -m conntrack --ctstate INVALID -j DROP",
+             f"-A {chain} -p {icmp} -j ACCEPT"]
     ifaces = list(policy.get("trusted_interfaces", []))
     if dev:
         ifaces += policy.get("dev_trusted_interfaces", [])
     for iface in ifaces:
-        lines.append(f"-A {CHAIN} -i {iface} -j ACCEPT")
+        lines.append(f"-A {chain} -i {iface} -j ACCEPT")
     tcp = list(policy.get("tcp", []))
     if dev:
         tcp += policy.get("dev_tcp", [])
     if tcp:
-        lines.append(f"-A {CHAIN} -p tcp -m multiport --dports {_ports(tcp)} -j ACCEPT")
+        lines.append(f"-A {chain} -p tcp -m multiport --dports {_ports(tcp)} -j ACCEPT")
     if udp:
-        lines.append(f"-A {CHAIN} -p udp -m multiport --dports {_ports(udp)} -j ACCEPT")
-    lines += [f"-A {CHAIN} -p tcp -j REJECT --reject-with tcp-reset",
-              f"-A {CHAIN} -j DROP",
-              f"-I INPUT 1 -j {CHAIN}",
-              "COMMIT", ""]
+        lines.append(f"-A {chain} -p udp -m multiport --dports {_ports(udp)} -j ACCEPT")
+    lines += [f"-A {chain} -p tcp -j REJECT --reject-with tcp-reset",
+              f"-A {chain} -j DROP"]
+    if hook:
+        lines.append(f"-I INPUT 1 -j {chain}")
+    lines += ["COMMIT", ""]
     return "\n".join(lines)
 
 
@@ -101,19 +105,32 @@ class CheckResult:
         self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
 
 
+def _drop_chain(runner, tool, chain):
+    runner.run([tool, "-F", chain], timeout=30)
+    runner.run([tool, "-X", chain], timeout=30)
+
+
 def check(policy_path, runner):
-    """Dry-run every generated ruleset against the running kernel."""
+    """Prove every generated ruleset loads in the *running kernel* without
+    it taking effect.
+
+    `iptables-nft-restore --test` only parses in userspace, so it cannot
+    tell whether the kernel can run a match or target. Instead the inbound
+    rules are committed into a probe chain that nothing jumps to (so no
+    packet ever reaches it) and removed again. The loopback table goes
+    through `nft -c`, which the kernel itself validates — the check that
+    caught the unsupported `ct`/`reject` on the Tegra kernel."""
     policy = load_policy(policy_path)
-    tests = [(["iptables-nft-restore", "--test", "--noflush"], render_iptables(policy)),
-             (["ip6tables-nft-restore", "--test", "--noflush"], render_iptables(policy, ipv6=True)),
-             (["nft", "-c", "-f"], render_nft_local(policy))]
-    for cmd, text in tests:
-        if cmd[0] == "nft":
-            r = runner.run(cmd + [_write("firewall-local.check", text)], timeout=60)
-        else:
-            r = runner.run(cmd, timeout=60, input=text)
+    for tool, v6 in (("iptables-nft", False), ("ip6tables-nft", True)):
+        _drop_chain(runner, tool, PROBE_CHAIN)
+        r = runner.run([f"{tool}-restore", "--noflush"], timeout=60,
+                       input=render_iptables(policy, ipv6=v6, chain=PROBE_CHAIN, hook=False))
+        _drop_chain(runner, tool, PROBE_CHAIN)
         if r.returncode != 0:
-            return CheckResult(r.returncode, r.stdout, f"{cmd[0]}: {(r.stderr or r.stdout).strip()}")
+            return CheckResult(r.returncode, r.stdout, f"{tool}-restore: {(r.stderr or r.stdout).strip()}")
+    r = runner.run(["nft", "-c", "-f", _write("firewall-local.check", render_nft_local(policy))], timeout=60)
+    if r.returncode != 0:
+        return CheckResult(r.returncode, r.stdout, f"nft: {(r.stderr or r.stdout).strip()}")
     return CheckResult(0)
 
 

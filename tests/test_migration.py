@@ -179,6 +179,19 @@ class MigrationRehearsal(unittest.TestCase):
         self.assertEqual(self.read("/etc/systemd/system/atlas-control.service"), LEGACY_UNIT)
         self.assertFalse(os.path.exists(self.sb.paths.OPT))
 
+    def test_firewall_the_kernel_cannot_load_stops_before_touching_anything(self):
+        failed = mock.Mock(returncode=1, stdout="", stderr="Could not process rule: No such file or directory")
+        with mock.patch("atlas_engine.firewall.check", return_value=failed) as check:
+            self.assertEqual(self.apply(), 1)
+        policy = check.call_args[0][0]
+        self.assertTrue(policy.endswith(os.path.join("system", "firewall", "policy.json")))
+        self.assertEqual(self.read("/etc/systemd/system/atlas-control.service"), LEGACY_UNIT)
+        self.assertTrue(os.path.exists(self.sb.paths.p("/etc/sudoers.d/atlas-update")))
+        self.assertFalse(os.path.exists(self.sb.paths.OPT))
+        self.assertFalse(os.path.exists(self.migrate.BACKUP))
+        self.assertNotIn("preflight", self.migrate.load_state()["done"])
+        self.assertEqual(self.apply(), 0)                  # fixed rules: the same command now succeeds
+
     def test_default_hotspot_password_is_replaced(self):
         with open(os.path.join(self.sb.app_state, "hotspot_config.json"), "w") as f:
             json.dump({"ssid": "Atlas-Hotspot", "password": "AtlasControl"}, f)
