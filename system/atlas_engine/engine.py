@@ -116,6 +116,9 @@ class Engine:
         self.fault = fault if fault is not None else (
             os.environ.get("ATLAS_ENGINE_FAULT", "") if paths.dev_mode() else "")
         self.execv = execv or os.execv
+        # Everything the engine creates is root-writable only, whatever the
+        # caller's umask was.
+        os.umask(0o022)
         self.log = log or (lambda msg: print(f"[atlas-engine] {msg}", file=sys.stderr, flush=True))
         self.j = None
 
@@ -413,11 +416,13 @@ class Engine:
         src = staging if os.path.isdir(staging) else self.target_dir()
         key = venvs.ensure_venv(src, self.runner)
         venvs.link_release(src, key)
+        strip_write_bits(os.path.join(paths.VENVS, key))
         self.j["to"]["venv"] = key
         if src == staging:
             self.runner.run(["/usr/bin/python3", "-m", "compileall", "-q", "-x", r"/(tests|mobile)/",
                              staging], timeout=900)
             shutil.rmtree(os.path.join(staging, "wheels"), ignore_errors=True)
+            strip_write_bits(staging)
             fsutil.atomic_write_bytes(os.path.join(staging, ".complete"),
                                       (self.j["to"]["version"] + "\n").encode())
             os.sync()
@@ -669,6 +674,18 @@ def ensure_current_is_complete(log):
             fsutil.atomic_symlink(os.path.relpath(os.path.realpath(fallback), paths.OPT), cur)
             log(f"current release was unusable; switched to {os.path.realpath(fallback)}")
             return
+
+
+def strip_write_bits(top):
+    """No file in a release or venv may be writable by anyone but its owner."""
+    for dirpath, dirnames, filenames in os.walk(top):
+        for name in [dirpath] + [os.path.join(dirpath, f) for f in filenames]:
+            try:
+                st = os.lstat(name)
+            except FileNotFoundError:
+                continue
+            if not os.path.islink(name) and st.st_mode & 0o022:
+                os.chmod(name, st.st_mode & ~0o022)
 
 
 def install_engine(system_dir, version, runner):

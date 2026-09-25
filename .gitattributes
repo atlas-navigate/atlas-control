@@ -1,0 +1,7 @@
+# Paths left out of release bundles (tools/release/build_release.py uses git archive).
+mobile/ export-ignore
+tests/ export-ignore
+dist/ export-ignore
+heltec-v4-pinmap.webp export-ignore
+.codex export-ignore
+.gitattributes export-ignore

@@ -64,3 +64,6 @@ hotspot_config.json
 # symlink — NOT the bundled OSRM profile library at osrm-profiles/lib/.
 /lib
 .atlas_installed
+
+# Release build output
+dist/
