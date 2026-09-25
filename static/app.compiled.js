@@ -522,19 +522,24 @@ function mdInline(text, kp) {
       if (close > i && text[close + 1] === '(') {
         const paren = text.indexOf(')', close + 2);
         if (paren > close) {
-          flush();
-          out.push( /*#__PURE__*/React.createElement("a", {
-            key: kp + 'l' + i,
-            href: text.slice(close + 2, paren).trim(),
-            target: "_blank",
-            rel: "noopener noreferrer",
-            style: {
-              color: 'var(--accent-green)',
-              textDecoration: 'underline'
-            }
-          }, text.slice(i + 1, close)));
-          i = paren + 1;
-          continue;
+          // Ray's Markdown is model-written: only http(s), same-origin paths and
+          // anchors become links; anything else stays plain text.
+          const href = window.atlasSafeHref ? window.atlasSafeHref(text.slice(close + 2, paren)) : null;
+          if (href) {
+            flush();
+            out.push( /*#__PURE__*/React.createElement("a", {
+              key: kp + 'l' + i,
+              href: href,
+              target: "_blank",
+              rel: "noopener noreferrer",
+              style: {
+                color: 'var(--accent-green)',
+                textDecoration: 'underline'
+              }
+            }, text.slice(i + 1, close)));
+            i = paren + 1;
+            continue;
+          }
         }
       }
     }
@@ -1056,7 +1061,9 @@ async function apiRequest(url, {
     var _body;
     const init = {
       method,
+      // X-Atlas-CSRF marks requests from Atlas's own pages (see atlas-safety.js).
       headers: {
+        'X-Atlas-CSRF': window.atlasCsrfToken ? window.atlasCsrfToken() : '1',
         ...headers
       },
       signal: controller.signal

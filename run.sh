@@ -12,7 +12,7 @@ fi
 
 # Default args
 PORT="AUTO"
-HOST="0.0.0.0"
+HOST="127.0.0.1"   # nginx fronts the network; see request_guard.py
 WEB_PORT=5000
 EXTRA_ARGS=""
 

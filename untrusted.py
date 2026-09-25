@@ -19,7 +19,7 @@ markers and role/INSTRUCTION prefixes.
 import re
 import secrets
 
-_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f  ‪-‮⁦-⁩]")
+_CONTROL = re.compile("[\\x00-\\x08\\x0b-\\x1f\\x7f-\\x9f\\u2028\\u2029\\u202a-\\u202e\\u2066-\\u2069]")
 _TEMPLATE_TOKEN = re.compile(r"<\|[^|<>]{0,64}\|>")
 _CALC_TAG = re.compile(r"\[\s*(calc)\s*:", re.I)
 _FENCE_MARK = re.compile(r"<{3,}|>{3,}")

@@ -22,7 +22,7 @@ class NeutralizeTests(unittest.TestCase):
         self.assertNotRegex(out, r"(?im)^\s*system\s*:")
 
     def test_single_line_and_length(self):
-        out = untrusted.neutralize("a\nb\r\n\tc‮d", max_len=5, single_line=True)
+        out = untrusted.neutralize("a\nb\r\n\tc\u202ed", max_len=5, single_line=True)
         self.assertNotIn("\n", out)
         self.assertLessEqual(len(out), 6)
 

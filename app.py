@@ -218,10 +218,6 @@ def _hiking_db_mtime(db_path):
 
 app.config["SECRET_KEY"] = _load_secret_key()
 
-# Trust X-Real-IP / X-Forwarded-For from the nginx reverse proxy (127.0.0.1)
-# so request.remote_addr shows the real client IP for VPN-IP tracking
-from werkzeug.middleware.proxy_fix import ProxyFix
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 
 def _discover_local_networks(cache_ttl=30):
     now = time.time()
@@ -296,43 +292,10 @@ def _discover_local_networks(cache_ttl=30):
     return list(nets), list(addrs)
 
 
-def _is_trusted_local_host(host):
-    host = (host or "").strip().lower()
-    if not host:
-        return False
-    if host in ("localhost", "atlas", "atlas.local") or host.endswith(".local"):
-        return True
-    try:
-        return _is_local(host)
-    except Exception:
-        pass
-    try:
-        infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
-    except Exception:
-        return False
-    for info in infos:
-        sockaddr = info[4]
-        if not sockaddr:
-            continue
-        ip = sockaddr[0]
-        if _is_local(ip):
-            return True
-    return False
-
-
-def _cors_origin_allowed(origin):
-    """Restrict WebSocket origins to local/private network addresses only."""
-    if not origin:
-        return True
-    try:
-        from urllib.parse import urlparse
-        host = urlparse(origin).hostname or ""
-        return _is_trusted_local_host(host)
-    except Exception:
-        return False
-
 socketio = SocketIO(
     app,
+    # Origin is enforced by request_guard.EdgeMiddleware (below), which sees
+    # every /socket.io/ request before engine.io does.
     cors_allowed_origins="*",
     async_mode="gevent",
     http_compression=True,       # gzip-compress engine.io polling payloads
@@ -340,6 +303,25 @@ socketio = SocketIO(
     ping_timeout=60,
     ping_interval=25,
 )
+
+def _extra_hostnames():
+    """Owner-configured extra names for this Atlas (e.g. a VPN MagicDNS name)."""
+    try:
+        raw = db.get_app_settings().get("extra_hostnames", "")
+    except Exception:
+        return ()
+    return [n for n in (raw or "").replace(";", ",").split(",") if n.strip()]
+
+
+# Outermost WSGI layer: must wrap Flask-SocketIO's middleware, not sit inside
+# it, or /socket.io/ traffic would bypass every check. See request_guard.py.
+import request_guard
+app.wsgi_app = request_guard.EdgeMiddleware(
+    app.wsgi_app,
+    host_policy=request_guard.HostPolicy(extra_names=_extra_hostnames),
+    logger=logger,
+)
+
 mesh = None
 gps_manager = None
 ai_manager = None
@@ -756,6 +738,37 @@ def api_device():
     # from any other HTTP server that happens to 200 on /api/device.
     info["app"] = "atlas-control"
     return jsonify(info)
+
+@app.route("/api/health")
+def api_health():
+    """Liveness for the updater, nginx's status page and reconnecting clients.
+
+    Everyone gets {ok, version}. The updater's health check connects directly
+    on loopback (not through nginx) and additionally gets the facts it needs
+    to decide whether a new release is healthy.
+    """
+    import atlas_version
+    info = atlas_version.info()
+    body = {"ok": True, "app": "atlas-control", "version": info["version"]}
+    if request.environ.get("atlas.direct_loopback"):
+        try:
+            conn = db.get_db()
+            conn.execute("SELECT 1 FROM app_settings LIMIT 1").fetchall()
+            db_ok = True
+        except Exception as exc:
+            logger.warning("health: database check failed: %s", exc)
+            db_ok = False
+        body.update({
+            "seq": info.get("seq", 0),
+            "release_path": atlas_paths.CODE_DIR,
+            "pid": os.getpid(),
+            "db_ok": db_ok,
+            "schema_version": db.schema_version(),
+            "compat_floor": int(db.get_meta("compat_floor", "0") or 0),
+        })
+        body["ok"] = db_ok
+    return jsonify(body), (200 if body["ok"] else 503)
+
 
 # ------------------------------------------------------------------ API: stats
 @app.route("/api/stats")
@@ -2574,17 +2587,45 @@ def api_tracker_checkin():
         return jsonify({"error": "device_id too long (max 64 characters)"}), 400
     if len(name) > 100:
         return jsonify({"error": "name too long (max 100 characters)"}), 400
+    # Tracker data is rendered on every client's map; accept only well-formed
+    # values (the colour lands in a style attribute).
+    color = str(data.get("color") or "#3b82f6")
+    if not re.fullmatch(r"#[0-9a-fA-F]{6}", color):
+        return jsonify({"error": "color must look like #1a2b3c"}), 400
+
+    def _num(key, lo, hi):
+        v = data.get(key)
+        if v is None or v == "":
+            return None
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            raise ValueError(key)
+        if not (math.isfinite(v) and lo <= v <= hi):
+            raise ValueError(key)
+        return v
+
+    try:
+        lat = _num("latitude", -90, 90)
+        lon = _num("longitude", -180, 180)
+        fields = {
+            "accuracy": _num("accuracy", 0, 1e6),
+            "altitude": _num("altitude", -1e4, 1e5),
+            "speed":    _num("speed", 0, 1e4),
+            "heading":  _num("heading", 0, 360),
+            "battery":  _num("battery", 0, 100),
+        }
+    except ValueError as exc:
+        return jsonify({"error": f"invalid {exc.args[0]}"}), 400
+    if (lat is None) != (lon is None):
+        return jsonify({"error": "latitude and longitude go together"}), 400
     record = {
         "id":        device_id,
-        "name":      name,
-        "color":     data.get("color", "#3b82f6"),
-        "latitude":  data.get("latitude"),
-        "longitude": data.get("longitude"),
-        "accuracy":  data.get("accuracy"),
-        "altitude":  data.get("altitude"),
-        "speed":     data.get("speed"),
-        "heading":   data.get("heading"),
-        "battery":   data.get("battery"),
+        "name":      _sanitize_text(name, 100),
+        "color":     color,
+        "latitude":  lat,
+        "longitude": lon,
+        **fields,
         "last_seen": int(time.time()),
     }
     db.upsert_tracker_device(record)
@@ -3166,13 +3207,11 @@ def api_factory_reset():
 
 # ------------------------------------------------------------------ SocketIO
 @socketio.on("connect")
-def handle_connect():
-    origin = request.headers.get("Origin", "")
+def handle_connect(auth=None):
+    # Host, Origin and the real client address were already established by
+    # request_guard.EdgeMiddleware for this /socket.io/ request.
     if not _is_local(request.remote_addr or ""):
         logger.warning("Rejected WebSocket client from non-local address %s", request.remote_addr or "-")
-        return False
-    if origin and not _cors_origin_allowed(origin):
-        logger.warning("Rejected WebSocket origin %s for client %s", origin, request.remote_addr or "-")
         return False
     logger.info("WebSocket client connected")
 
@@ -3232,7 +3271,7 @@ def api_calendar_list():
 
 @app.route("/api/calendar", methods=["POST"])
 def api_calendar_create():
-    data = request.get_json(force=True)
+    data = (request.get_json(silent=True) or {})
     if not data.get("title") or not data.get("start_ts"):
         return jsonify({"error": "title and start_ts required"}), 400
     event_id = db.create_calendar_event(data)
@@ -3240,7 +3279,7 @@ def api_calendar_create():
 
 @app.route("/api/calendar/<int:event_id>", methods=["PUT"])
 def api_calendar_update(event_id):
-    data = request.get_json(force=True)
+    data = (request.get_json(silent=True) or {})
     db.update_calendar_event(event_id, data)
     return jsonify({"ok": True})
 
@@ -3323,7 +3362,7 @@ def api_get_jobs():
 
 @app.route("/api/jobs", methods=["POST"])
 def api_create_job():
-    data = request.get_json(force=True)
+    data = (request.get_json(silent=True) or {})
     now = int(time.time())
     stype = data.get('schedule_type')
     if stype == 'once':
@@ -3338,7 +3377,7 @@ def api_create_job():
 
 @app.route("/api/jobs/<int:job_id>", methods=["PUT"])
 def api_update_job(job_id):
-    data = request.get_json(force=True)
+    data = (request.get_json(silent=True) or {})
     now = int(time.time())
     stype = data.get('schedule_type')
     if stype == 'once':
@@ -4328,7 +4367,9 @@ def main():
     parser.add_argument("--port", default="AUTO", help="Meshtastic serial port (AUTO = scan)")
     parser.add_argument("--gps-port", default=None, help="GPS serial port (default: AUTO = scan)")
     parser.add_argument("--gps-baud", default=None, type=int, help="GPS baud rate (default: 9600)")
-    parser.add_argument("--host", default="0.0.0.0", help="Listen host")
+    # nginx is the only network entry point; Flask listens on loopback.
+    parser.add_argument("--host", default=os.environ.get("ATLAS_BIND", "127.0.0.1"),
+                        help="Listen address (default 127.0.0.1; nginx fronts the network)")
     parser.add_argument("--web-port", default=None, type=int, help="Web port")
     parser.add_argument("--demo", action="store_true", help="Run with demo data")
     args = parser.parse_args()
@@ -4375,7 +4416,9 @@ def main():
             _conn.commit()
     if ai_updates:
         db.ai_set_settings(ai_updates)
-    web_port = args.web_port or int(settings.get("web_port", 5000))
+    # The port nginx proxies to is fixed; a stored web_port setting (writable
+    # through the settings API) must not be able to move or break it.
+    web_port = args.web_port or int(os.environ.get("ATLAS_WEB_PORT", "5000"))
     mesh_port = args.port if args.port != "AUTO" else settings.get("serial_port", "AUTO")
     gps_port = args.gps_port or settings.get("gps_port", "AUTO")
     gps_baud = args.gps_baud or int(settings.get("gps_baud", 9600))
