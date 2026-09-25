@@ -154,3 +154,8 @@ Retail units have setup-account passwords locked and SSH masked. See
   the apps pin the key instead.
 - Anyone who can open the unit's case, or who has the label, can pair — by
   design, that is the owner.
+- Typing the setup code (rather than scanning the label's QR code) trusts
+  the first TLS key the phone sees; an attacker actively intercepting the
+  LAN at that moment could capture the code. Scanning the QR code (which
+  carries the key pin) or approving from a paired device (match code) closes
+  that gap.

@@ -58,7 +58,6 @@ _meshtastic_util.Queue = _RealQueue
 
 import os
 import sys
-import ast
 import re
 import shutil
 import json
@@ -66,10 +65,8 @@ import math
 import time
 import logging
 import argparse
-import operator
 import threading
 import subprocess
-import socket
 import unicodedata
 import ipaddress as _ipaddress
 import faulthandler as _faulthandler

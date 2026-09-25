@@ -3,7 +3,6 @@ that never copies one unit's secrets onto the next."""
 import io
 import json
 import os
-import re
 import stat
 import subprocess
 import sys

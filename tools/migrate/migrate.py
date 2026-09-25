@@ -34,7 +34,6 @@ leaving /opt/atlas and /etc/atlas in place (harmless) unless --purge.
 """
 import argparse
 import grp
-import json
 import os
 import pwd
 import shutil
