@@ -14,7 +14,8 @@ Runs 100% offline — no internet required after installation.
 - AI chat assistant (Ollama, runs locally on Jetson GPU)
 - Phone tracker check-in
 - Offline city and NPS trail search
-- Native mobile clients with Bluetooth bootstrap into the local Atlas hotspot and API
+- Native Android and iOS apps: pair once from the label QR code, pinned TLS, automatic rediscovery
+- No accounts or passwords; signed, self-healing software updates
 
 ## Hardware
 
@@ -65,56 +66,60 @@ applies live, no restart needed (`"AUTO"` switches back).
 
 ## Installation
 
-Requires internet access once to download map data. After that, fully offline.
+Production units are built from a payload drive plus one script, and each
+leaves the line with its own identity and label — see
+[docs/MANUFACTURING.md](docs/MANUFACTURING.md). The short version, on a
+freshly flashed Jetson with the payload drive attached:
 
 ```bash
-git clone https://github.com/atlas-navigate/atlas-control.git
-cd atlas-control
-sudo ./install.sh
+sudo /media/$USER/atlas-backup/stage/atlas-imaging/atlas-provision.sh
 ```
 
-The installer will:
-1. Detect and mount an NVMe drive at `/atlas_data`
-2. Install system dependencies and Python environment
-3. Install Ollama (local AI engine)
-4. Build OSRM routing engine from source
-5. Download the PMTiles CLI tool
-6. Download the vector basemap (~18 GB)
-7. Download map font glyphs (~8 MB)
-8. Download topographic tiles and build topo.pmtiles
-9. Download US cities and NPS trails databases
-10. Download and process OSRM routing data for chosen states
-11. Configure nginx with HTTPS and rate limiting
-12. Install systemd services
+That copies the maps and datasets, then runs `install.sh --bundle <signed release>`:
+system packages, the Atlas software through its update engine (no git, no
+sudo rules), the unit's own identity and label, and retail lock-down.
+Building the datasets from scratch (a golden unit) runs the same
+`install.sh` with no payload and needs Internet for a day or two.
 
-On first visit, your browser will warn about the self-signed certificate — click **Advanced → Proceed**. Required once per device.
+A unit installed the old way moves to the new layout with
+`sudo tools/migrate/atlas-migrate apply --bundle <release>` (and back with
+`… rollback`).
 
 ## Updating
 
-The same script updates an existing installation:
-
-```bash
-sudo /atlas_data/atlas-control/install.sh --update
-```
-
-This pulls the latest release, refreshes Python dependencies, configs, and services, then restarts Atlas — your database, settings, maps, and routing data are preserved. It runs without prompts, so it's safe to automate. Re-running `install.sh` with no flags on an installed system offers the same quick update; use `--full` to force the complete install flow (e.g. to add more state routing data).
-
-You can also update from the web app: **Settings → Software Update** checks GitHub automatically every 30 minutes while Atlas has internet access. It shows the changelog when an update is available; installation remains a one-click, confirmed action with streamed progress. The manual **Check for Updates** action remains available at any time.
+Atlas installs signed releases itself: **Settings → Software Update** checks
+while Atlas is online (every six hours, or on demand), shows what's new,
+downloads with resume, and installs with a live progress bar. Every release
+is verified with Ed25519 before it is installed, health-checked afterwards,
+and rolled back automatically if the new version does not come up healthy —
+including after a power cut. See [docs/UPDATES.md](docs/UPDATES.md) and, for
+publishing releases, [docs/RELEASES.md](docs/RELEASES.md).
 
 ## Access
 
-| Network | URL |
-|---------|-----|
-| Hotspot / LAN | `https://atlas.local` or `https://<device-ip>` |
-| Direct IP | `https://<device-ip>` |
+There are no accounts or passwords. The first time, pair the phone or
+browser with Atlas using the label (QR code or setup code), Atlas's own
+Wi-Fi, or "Allow" on a device that is already paired — see
+[docs/PAIRING.md](docs/PAIRING.md).
 
-If `atlas.local` does not resolve on your client device, use the direct device IP instead.
+| Network | Address |
+|---------|---------|
+| Atlas's Wi-Fi or your network | `https://atlas-xxxx.local` (on the label) |
+| Atlas's Wi-Fi | `https://10.42.0.1` |
+
+Browsers warn once about Atlas's own (self-signed) certificate.
 
 ## Mobile
 
-Native Android and iOS clients live in [`mobile/`](mobile/README.md).
+Native Android and iOS apps live in [`mobile/`](mobile/README.md). They pair
+by scanning the label, pin the unit's TLS key, find Atlas by its device id
+(mDNS, the LAN beacon or its hotspot) after any address change, and keep
+working through updates.
 
-They use Bluetooth Low Energy for first contact, read a compact Atlas bootstrap manifest from the Jetson, then switch to the Atlas hotspot and local HTTP API for Meshtastic, GPS, navigation, and AI features.
+## Security and privacy
+
+How Atlas keeps strangers, web pages, other radios and bad updates out, and
+what it keeps about the owner: [docs/SECURITY_ARCHITECTURE.md](docs/SECURITY_ARCHITECTURE.md).
 
 ## Service management
 
@@ -133,11 +138,11 @@ Atlas will show a host battery badge in the top bar when it can read either:
 
 For the Waveshare UPS Power Module C used on this Atlas build, the installed service
 defaults to I2C bus `7` and address `0x41`. Those defaults are set in
-[`atlas-control.service`](/atlas_data/atlas-control/atlas-control.service:18).
+[`system/systemd/atlas-control.service`](system/systemd/atlas-control.service).
 
 Atlas also auto-detects the older Waveshare generic UPS profile on bus `1` / address `0x42`,
-but if your hardware differs from either profile, override `ATLAS_UPS_I2C_BUS` and
-`ATLAS_UPS_I2C_ADDR` in the service file, then reload systemd and restart Atlas.
+but if your hardware differs from either profile, set `ATLAS_UPS_I2C_BUS` and
+`ATLAS_UPS_I2C_ADDR` in a drop-in (`sudo systemctl edit atlas-control`) and restart Atlas.
 
 ## License
 
