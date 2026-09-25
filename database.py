@@ -496,9 +496,25 @@ def _migration_pairing(conn):
         )""")
 
 
+def _migration_audit(conn):
+    """Security-relevant events (what happened, never personal content)."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id      INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts      INTEGER NOT NULL,
+            action  TEXT NOT NULL,
+            actor   TEXT,
+            detail  TEXT
+        )""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_messages_created ON ai_messages(created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_tracker_last_seen ON tracker_devices(last_seen)")
+
+
 MIGRATIONS = [
     (1, "baseline", _migration_baseline),
     (2, "pairing", _migration_pairing),
+    (3, "audit_log", _migration_audit),
 ]
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 # Oldest schema version whose code can still use a database at SCHEMA_VERSION.
@@ -1450,15 +1466,15 @@ def prune_old_data():
     """Remove time-series data on a tiered retention schedule to cap disk usage:
       - topology  : 1 day   (high-frequency link snapshots)
       - telemetry : 7 days  (per-node device metrics)
-      - positions : 7 days  (GPS track history)
       - alerts    : 30 days (operational events)
       - messages  : 90 days (mesh chat log)
+    Location history and Ray explain data follow the owner's retention
+    settings instead (retention.py).
     """
     conn = sqlite3.connect(DB_PATH)
     try:
         conn.execute("DELETE FROM topology  WHERE timestamp < (strftime('%s','now') - 86400)")
         conn.execute("DELETE FROM telemetry WHERE timestamp < (strftime('%s','now') - 604800)")
-        conn.execute("DELETE FROM positions WHERE timestamp < (strftime('%s','now') - 604800)")
         conn.execute("DELETE FROM alerts    WHERE timestamp < (strftime('%s','now') - 2592000)")
         conn.execute("DELETE FROM messages  WHERE rx_time   < (strftime('%s','now') - 7776000)")
         conn.commit()
@@ -1618,37 +1634,47 @@ def set_factory_defaults_device(snapshot):
     )
     db.commit()
 
-def factory_reset_data():
-    """Wipe messaging, AI chat, node, and GPS-coordinate data.
+# Settings that describe this unit's hardware or internal bookkeeping rather
+# than the owner's preferences — kept across a factory reset.
+_RESET_KEEP_APP_SETTINGS = ("local_node_id", "factory_defaults_device_v1", "serial_port",
+                            "gps_port", "gps_baud", "web_port")
+_RESET_KEEP_AI_SETTINGS = ("embed_format_v",)
 
-    Preserves: app_settings (incl. factory_defaults snapshot), ai_settings,
-    ai_documents (knowledge base), channels (general channel), calendar_events.
+
+def factory_reset_data():
+    """Return the database to how Atlas left the factory, ready for a new owner.
+
+    Erases mesh messages, nodes and telemetry; Ray conversations and the
+    owner's own knowledge documents; every kind of location data; calendar;
+    scheduled jobs; owner preferences and Ray settings; paired devices; the
+    security log. Keeps the built-in reference documents, hardware settings
+    and the radio's factory snapshot. Freed pages are overwritten
+    (secure_delete) and the file is compacted, so nothing lingers on disk.
     """
     db = get_db()
-    # Messaging
-    db.execute("DELETE FROM messages")
-    # AI chat data (chats + their messages); knowledge base & settings preserved
-    db.execute("DELETE FROM ai_messages")
-    db.execute("DELETE FROM ai_chats")
-    # Node information & per-node time series
-    db.execute("DELETE FROM nodes")
-    db.execute("DELETE FROM telemetry")
-    db.execute("DELETE FROM topology")
-    db.execute("DELETE FROM alerts")
-    # GPS coordinate information
-    db.execute("DELETE FROM positions")
-    db.execute("DELETE FROM tracker_devices")
-    db.execute("DELETE FROM hike_sessions")
-    db.execute("DELETE FROM nav_favorites")
-    db.execute("DELETE FROM route_waypoints")
-    db.execute("DELETE FROM routes")
-    db.execute("DELETE FROM waypoints")
-    # Scheduled jobs may carry GPS payloads / node refs — wipe to avoid dangling state
-    db.execute("DELETE FROM scheduled_jobs")
-    db.commit()
-    # Reclaim space and rebuild indexes
+    db.execute("PRAGMA secure_delete = ON")
     try:
-        db.execute("PRAGMA wal_checkpoint(PASSIVE)")
+        for table in ("messages", "ai_messages", "ai_chats", "nodes", "telemetry", "topology",
+                      "alerts", "positions", "tracker_devices", "hike_sessions", "nav_favorites",
+                      "route_waypoints", "routes", "waypoints", "scheduled_jobs", "calendar_events",
+                      "paired_clients", "pair_requests", "audit_log"):
+            db.execute(f"DELETE FROM {table}")
+        db.execute("DELETE FROM ai_documents_fts WHERE rowid IN "
+                   "(SELECT id FROM ai_documents WHERE COALESCE(is_seed, 0) = 0)")
+        db.execute("DELETE FROM ai_documents WHERE COALESCE(is_seed, 0) = 0")
+        db.execute("DELETE FROM app_settings WHERE key NOT IN (%s)" % ",".join("?" * len(_RESET_KEEP_APP_SETTINGS)),
+                   _RESET_KEEP_APP_SETTINGS)
+        db.execute("DELETE FROM ai_settings WHERE key NOT IN (%s)" % ",".join("?" * len(_RESET_KEEP_AI_SETTINGS)),
+                   _RESET_KEEP_AI_SETTINGS)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.execute("PRAGMA secure_delete = OFF")
+    try:
+        db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        db.execute("VACUUM")
         db.execute("PRAGMA optimize")
     except Exception:
         pass

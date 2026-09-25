@@ -90,8 +90,10 @@ def _read_json(path, default=None):
 
 class UpdateManager:
     def __init__(self, emit=None, helper_run=None, releases_url=None, clock=time.time,
-                 opener=None, sleep=None):
+                 opener=None, sleep=None, audit=None):
         self.emit = emit or (lambda event, data: None)
+        # audit(action, **detail): the local security log (audit_log.record).
+        self.audit = audit or (lambda action, **detail: None)
         self.helper_run = helper_run
         self.releases_url = (releases_url or os.environ.get("ATLAS_RELEASES_URL")
                              or DEFAULT_RELEASES_URL).rstrip("/")
@@ -320,6 +322,22 @@ class UpdateManager:
                       stage=None, message="Update cancelled.", downloaded_bytes=0)
         return self.snapshot()
 
+    def forget(self):
+        """Factory reset: stop any download, delete downloaded updates and
+        forget update state. Refused (False) while the engine is installing."""
+        with self._lock:
+            if self.state.get("state") == "installing":
+                return False
+        self._cancel.set()
+        job = self._job
+        if job is not None and job.is_alive():
+            job.join(10)
+        shutil.rmtree(self.dir, ignore_errors=True)
+        with self._lock:
+            self.state = {"state": "idle"}
+        self._set(message="")
+        return True
+
     def _bundle_paths(self):
         name = self.state["manifest"]["bundle"]["name"]
         final = os.path.join(self.dir, name)
@@ -361,6 +379,7 @@ class UpdateManager:
                     pass
             self._set(state="ready", stage="verifying", message=f"Atlas {manifest['version']} is ready to install.",
                       downloaded_bytes=bundle["size"], total_bytes=bundle["size"])
+            self.audit("update_verified", version=str(manifest["version"]))
             if self.state.get("install_when_ready"):
                 self.install()
         except _Cancelled:
@@ -487,6 +506,8 @@ class UpdateManager:
         self._set(state="installing", stage="preparing", message="Preparing installation…",
                   handed_off_at=self.clock(), result=None)
         out, rc = self.helper_run("update.apply")
+        self.audit("update_install_started" if rc == 0 else "update_install_refused",
+                   version=str((self.state.get("manifest") or {}).get("version", "")))
         if rc != 0:
             self._set(state="ready", stage="verifying", message="The update could not be started.",
                       error=out[:300])
@@ -514,6 +535,8 @@ class UpdateManager:
             self._finish("unknown", f"Atlas {version or ''} installation status is unknown.")
 
     def _finish(self, result, message):
+        self.audit({"success": "update_installed", "rolled_back": "update_rolled_back"}.get(result, "update_failed"),
+                   version=str((self.state.get("manifest") or {}).get("version", "")), result=str(result))
         keep_manifest = result != "success"
         self._set(state="up_to_date" if result == "success" else ("available" if keep_manifest and
                                                                     self.state.get("manifest") else "idle"),
@@ -544,6 +567,9 @@ class _GreenletJob:
 
     def is_alive(self):
         return not self.g.dead
+
+    def join(self, timeout=None):
+        self.g.join(timeout)
 
 
 def sha256_file(path):

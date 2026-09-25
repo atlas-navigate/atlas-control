@@ -229,6 +229,30 @@ class UpdateManagerTests(unittest.TestCase):
         self.assertFalse(os.path.exists(part))
         self.assertEqual(self.um.state["state"], "available")
 
+    def test_factory_reset_forgets_downloads_but_never_mid_install(self):
+        audits = []
+        self.um.audit = lambda action, **d: audits.append((action, d))
+        self.um.check()
+        self.um.start(install=False)
+        self.assertEqual(self.um.state["state"], "ready")
+        self.assertEqual(audits, [("update_verified", {"version": "2.0.0"})])
+        self.um.state["state"] = "installing"
+        self.assertFalse(self.um.forget())
+        self.assertTrue(os.listdir(self.um.dir))
+        self.um.state["state"] = "ready"
+        self.assertTrue(self.um.forget())
+        self.assertFalse(os.path.exists(self.um.dir))
+        self.assertEqual(self.um.snapshot()["state"], "idle")
+        self.assertEqual(self.make().state["state"], "idle")       # persisted
+
+    def test_install_and_outcome_reach_the_security_log(self):
+        audits = []
+        self.um.audit = lambda action, **d: audits.append(action)
+        self.um.check()
+        self.um.start(install=True)
+        self.um._finish("rolled_back", update_manager.MSG_ROLLED_BACK)
+        self.assertEqual(audits, ["update_verified", "update_install_started", "update_rolled_back"])
+
     def test_result_after_restart_is_reported(self):
         self.um.check()
         self.um.state.update(state="installing")

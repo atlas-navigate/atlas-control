@@ -60,6 +60,7 @@ import os
 import sys
 import ast
 import re
+import shutil
 import json
 import math
 import time
@@ -319,12 +320,68 @@ def _extra_hostnames():
 import request_guard
 import pairing
 import device_identity
+import audit_log
+import retention
 app.wsgi_app = request_guard.EdgeMiddleware(
     app.wsgi_app,
     host_policy=request_guard.HostPolicy(extra_names=_extra_hostnames),
     client_check=pairing.client_check,
     logger=logger,
 )
+
+# ── Local security log ──────────────────────────────────────────────────
+# Which paired device changed what — never the values themselves (no
+# passwords, SSIDs, coordinates, messages or setting contents); see
+# audit_log.py. Pairing, updates, factory reset and privacy deletions are
+# recorded where they happen.
+_AUDITED_ROUTES = [(m, re.compile(rf"^{pat}$"), action, keys) for m, pat, action, keys in (
+    ("PUT", r"/api/settings", "settings_changed", True),
+    ("PUT", r"/api/ai/settings", "ray_settings_changed", True),
+    ("PUT", r"/api/gps/share", "location_sharing_changed", True),
+    ("PUT", r"/api/device/config/[a-z_]+", "radio_settings_changed", True),
+    ("PUT", r"/api/device/owner", "radio_name_changed", False),
+    ("POST", r"/api/wifi/connect", "wifi_connected", False),
+    ("POST", r"/api/wifi/disconnect", "wifi_disconnected", False),
+    ("POST", r"/api/hotspot/config", "hotspot_changed", False),
+    ("POST", r"/api/hotspot/start", "hotspot_started", False),
+    ("POST", r"/api/hotspot/stop", "hotspot_stopped", False),
+    ("POST", r"/api/power/ai", "ray_power_changed", False),
+    ("POST", r"/api/power/comms", "radio_power_changed", False),
+    ("POST", r"/api/pair/request/[\w-]+/approve", "device_approved", False),
+    ("POST", r"/api/pair/request/[\w-]+/deny", "device_denied", False),
+    ("DELETE", r"/api/pair/clients/[\w-]+", "device_removed", False),
+    ("POST", r"/api/update/(?:start|install|apply)", "update_requested", False),
+    ("POST", r"/api/update/cancel", "update_cancelled", False),
+    ("PUT", r"/api/privacy/retention", "retention_changed", True),
+)]
+
+
+@app.after_request
+def _audit_sensitive_request(response):
+    if response.status_code < 400 and request.method in ("POST", "PUT", "DELETE"):
+        for method, pattern, action, with_keys in _AUDITED_ROUTES:
+            if method == request.method and pattern.match(request.path):
+                detail = {}
+                body = request.get_json(silent=True) if with_keys else None
+                if isinstance(body, dict):
+                    detail["keys"] = sorted(str(k)[:60] for k in body)[:30]
+                audit_log.record(action, audit_log.actor_from(request.environ), **detail)
+                break
+    return response
+
+
+def _confirmed(expected=True):
+    """Destructive requests must say so explicitly: {"confirm": true} or,
+    for factory reset, {"confirm": "RESET"} — so a stray or scripted call
+    can never erase anything by accident."""
+    body = request.get_json(silent=True)
+    return isinstance(body, dict) and body.get("confirm") == expected and \
+        type(body.get("confirm")) is type(expected)
+
+
+def _needs_confirmation(what):
+    return jsonify({"ok": False, "error": f"Confirm to {what}.", "confirm_required": True}), 400
+
 
 mesh = None
 gps_manager = None
@@ -894,6 +951,8 @@ def api_pair_clients():
 @app.route("/api/pair/clients/<client_id>", methods=["DELETE"])
 def api_pair_revoke(client_id):
     ok = pairing.revoke(client_id)
+    if ok:
+        _disconnect_sockets(client_id)
     return jsonify({"ok": ok}), (200 if ok else 404)
 
 
@@ -3097,16 +3156,58 @@ def api_factory_defaults_capture():
         return jsonify({"ok": False, "error": err or "device not connected or config unavailable"}), 503
     return jsonify({"ok": True, "snapshot": _redact_radio_config(snap)})
 
+def _factory_reset_local_state():
+    """The owner's state outside the database: saved networks, network
+    hints, hotspot changes, downloaded updates and pre-migration database
+    copies (which hold the old data). Best effort; returns what failed."""
+    problems = []
+    for path in (_LAN_HINTS_PATH, _HOTSPOT_CFG_PATH):
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            problems.append(f"{os.path.basename(path)}: {exc.strerror}")
+    shutil.rmtree(atlas_paths.BACKUP_DIR, ignore_errors=True)
+    updates.forget()
+    out, rc = atlas_helper.run("net.forget_all", timeout=60)
+    if rc != 0:
+        problems.append("saved Wi-Fi networks: " + (out or "helper unavailable")[:120])
+    if ai_manager is not None:
+        ai_manager._doc_emb_cache = None
+    return problems
+
+
+def _restart_hotspot_with_label_credentials():
+    """If the hotspot is on, bring it back with the label's name/password."""
+    atlas_blocking.sleep(3)          # let the reset response reach the browser first
+    try:
+        if _current_hotspot_state().get("active"):
+            with _WIFI_OPS_LOCK:
+                _start_hotspot_with_saved_config()
+    except Exception as exc:
+        logger.warning("factory reset: hotspot restart failed: %s", exc)
+
+
 @app.route("/api/factory-reset", methods=["POST"])
 def api_factory_reset():
-    """Wipe local data and restore Heltec to its captured default config.
+    """Return Atlas to how it left the factory, ready for a new owner.
 
-    Steps:
+    Requires {"confirm": "RESET"}. Steps:
       1. Ensure a Heltec snapshot exists (capture lazily if missing).
-      2. Wipe messaging / AI chat / node / GPS data from the local DB.
+      2. Erase the owner's data (see database.factory_reset_data) and state
+         outside the database: saved Wi-Fi networks, hotspot changes,
+         downloads, database copies. Every paired device must pair again.
       3. Re-write the snapshot to the radio.
       4. Reset short_name to the firmware default (last 4 hex of node ID).
+    Kept: the installed software, offline maps/routing and built-in
+    reference, and Atlas's identity (name, key, label setup code and Wi-Fi
+    password — the hotspot returns to the label's credentials).
     """
+    if not _confirmed("RESET"):
+        return _needs_confirmation("reset Atlas (type RESET)")
+    if updates.state.get("state") == "installing":
+        return jsonify({"ok": False, "error": "Atlas is installing an update. Try again when it has finished."}), 409
     snap = db.get_factory_defaults_device()
     if not snap:
         snap, _ = _capture_factory_defaults()
@@ -3128,6 +3229,11 @@ def api_factory_reset():
     except Exception as e:
         logger.error("factory_reset: DB wipe failed: %s", e)
         return jsonify({"ok": False, "error": f"data wipe failed: {e}"}), 500
+    pairing.revoke_all()
+    local_problems = _factory_reset_local_state()
+    for problem in local_problems:
+        logger.warning("factory_reset: %s", problem)
+    audit_log.record("factory_reset", None)
 
     device_result = {"applied": False, "reason": "no snapshot or device unavailable", "nodedb": nodedb_result}
     if mesh and mesh.connected and snap:
@@ -3152,13 +3258,63 @@ def api_factory_reset():
             logger.error("factory_reset: owner reset failed: %s", e)
             device_result["owner_error"] = str(e)
 
-    # Push a UI nudge so connected clients drop their cached state.
+    # Push a UI nudge so connected clients drop their cached state, then cut
+    # every live connection: nobody is paired any more.
     try:
         socketio.emit("factory_reset_done", {"device": device_result})
     except Exception:
         pass
+    import gevent
+    gevent.spawn_later(1.5, _disconnect_sockets)
+    gevent.spawn(_restart_hotspot_with_label_credentials)
 
-    return jsonify({"ok": True, "device": device_result})
+    return jsonify({"ok": True, "device": device_result, "incomplete": local_problems})
+
+
+# ------------------------------------------------------------------ API: Privacy
+@app.route("/api/privacy/retention", methods=["GET"])
+def api_privacy_retention_get():
+    return jsonify(retention.settings())
+
+
+@app.route("/api/privacy/retention", methods=["PUT"])
+def api_privacy_retention_put():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"ok": False, "error": "Expected a JSON object"}), 400
+    try:
+        return jsonify(retention.update(data))
+    except (TypeError, ValueError) as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.route("/api/privacy/delete-ai-history", methods=["POST"])
+def api_privacy_delete_ai_history():
+    if not _confirmed():
+        return _needs_confirmation("delete all Ray conversations")
+    counts = retention.delete_ai_history()
+    audit_log.record("ai_history_deleted", audit_log.actor_from(request.environ), **counts)
+    socketio.emit("ai_history_deleted", {}, to="paired", namespace="/")
+    return jsonify({"ok": True, **counts})
+
+
+@app.route("/api/privacy/delete-location-history", methods=["POST"])
+def api_privacy_delete_location_history():
+    if not _confirmed():
+        return _needs_confirmation("delete Atlas's location history")
+    counts = retention.delete_location_history()
+    audit_log.record("location_history_deleted", audit_log.actor_from(request.environ), **counts)
+    socketio.emit("location_history_deleted", {}, to="paired", namespace="/")
+    return jsonify({"ok": True, **counts})
+
+
+@app.route("/api/audit")
+def api_audit():
+    try:
+        limit = max(1, min(500, int(request.args.get("limit", 100))))
+    except ValueError:
+        limit = 100
+    return jsonify(audit_log.recent(limit))
 
 # ------------------------------------------------------------------ SocketIO
 @socketio.on("connect")
@@ -3175,7 +3331,29 @@ def handle_connect(auth=None):
         return False
     from flask_socketio import join_room
     join_room("paired")
+    _socket_clients[request.sid] = client["id"] if client else None
     logger.info("WebSocket client connected")
+
+
+# Live Socket.IO sessions → paired client id, so removing a device (or a
+# factory reset) also cuts its open connection instead of letting it keep
+# receiving live data until it happens to reconnect.
+_socket_clients = {}
+
+
+@socketio.on("disconnect")
+def handle_disconnect(*_args):
+    _socket_clients.pop(request.sid, None)
+
+
+def _disconnect_sockets(client_id=None):
+    for sid, cid in list(_socket_clients.items()):
+        if client_id is None or cid == client_id:
+            _socket_clients.pop(sid, None)
+            try:
+                socketio.server.disconnect(sid, namespace="/")
+            except Exception:
+                pass
 
 @socketio.on("join_rooms")
 def handle_join_rooms(data):
@@ -3378,11 +3556,13 @@ def api_toggle_job(job_id):
 _HOTSPOT_CFG_PATH = atlas_paths.data_file("hotspot_config.json")
 
 def _load_hotspot_cfg():
+    """The owner's hotspot settings; until they change them (and again after
+    a factory reset), the Wi-Fi name and password printed on Atlas's label."""
     try:
         with open(_HOTSPOT_CFG_PATH) as f:
             return json.load(f)
     except Exception:
-        return {}
+        return dict(device_identity.hotspot() or {})
 
 def _save_hotspot_cfg(ssid, password):
     try:
@@ -4132,6 +4312,8 @@ def api_wifi_connect():
 
 @app.route("/api/wifi/disconnect", methods=["POST"])
 def api_wifi_disconnect():
+    if not _confirmed():
+        return _needs_confirmation("disconnect Atlas from this network")
     iface = _wifi_iface()
     if not iface:
         return jsonify({"error": "No WiFi interface found"}), 500
@@ -4178,6 +4360,8 @@ def api_mobile_handoff():
 @limiter.limit("20 per minute")
 def api_hotspot_config():
     """Save hotspot SSID and password without starting the hotspot."""
+    if not _confirmed():
+        return _needs_confirmation("change Atlas's Wi-Fi name or password")
     data = request.json or {}
     import re as _re
     ssid = data.get("ssid", "").strip()
@@ -4228,6 +4412,8 @@ def api_hotspot_start():
 
 @app.route("/api/hotspot/stop", methods=["POST"])
 def api_hotspot_stop():
+    if not _confirmed():
+        return _needs_confirmation("turn off Atlas's Wi-Fi hotspot")
     with _WIFI_OPS_LOCK:
         result = _stop_hotspot(grace_seconds=120, timeout=10)
     if not result.get("ok"):
@@ -4500,7 +4686,9 @@ def main():
         while True:
             try:
                 db.prune_old_data()
-                logger.info("Data prune complete")
+                removed = retention.apply()
+                audit_log.prune()
+                logger.info("Data prune complete (%s)", ", ".join(f"{k} {v}" for k, v in removed.items()) or "nothing due")
             except Exception as e:
                 logger.warning(f"Data prune failed: {e}")
             _time.sleep(86400)

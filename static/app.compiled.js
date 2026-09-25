@@ -5969,6 +5969,27 @@ function AIPage() {
     api.get(`/api/ai/chats/${chatId}`).then(c => setMessages(c.messages || []));
   }
 
+  // "Delete AI History" (Settings → Privacy, possibly on another device).
+  useEffect(() => {
+    const onWiped = () => {
+      setMessages([]);
+      loadChats().then(list => {
+        if (list.length) {
+          setActiveChatId(list[0].id);
+          loadMessages(list[0].id);
+          return;
+        }
+        setActiveChatId(null);
+        api.post('/api/ai/chats', {}).then(chat => {
+          setChats([chat]);
+          setActiveChatId(chat.id);
+        }).catch(() => {});
+      }).catch(() => {});
+    };
+    window.addEventListener('atlas-ai-history-deleted', onWiped);
+    return () => window.removeEventListener('atlas-ai-history-deleted', onWiped);
+  }, []);
+
   // ── Mount ──────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
@@ -6029,6 +6050,12 @@ function AIPage() {
   }
   async function deleteChat(id) {
     if (!id || deletingChatId === id) return;
+    if (!(await atlasConfirm({
+      title: 'Delete this conversation?',
+      message: 'It will be removed from Atlas permanently.',
+      confirmLabel: 'Delete',
+      danger: true
+    }))) return;
     setDeletingChatId(id);
     const wasActive = activeChatId === id;
     try {
@@ -6177,6 +6204,12 @@ function AIPage() {
     loadDocs();
   }
   async function deleteDocument(id) {
+    if (!(await atlasConfirm({
+      title: "Remove this document from Ray's knowledge?",
+      message: 'Ray will no longer use it to answer questions.',
+      confirmLabel: 'Remove',
+      danger: true
+    }))) return;
     await api.del(`/api/ai/documents/${id}`);
     loadDocs();
   }
@@ -8883,7 +8916,7 @@ function SettingsPage({
     }
   }, "\u2193")))))), /*#__PURE__*/React.createElement(DeviceConfigSection, null), /*#__PURE__*/React.createElement(GpsShareSection, {
     nodes: nodes || []
-  }), /*#__PURE__*/React.createElement(ConnectedDevicesSection, null), /*#__PURE__*/React.createElement(SoftwareUpdateSection, null), /*#__PURE__*/React.createElement(FactoryResetSection, null), /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement(ConnectedDevicesSection, null), /*#__PURE__*/React.createElement(PrivacySection, null), /*#__PURE__*/React.createElement(SoftwareUpdateSection, null), /*#__PURE__*/React.createElement(FactoryResetSection, null), /*#__PURE__*/React.createElement("div", {
     className: "settings-actions",
     style: {
       marginTop: 4
@@ -9276,7 +9309,9 @@ function FactoryResetSection() {
     setError(null);
     setResult(null);
     try {
-      const r = await api.post('/api/factory-reset', {});
+      const r = await api.post('/api/factory-reset', {
+        confirm: 'RESET'
+      });
       setResult(r);
       setConfirmOpen(false);
       setConfirmText('');
@@ -9509,8 +9544,8 @@ function FactoryResetConfirm({
   var _snapshot$owner3, _snapshot$lora$region2, _snapshot$lora5, _snapshot$lora$modem_2, _snapshot$lora6, _snapshot$lora$hop_li2, _snapshot$lora7, _snapshot$lora$tx_pow2, _snapshot$lora8, _snapshot$device$role2, _snapshot$device4, _snapshot$device$rebr2, _snapshot$device5, _snapshot$device$node2, _snapshot$device6, _snapshot$position$po2, _snapshot$position3, _snapshot$position$gp2, _snapshot$position4;
   const [acknowledged, setAcknowledged] = useState(false);
   const ready = acknowledged && confirmText.trim() === 'RESET';
-  const wipeList = ['All mesh chat messages (channels and direct messages)', 'All AI chat conversations and history', 'All node directory entries, telemetry, topology, and alerts', 'All GPS coordinate data — position history, phone trackers, waypoints, routes, hike sessions, nav favorites, and scheduled jobs'];
-  const preserveList = ['AI knowledge base documents', 'AI model settings (system prompt, temperature, etc.)', 'App settings (theme, units, alerts, hidden pages)', 'Calendar events', 'The Heltec snapshot itself (will be re-applied to the radio)'];
+  const wipeList = ['All mesh chat messages (channels and direct messages)', 'All Ray conversations and the documents you added to Ray', 'Node directory, telemetry, topology and alerts', 'All location data — position history, shared phones, waypoints, routes, hikes, favorites and scheduled jobs', 'Calendar events', 'Your settings and Ray settings', 'Saved Wi-Fi networks, paired phones and computers (each must pair again), downloaded updates and the security log'];
+  const preserveList = ["Ray's built-in reference knowledge, offline maps and routing data", 'The installed Atlas software', "Atlas's name, security key, and the setup code and Wi-Fi password on its label (its hotspot goes back to them)", 'The Heltec snapshot itself (will be re-applied to the radio)'];
   return /*#__PURE__*/React.createElement("div", {
     className: "rename-overlay",
     onClick: e => e.target === e.currentTarget && !resetting && onCancel()
@@ -9666,7 +9701,7 @@ function FactoryResetConfirm({
       color: 'var(--text-secondary)',
       lineHeight: 1.4
     }
-  }, "I understand this will permanently delete all messaging, AI chat, node, and GPS data on Atlas Control.")), /*#__PURE__*/React.createElement("div", {
+  }, "I understand this permanently erases my data from Atlas and disconnects every paired device.")), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 12,
       color: 'var(--text-muted)',
@@ -13032,12 +13067,22 @@ function WifiPage() {
       if (!(res !== null && res !== void 0 && res.pending)) scan();
     }).catch(e => flash(errText(e, 'Connection failed'), false)).finally(() => setConnecting(false));
   };
-  const disconnect = () => api.post('/api/wifi/disconnect', {}).then(() => {
-    setLastSwitch(null);
-    flash('Disconnected from network');
-    loadStatus();
-    scan();
-  }).catch(e => flash(errText(e, 'Disconnect failed'), false));
+  const disconnect = async () => {
+    if (!(await atlasConfirm({
+      title: 'Disconnect Atlas from this network?',
+      message: "Devices that reach Atlas through this network lose the connection until Atlas's own Wi-Fi hotspot comes on (about a minute).",
+      confirmLabel: 'Disconnect',
+      danger: true
+    }))) return;
+    return api.post('/api/wifi/disconnect', {
+      confirm: true
+    }).then(() => {
+      setLastSwitch(null);
+      flash('Disconnected from network');
+      loadStatus();
+      scan();
+    }).catch(e => flash(errText(e, 'Disconnect failed'), false));
+  };
   const startHotspot = () => {
     if (!hsSSID) {
       flash('SSID is required', false);
@@ -13058,22 +13103,36 @@ function WifiPage() {
       loadStatus();
     }).catch(e => flash(errText(e, 'Failed to start hotspot'), false)).finally(() => setHsWorking(false));
   };
-  const stopHotspot = () => {
+  const stopHotspot = async () => {
+    if (!(await atlasConfirm({
+      title: "Turn off Atlas's Wi-Fi hotspot?",
+      message: 'Phones and computers connected to it will be disconnected.',
+      confirmLabel: 'Turn off',
+      danger: true
+    }))) return;
     setHsWorking(true);
-    api.post('/api/hotspot/stop', {}).then(() => {
+    api.post('/api/hotspot/stop', {
+      confirm: true
+    }).then(() => {
       flash('Hotspot stopped');
       loadHotspot();
       loadStatus();
     }).catch(e => flash(errText(e, 'Failed to stop hotspot'), false)).finally(() => setHsWorking(false));
   };
-  const saveHotspotConfig = () => {
+  const saveHotspotConfig = async () => {
     if (!hsSSID) {
       flash('SSID is required', false);
       return;
     }
+    if (!(await atlasConfirm({
+      title: "Change Atlas's Wi-Fi name or password?",
+      message: "Devices that joined the old network will need the new details, and the label on your Atlas won't match until a factory reset.",
+      confirmLabel: 'Change'
+    }))) return;
     api.post('/api/hotspot/config', {
       ssid: hsSSID,
-      password: hsPass
+      password: hsPass,
+      confirm: true
     }).then(() => flash('Hotspot config saved')).catch(e => flash(errText(e, 'Failed to save config'), false));
   };
   const currentSSID = status === null || status === void 0 || (_status$current = status.current) === null || _status$current === void 0 ? void 0 : _status$current.ssid;
@@ -14848,6 +14907,120 @@ const DEFAULT_PAGES = [{
 const ALWAYS_VISIBLE_PAGES = ['system'];
 
 // ═══════════════════════════════════════════════
+// Confirmation for destructive actions — deliberate, not authentication.
+// atlasConfirm({title, message, confirmLabel, danger, typed}) → Promise<bool>.
+// `typed` (e.g. 'RESET') makes the owner type a word to enable the button.
+// ═══════════════════════════════════════════════
+const _confirmListeners = new Set();
+function atlasConfirm(opts) {
+  return new Promise(resolve => {
+    if (_confirmListeners.size === 0) {
+      resolve(window.confirm(`${opts.title}\n\n${opts.message || ''}`));
+      return;
+    }
+    _confirmListeners.forEach(fn => fn({
+      ...opts,
+      resolve
+    }));
+  });
+}
+function ConfirmHost() {
+  const [req, setReq] = useState(null);
+  const [typed, setTyped] = useState('');
+  useEffect(() => {
+    const fn = r => {
+      setTyped('');
+      setReq(r);
+    };
+    _confirmListeners.add(fn);
+    return () => _confirmListeners.delete(fn);
+  }, []);
+  if (!req) return null;
+  const close = ok => {
+    req.resolve(ok);
+    setReq(null);
+  };
+  const ready = !req.typed || typed.trim().toUpperCase() === req.typed;
+  return /*#__PURE__*/React.createElement("div", {
+    role: "dialog",
+    "aria-modal": "true",
+    style: {
+      position: 'fixed',
+      inset: 0,
+      background: 'rgba(0,0,0,0.55)',
+      zIndex: 10001,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 16
+    },
+    onKeyDown: e => {
+      if (e.key === 'Escape') close(false);
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      maxWidth: 420,
+      width: '100%'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 16,
+      fontWeight: 700,
+      marginBottom: 8
+    }
+  }, req.title), req.message && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: 'var(--text-secondary)',
+      lineHeight: 1.5
+    }
+  }, req.message), req.typed && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: 'var(--text-muted)',
+      margin: '12px 0 6px'
+    }
+  }, "Type ", /*#__PURE__*/React.createElement("strong", null, req.typed), " to confirm"), /*#__PURE__*/React.createElement("input", {
+    autoFocus: true,
+    value: typed,
+    onChange: e => setTyped(e.target.value),
+    autoComplete: "off",
+    spellCheck: false,
+    style: {
+      width: '100%',
+      boxSizing: 'border-box',
+      padding: '8px 10px',
+      borderRadius: 6,
+      border: '1px solid var(--border)',
+      background: 'var(--bg-input)',
+      color: 'var(--text-primary)',
+      fontFamily: 'var(--font-mono)'
+    }
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 10,
+      justifyContent: 'flex-end',
+      marginTop: 16
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-sm",
+    onClick: () => close(false)
+  }, "Cancel"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-sm",
+    disabled: !ready,
+    autoFocus: !req.typed,
+    style: req.danger ? {
+      background: 'var(--accent-red)',
+      color: '#fff',
+      borderColor: 'var(--accent-red)'
+    } : {},
+    onClick: () => close(true)
+  }, req.confirmLabel || 'Confirm'))));
+}
+
+// ═══════════════════════════════════════════════
 // Pairing — no accounts, no passwords: a device proves once that it is with
 // this Atlas (label code, Atlas's own Wi-Fi, or "Allow" on a paired device).
 // ═══════════════════════════════════════════════
@@ -15181,6 +15354,243 @@ function PairRequestPrompt({
     className: "btn btn-primary btn-sm",
     onClick: () => decide(true)
   }, "Allow"))));
+}
+
+// ═══════════════════════════════════════════════
+// Privacy — how long Atlas keeps history, deleting it, and the security log.
+// ═══════════════════════════════════════════════
+const RETENTION_CHOICES = [['retention_ai_days', 'Ray conversations', [[0, 'Until I delete them'], [30, '30 days'], [90, '90 days'], [365, '1 year']]], ['retention_explain_days', "Sources behind Ray's answers", [[7, '7 days'], [30, '30 days'], [90, '90 days'], [0, 'Until I delete them']]], ['retention_location_days', 'Location history', [[1, '1 day'], [7, '7 days'], [30, '30 days'], [0, 'Until I delete it']]], ['retention_tracker_days', 'Shared phones on the map', [[7, '7 days'], [30, '30 days'], [90, '90 days'], [0, 'Until I remove them']]]];
+const AUDIT_LABELS = {
+  settings_changed: 'Settings changed',
+  ray_settings_changed: 'Ray settings changed',
+  location_sharing_changed: 'Location sharing changed',
+  radio_settings_changed: 'Radio settings changed',
+  radio_name_changed: 'Radio name changed',
+  wifi_connected: 'Joined a Wi-Fi network',
+  wifi_disconnected: 'Left a Wi-Fi network',
+  hotspot_changed: 'Hotspot name or password changed',
+  hotspot_started: 'Hotspot turned on',
+  hotspot_stopped: 'Hotspot turned off',
+  ray_power_changed: 'Ray turned on or off',
+  radio_power_changed: 'Radio turned on or off',
+  device_paired: 'New device paired',
+  device_approved: 'New device allowed',
+  device_denied: 'New device declined',
+  device_removed: 'Device removed',
+  pairing_code_rejected: 'Wrong setup code entered',
+  update_requested: 'Update requested',
+  update_cancelled: 'Update cancelled',
+  update_verified: 'Update downloaded and verified',
+  update_install_started: 'Update installation started',
+  update_install_refused: 'Update could not start',
+  update_installed: 'Update installed',
+  update_rolled_back: 'Update undone — previous version restored',
+  update_failed: 'Update failed',
+  retention_changed: 'History settings changed',
+  ai_history_deleted: 'AI history deleted',
+  location_history_deleted: 'Location history deleted',
+  factory_reset: 'Factory reset'
+};
+function auditDetail(d) {
+  if (!d) return '';
+  const parts = [];
+  if (d.version) parts.push(`Atlas ${d.version}`);
+  if (d.method) parts.push({
+    setup_code: 'with the setup code',
+    hotspot: "over Atlas's Wi-Fi",
+    approved_by: 'approved on a paired device'
+  }[d.method] || d.method);
+  if (Array.isArray(d.keys) && d.keys.length) parts.push(d.keys.slice(0, 6).join(', ') + (d.keys.length > 6 ? '…' : ''));
+  return parts.join(' · ');
+}
+function PrivacySection() {
+  const [cfg, setCfg] = useState(null);
+  const [note, setNote] = useState(null);
+  const [busy, setBusy] = useState('');
+  const [log, setLog] = useState(null);
+  useEffect(() => {
+    api.get('/api/privacy/retention').then(setCfg).catch(() => setCfg(null));
+  }, []);
+  const SL = {
+    fontSize: 11,
+    fontWeight: 700,
+    color: 'var(--text-muted)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    marginBottom: 12
+  };
+  const muted = {
+    fontSize: 12,
+    color: 'var(--text-muted)'
+  };
+  const show = (ok, text) => {
+    setNote({
+      ok,
+      text
+    });
+    setTimeout(() => setNote(n => n && n.text === text ? null : n), 6000);
+  };
+  const failText = (e, fallback) => (e === null || e === void 0 ? void 0 : e.message) || (e === null || e === void 0 ? void 0 : e.error) || fallback;
+  const setDays = (key, days) => api.put('/api/privacy/retention', {
+    [key]: days
+  }).then(setCfg).catch(e => show(false, failText(e, 'Could not save')));
+  const erase = async kind => {
+    const spec = kind === 'ai' ? {
+      title: 'Delete all Ray conversations?',
+      url: '/api/privacy/delete-ai-history',
+      label: 'Delete AI History',
+      message: 'Every conversation with Ray is erased from Atlas and cannot be recovered. Documents you added to Ray stay.',
+      done: r => `Deleted ${r.conversations} conversation${r.conversations === 1 ? '' : 's'}.`
+    } : {
+      title: "Delete Atlas's location history?",
+      url: '/api/privacy/delete-location-history',
+      label: 'Delete Location History',
+      message: "Atlas's recorded track, shared phones' positions and recorded hikes are erased and cannot be recovered. Saved places, routes and waypoints stay.",
+      done: () => 'Location history deleted.'
+    };
+    if (!(await atlasConfirm({
+      title: spec.title,
+      message: spec.message,
+      confirmLabel: spec.label,
+      danger: true
+    }))) return;
+    setBusy(kind);
+    try {
+      show(true, spec.done(await api.post(spec.url, {
+        confirm: true
+      })));
+    } catch (e) {
+      show(false, failText(e, 'Could not delete'));
+    } finally {
+      setBusy('');
+    }
+  };
+  const toggleLog = () => {
+    if (log) {
+      setLog(null);
+      return;
+    }
+    api.get('/api/audit?limit=100').then(setLog).catch(e => show(false, failText(e, 'Could not load the security log')));
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      marginBottom: 16
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: SL
+  }, "Privacy"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...muted,
+      marginBottom: 12
+    }
+  }, "Everything stays on this Atlas. Choose how long history is kept; older records are erased each night."), cfg && RETENTION_CHOICES.map(([key, label, options]) => {
+    const value = Number(cfg[key]);
+    const opts = options.some(([d]) => d === value) ? options : [...options, [value, `${value} days`]];
+    return /*#__PURE__*/React.createElement("div", {
+      key: key,
+      style: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        padding: '6px 0'
+      }
+    }, /*#__PURE__*/React.createElement("label", {
+      htmlFor: `ret-${key}`,
+      style: {
+        flex: 1,
+        fontSize: 13
+      }
+    }, label), /*#__PURE__*/React.createElement("select", {
+      id: `ret-${key}`,
+      value: value,
+      onChange: e => setDays(key, Number(e.target.value)),
+      style: {
+        padding: '6px 8px',
+        borderRadius: 6,
+        border: '1px solid var(--border)',
+        background: 'var(--bg-input)',
+        color: 'var(--text-primary)'
+      }
+    }, opts.map(([d, text]) => /*#__PURE__*/React.createElement("option", {
+      key: d,
+      value: d
+    }, text))));
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 10,
+      flexWrap: 'wrap',
+      marginTop: 14
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-sm",
+    style: {
+      color: 'var(--accent-red)'
+    },
+    disabled: !!busy,
+    onClick: () => erase('ai')
+  }, busy === 'ai' ? 'Deleting…' : 'Delete AI History'), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-sm",
+    style: {
+      color: 'var(--accent-red)'
+    },
+    disabled: !!busy,
+    onClick: () => erase('location')
+  }, busy === 'location' ? 'Deleting…' : 'Delete Location History'), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-sm",
+    onClick: toggleLog
+  }, log ? 'Hide security log' : 'Show security log')), note && /*#__PURE__*/React.createElement("div", {
+    role: "status",
+    style: {
+      fontSize: 12,
+      marginTop: 10,
+      color: note.ok ? 'var(--accent-green)' : 'var(--accent-red)'
+    }
+  }, note.text), log && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 12,
+      maxHeight: 280,
+      overflowY: 'auto',
+      borderTop: '1px solid var(--border)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...muted,
+      padding: '8px 0'
+    }
+  }, "Changes to settings, networks, paired devices and updates \u2014 which device made them, never what was typed."), log.length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: muted
+  }, "Nothing recorded yet."), log.map((e, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      display: 'flex',
+      gap: 10,
+      padding: '6px 0',
+      borderTop: '1px solid var(--border)',
+      fontSize: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: 130,
+      flexShrink: 0,
+      color: 'var(--text-muted)',
+      fontFamily: 'var(--font-mono)'
+    }
+  }, new Date(e.ts * 1000).toLocaleString()), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      minWidth: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", null, AUDIT_LABELS[e.action] || e.action, e.actor ? /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: 'var(--text-muted)'
+    }
+  }, " \u2014 ", e.actor) : null), auditDetail(e.detail) && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: 'var(--text-muted)'
+    }
+  }, auditDetail(e.detail)))))));
 }
 function ConnectedDevicesSection() {
   const [clients, setClients] = useState(null);
@@ -15569,6 +15979,9 @@ function App() {
       }) => {
         setNodes(prev => prev.filter(n => n.node_id !== node_id));
       });
+      socket.on('location_history_deleted', () => setTrackerDevices([]));
+      // The Ray page may mount before this socket exists, so it listens on window.
+      socket.on('ai_history_deleted', () => window.dispatchEvent(new Event('atlas-ai-history-deleted')));
       socket.on('tracker_removed', ({
         id
       }) => {
@@ -15741,7 +16154,7 @@ function App() {
       ...appSettings,
       refresh
     }
-  }, /*#__PURE__*/React.createElement(PairRequestPrompt, {
+  }, /*#__PURE__*/React.createElement(ConfirmHost, null), /*#__PURE__*/React.createElement(PairRequestPrompt, {
     requests: pairRequests,
     onDone: id => setPairRequests(prev => prev.filter(x => x.request_id !== id))
   }), /*#__PURE__*/React.createElement("div", {
@@ -15888,7 +16301,11 @@ function App() {
     trackerDevices: trackerDevices,
     device: device,
     gpsStatus: gpsStatus,
-    onRemoveTracker: id => api.del(`/api/tracker/devices/${id}`).then(() => setTrackerDevices(prev => prev.filter(d => d.id !== id)))
+    onRemoveTracker: id => atlasConfirm({
+      title: 'Remove this shared phone from the map?',
+      confirmLabel: 'Remove',
+      danger: true
+    }).then(ok => ok && api.del(`/api/tracker/devices/${id}`).then(() => setTrackerDevices(prev => prev.filter(d => d.id !== id))))
   }), page === 'comms' && /*#__PURE__*/React.createElement(CommsSection, {
     messages: messages,
     alerts: alerts,

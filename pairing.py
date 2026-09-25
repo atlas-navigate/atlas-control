@@ -32,6 +32,7 @@ import secrets
 import threading
 import time
 
+import audit_log
 import database as db
 import device_identity
 
@@ -98,6 +99,8 @@ def _issue(name, kind, proof):
                  (client_id, _clean_name(name, kind), kind if kind in KINDS else "browser",
                   _hash(token), proof, now, now))
     conn.commit()
+    audit_log.record("device_paired", _clean_name(name, kind), kind=kind if kind in KINDS else "browser",
+                     method=proof.split(":", 1)[0])
     return client_id, token
 
 
@@ -221,6 +224,7 @@ def claim_with_setup_code(code, name, kind, ip):
         raise ValueError("Too many attempts. Wait a few minutes and try again.")
     if not atlas_blocking.call(device_identity.check_setup_code, code):
         _record_failure(ip)
+        audit_log.record("pairing_code_rejected", None)
         raise ValueError("That setup code doesn't match this Atlas. Check the label and try again.")
     return _issue(name, kind, "setup_code")
 

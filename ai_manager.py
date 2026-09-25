@@ -7259,7 +7259,7 @@ class AIManager:
             if user_loc and user_loc.get("type") == "named":
                 sources.append(f"User Location ({user_loc['name']})")
             elif user_loc and user_loc.get("type") == "coords":
-                sources.append(f"User Location ({user_loc['lat']:.4f}, {user_loc['lon']:.4f})")
+                sources.append(f"User Location (≈{user_loc['lat']:.2f}, {user_loc['lon']:.2f})")
             else:
                 sources.append("GPS Fix")
         if not sources:
@@ -7297,12 +7297,14 @@ class AIManager:
             if user_loc.get("type") == "named":
                 return f"user-stated location: {user_loc['name']}"
             if user_loc.get("type") == "coords":
-                return f"user-stated coords: {user_loc['lat']:.4f}, {user_loc['lon']:.4f}"
+                # Stored with the answer: keep it to ~1 km, enough to explain it.
+                return f"user-stated coords: ≈{user_loc['lat']:.2f}, {user_loc['lon']:.2f}"
         if gps_fix and gps_fix.get("latitude") is not None:
             lat, lon = gps_fix["latitude"], gps_fix["longitude"]
             place = _reverse_geocode(lat, lon)
-            tail = f" ({place})" if place else ""
-            return f"device GPS fix: {lat:.4f}, {lon:.4f}{tail}"
+            if place:
+                return f"device GPS fix near {place}"
+            return f"device GPS fix: ≈{lat:.2f}, {lon:.2f}"
         return None
 
     def _build_explain_trace(self, *, user_message, path, ctx_meta, settings,
