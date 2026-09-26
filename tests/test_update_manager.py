@@ -84,6 +84,14 @@ class ReleaseServer:
                 self.server_bind()
                 self.server_activate()
 
+            def get_request(self):
+                # socket.accept() builds the connection from the module-level
+                # socket class, which gevent has patched; a gevent socket read
+                # that has to wait in this native thread kills the handler
+                # ("Cannot switch to a different thread") about 1 time in 300.
+                fd, addr = self.socket._accept()
+                return native_socket(self.address_family, self.socket_type, fileno=fd), addr
+
         self.httpd = Server(("127.0.0.1", 0), Handler)
         self.url = f"http://127.0.0.1:{self.httpd.server_address[1]}"
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()

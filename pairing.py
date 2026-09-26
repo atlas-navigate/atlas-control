@@ -225,7 +225,8 @@ def claim_with_setup_code(code, name, kind, ip):
     if not atlas_blocking.call(device_identity.check_setup_code, code):
         _record_failure(ip)
         audit_log.record("pairing_code_rejected", None)
-        raise ValueError("That setup code doesn't match this Atlas. Check the label and try again.")
+        raise ValueError("That setup code doesn't match this Atlas. Use the code labelled "
+                         "\u201cSetup code\u201d \u2014 not the Wi-Fi password.")
     return _issue(name, kind, "setup_code")
 
 

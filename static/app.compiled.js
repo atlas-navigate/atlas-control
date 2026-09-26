@@ -15117,6 +15117,7 @@ async function pairJson(url, data) {
   try {
     body = await r.json();
   } catch (e) {}
+  if (r.status === 429) throw new Error(body.error || 'Too many tries — wait a minute and try again.');
   if (!r.ok) throw new Error(body.error || `Request failed (${r.status})`);
   return body;
 }

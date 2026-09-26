@@ -48,6 +48,17 @@ class AppPageTests(unittest.TestCase):
         self.assertEqual(script_src.strip(), "'self'")
         self.assertIn("object-src 'none'", csp)
 
+    def test_release_uses_its_prebuilt_bundle_even_if_the_template_looks_newer(self):
+        with mock.patch.object(self.app.atlas_paths, "code_is_writable", return_value=False), \
+                mock.patch.object(self.app.os.path, "getmtime",
+                                  side_effect=lambda p: 2.0 if p.endswith("index.html") else 1.0), \
+                mock.patch.object(self.app, "_MOBILE_HTML", None), \
+                mock.patch.object(self.app.logger, "warning") as warn:
+            self.app._precompile_jsx()
+            self.assertIsNotNone(self.app._MOBILE_HTML)
+            self.assertIn("defer", self.app._MOBILE_HTML)
+        warn.assert_not_called()
+
     def test_template_has_no_inline_event_handlers(self):
         html = open(os.path.join(REPO, "templates", "index.html"), encoding="utf-8").read()
         self.assertIsNone(re.search(r"<[^>]+\son[a-z]+\s*=\s*[\"']", html))

@@ -123,6 +123,36 @@ class IdentityTests(unittest.TestCase):
         self.assertNotEqual(first["device_id"], second["device_id"])
         self.assertEqual(second["created_reason"], "cloned-storage")
 
+    def test_wifi_password_and_setup_code_cannot_be_mistaken_for_each_other(self):
+        import re
+        self.identity.ensure()
+        d = self.sb.paths.IDENTITY
+        code = open(os.path.join(d, "setup_code")).read().strip()
+        pw = json.load(open(os.path.join(d, "hotspot.json")))["password"]
+        self.assertRegex(code, r"^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$")
+        self.assertRegex(pw, r"^[a-z0-9]{4}(-[a-z0-9]{4}){3}$")
+        text = self.identity.label_text()
+        self.assertIn("Setup code — type this to pair", text)
+        self.assertLess(text.index(code), text.index(pw))
+        self.assertIsNone(re.search(r"setup code", text.split(code)[1], re.I))   # the code is the only "setup code"
+
+    def test_setup_code_check_and_replacement(self):
+        import device_identity
+        self.identity.ensure()
+        d = self.sb.paths.IDENTITY
+        self.assertTrue(self.identity.setup_code_matches())
+        old = open(os.path.join(d, "setup_code")).read().strip()
+        with mock.patch.object(device_identity, "IDENTITY_DIR", d):
+            self.assertTrue(device_identity.check_setup_code(old))           # what the app checks
+            new = self.identity.new_setup_code()
+            self.assertNotEqual(new, old)
+            self.assertTrue(device_identity.check_setup_code(new.lower()))
+            self.assertFalse(device_identity.check_setup_code(old))
+        h = json.load(open(os.path.join(d, "setup_code.hash")))
+        h["hash"] = h["hash"][::-1]
+        json.dump(h, open(os.path.join(d, "setup_code.hash"), "w"))
+        self.assertFalse(self.identity.setup_code_matches())
+
     def test_setup_code_hash_verifies(self):
         import base64
         import hashlib
@@ -231,6 +261,19 @@ class RealSystemFilesTests(unittest.TestCase):
         self.assertIn("/etc/atlas/identity/tls/cert.pem", site)
         self.assertNotIn("0.0.0.0:5000", site)
         self.assertEqual(stat.S_IMODE(os.stat(sb.paths.p("/usr/local/lib/atlas/bin/atlas-launch")).st_mode), 0o755)
+
+
+class NginxPolicyTests(unittest.TestCase):
+    def test_throttling_is_429_and_only_proofs_get_the_pairing_rate(self):
+        import re
+        conf = open(os.path.join(REPO, "system", "nginx", "atlas.conf")).read()
+        self.assertIn("limit_req_status  429;", conf)     # never a 503 → "Atlas is restarting"
+        pair = re.search(r"location ~ (\S+) \{\s*limit_req zone=atlas_pair", conf).group(1)
+        rx = re.compile(pair)
+        for path in ("/api/pair/claim", "/api/pair/hotspot", "/api/pair/request"):
+            self.assertTrue(rx.search(path), path)
+        for path in ("/api/pair/request/1661c73f8eb33897", "/api/pair/status", "/api/pair/clients"):
+            self.assertFalse(rx.search(path), path)          # polling / status: general API limit
 
 
 class DiscoveryFilesTests(unittest.TestCase):

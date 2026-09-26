@@ -70,8 +70,18 @@ def identity_main(argv):
         device = identity.load() or {}
     elif cmd == "label-json":
         device = identity.label_payload()
+    elif cmd == "label":
+        print(identity.label_text())
+        return 0
+    elif cmd == "check":
+        ok = identity.setup_code_matches()
+        print("setup code verifies" if ok else "setup code does NOT verify — run: atlas-identity new-setup-code")
+        return 0 if ok else 1
+    elif cmd == "new-setup-code":
+        print(f"New setup code: {identity.new_setup_code()}  (print a new label; paired devices are unaffected)")
+        return 0
     else:
-        print("usage: atlas-identity ensure|show|label-json", file=sys.stderr)
+        print("usage: atlas-identity show|ensure|label|label-json|check|new-setup-code", file=sys.stderr)
         return 2
     print(json.dumps(device, indent=2))
     return 0

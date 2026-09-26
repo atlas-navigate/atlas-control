@@ -37,9 +37,12 @@ class FakeHelperServer:
     def _serve(self):
         while True:
             try:
-                conn, _ = self.sock.accept()
+                # accept() would wrap the connection in gevent's patched socket
+                # class, which cannot wait inside this native thread.
+                fd, _ = self.sock._accept()
             except OSError:
                 return
+            conn = _native_socket()(socket.AF_UNIX, socket.SOCK_STREAM, fileno=fd)
             data = b""
             while b"\n" not in data:
                 chunk = conn.recv(4096)

@@ -23,6 +23,7 @@ import base64
 import datetime
 import grp
 import hashlib
+import hmac
 import os
 import pwd
 import secrets
@@ -31,6 +32,9 @@ from . import fsutil, paths
 
 # No 0/O, 1/I/L, 5/S: read aloud and typed from a label without mistakes.
 ALPHABET = "ABCDEFGHJKMNPQRTUVWXYZ2346789"
+# The hotspot password has a visibly different shape (four lowercase groups)
+# so nobody types the Wi-Fi password where the setup code belongs, or back.
+WIFI_ALPHABET = ALPHABET.lower()
 DEFAULT_HOTSPOT_PASSWORDS = {"AtlasControl", "password", "atlascontrol"}
 
 
@@ -44,6 +48,10 @@ def _code(n):
 
 def _grouped(n_groups=3, size=4):
     return "-".join(_code(size) for _ in range(n_groups))
+
+
+def _wifi_password():
+    return "-".join("".join(secrets.choice(WIFI_ALPHABET) for _ in range(4)) for _ in range(4))
 
 
 def module_serial():
@@ -126,14 +134,11 @@ def create(hotspot_password=None, hostname=None, reason="new"):
     fsutil.atomic_write_bytes(_d("tls", "key.pem"), key_pem, mode=0o600)
     fsutil.atomic_write_bytes(_d("tls", "cert.pem"), cert_pem, mode=0o644)
 
-    password = hotspot_password or _grouped()
+    password = hotspot_password or _wifi_password()
     fsutil.atomic_write_json(_d("hotspot.json"), {"ssid": name, "password": password}, mode=0o640)
     _owner(_d("hotspot.json"), "root", paths.SERVICE_USER, 0o640)
 
-    setup = _grouped()
-    fsutil.atomic_write_bytes(_d("setup_code"), (setup + "\n").encode(), mode=0o600)
-    fsutil.atomic_write_json(_d("setup_code.hash"), hash_setup_code(setup), mode=0o640)
-    _owner(_d("setup_code.hash"), "root", paths.SERVICE_USER, 0o640)
+    _write_setup_code(_grouped())
 
     secret = secrets.token_urlsafe(48)
     fsutil.atomic_write_bytes(_d("proxy_secret"), (secret + "\n").encode(), mode=0o640)
@@ -187,6 +192,51 @@ def ensure(adopt_hotspot_password=None, hostname=None):
     if pw in DEFAULT_HOTSPOT_PASSWORDS:
         pw = None
     return create(hotspot_password=pw, hostname=hostname, reason="adopted" if hostname else "new")
+
+
+def _write_setup_code(setup):
+    fsutil.atomic_write_bytes(_d("setup_code"), (setup + "\n").encode(), mode=0o600)
+    fsutil.atomic_write_json(_d("setup_code.hash"), hash_setup_code(setup), mode=0o640)
+    _owner(_d("setup_code.hash"), "root", paths.SERVICE_USER, 0o640)
+
+
+def setup_code_matches():
+    """Does the stored setup code verify against the hash pairing checks?"""
+    try:
+        with open(_d("setup_code"), encoding="utf-8") as f:
+            code = f.read().strip()
+        stored = fsutil.read_json(_d("setup_code.hash"), None) or {}
+        salt = base64.b64decode(stored["salt"])
+        again = hash_setup_code(code, salt=salt)
+        return hmac.compare_digest(again["hash"], stored["hash"])
+    except (OSError, KeyError, ValueError, TypeError):
+        return False
+
+
+def new_setup_code():
+    """Replace the setup code (support: a lost label). The TLS key, hotspot and
+    paired devices stay; only new pairings need the new code. Returns it."""
+    setup = _grouped()
+    _write_setup_code(setup)
+    if not setup_code_matches():
+        raise RuntimeError("the new setup code did not verify")
+    return setup
+
+
+def label_text(payload=None):
+    """The label's facts for a person to read, each clearly named."""
+    p = payload or label_payload()
+    return "\n".join([
+        f"{p['name']}   https://{p['hostname']}.local",
+        "",
+        "  Setup code — type this to pair a phone or browser:",
+        f"      {p['setup_code']}",
+        "",
+        "  Atlas's own Wi-Fi (not needed to pair on your network):",
+        f"      Name:      {p['hotspot_ssid']}",
+        f"      Password:  {p['hotspot_password']}",
+        "",
+    ])
 
 
 def label_payload(device=None):

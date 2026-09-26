@@ -11,8 +11,10 @@ Any one of these proves the device belongs to the owner:
 - **Scan the label** with the Atlas app. The QR code carries the unit's id,
   setup code, TLS key pin and hotspot details, so the app joins Atlas's
   Wi-Fi if needed and pairs without any typing.
-- **Type the setup code** printed on the label (dashes and case don't
-  matter). Five wrong codes from one address, or twenty in total, pause
+- **Type the setup code** printed on the label — three groups of capitals
+  and digits (`H7QD-M3XR-9KTW`); the Wi-Fi password looks different (four
+  lowercase groups) so the two can't be confused. Dashes and case don't
+  matter. Five wrong codes from one address, or twenty in total, pause
   attempts for ten minutes.
 - **Join Atlas's own Wi-Fi** (its name and password are on the label) and
   tap Connect — being on that network already proves physical access.
@@ -45,3 +47,11 @@ lasts until the device is removed or Atlas is reset.
 `/tracker` pairs through the same approval flow (kind "Shared phone") and
 sends its position at most every 10 s and 15 m, with a 30 s heartbeat.
 Shared-phone positions are kept 30 days by default (Settings → Privacy).
+
+## Support
+
+On the unit (root): `atlas-identity label` prints the label's facts, each
+clearly named; `atlas-identity check` confirms the stored setup code verifies;
+`atlas-identity new-setup-code` issues a new one (for a lost or damaged label —
+paired devices keep working). Units made before the Wi-Fi password format
+changed keep their original password.

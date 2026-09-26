@@ -398,6 +398,11 @@ limiter = Limiter(
     storage_uri="memory://",
 )
 
+@app.errorhandler(429)
+def _too_many_requests(_exc):
+    return jsonify({"error": "Too many tries — wait a minute and try again.", "code": "rate_limited"}), 429
+
+
 # ── Access control: allow local-only client addresses ────────────────────────
 # Covers normal private LANs plus shared-address/CGNAT networks some tethering
 # and travel-router setups expose locally:
@@ -641,10 +646,13 @@ def _precompile_jsx():
     """
     global _MOBILE_HTML
     try:
-        # Only recompile if index.html is newer than the compiled output
+        # Only recompile if index.html is newer than the compiled output. A
+        # release directory is read-only and always ships its bundle prebuilt
+        # (extraction leaves sub-second mtime differences, so don't compare).
         if os.path.exists(_COMPILED_JS):
-            if os.path.getmtime(_INDEX_HTML) <= os.path.getmtime(_COMPILED_JS):
-                logger.info("JSX pre-compile: up-to-date, skipping")
+            if not atlas_paths.code_is_writable() or \
+                    os.path.getmtime(_INDEX_HTML) <= os.path.getmtime(_COMPILED_JS):
+                logger.info("JSX: using the prebuilt bundle")
                 with _MOBILE_HTML_LOCK:
                     _MOBILE_HTML = _build_mobile_html()
                 return

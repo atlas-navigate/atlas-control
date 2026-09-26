@@ -98,6 +98,18 @@ class SetupCodeTests(PairingTestBase):
         self.assertEqual(r.status_code, 403)                         # locked out for a while
         self.assertIn("Too many", r.get_json()["error"])
 
+    def test_wrong_code_message_points_at_the_right_line_on_the_label(self):
+        r = self.post("/api/pair/claim", json={"setup_code": "WRONG-CODE-HERE", "kind": "android"})
+        self.assertEqual(r.status_code, 403)
+        self.assertIn("not the Wi-Fi password", r.get_json()["error"])
+
+    def test_throttled_pairing_answers_429_json(self):
+        codes = [self.post("/api/pair/claim", json={"setup_code": "WRONG-CODE-HERE", "kind": "android"}).status_code
+                 for _ in range(12)]
+        self.assertEqual(codes[-1], 429)
+        r = self.post("/api/pair/claim", json={"setup_code": "WRONG-CODE-HERE", "kind": "android"})
+        self.assertEqual(r.get_json()["code"], "rate_limited")
+
     def test_native_app_gets_a_bearer_token_that_needs_no_csrf(self):
         r = self.post("/api/pair/claim", json={"setup_code": self.setup_code, "kind": "android"})
         token = r.get_json()["token"]
