@@ -1253,21 +1253,27 @@ except Exception: print(0)' /var/lib/atlas-update/installed.json)
             "$BUNDLE"/*.tar.xz "$READY/"
         /usr/bin/python3 -I - <<'PY'
 import json, socket, sys, time
+def status():
+    try:
+        return json.load(open("/run/atlas-update/status.json"))
+    except Exception:
+        return {}
+# The status file still shows the previous update's result until the engine
+# picks this one up: only a result with a new transaction id counts.
+before = status().get("txid")
 s = socket.socket(socket.AF_UNIX)
 s.connect("/run/atlas/helper.sock")
 s.sendall(b'{"verb": "update.apply", "args": {}}\n')
 s.recv(4096)
 last = None
 for _ in range(1800):
-    try:
-        st = json.load(open("/run/atlas-update/status.json"))
-    except Exception:
-        st = {}
+    st = status()
     line = f"{st.get('stage')}: {st.get('message') or ''}"
     if line != last:
         print("   ", line, flush=True)
         last = line
-    if st.get("engine_state") == "IDLE" and st.get("stage") in ("success", "rolled_back", "failed", "cancelled", "interrupted"):
+    if st.get("txid") != before and st.get("engine_state") == "IDLE" and \
+            st.get("stage") in ("success", "rolled_back", "failed", "cancelled", "interrupted"):
         sys.exit(0 if st["stage"] == "success" else 1)
     time.sleep(1)
 sys.exit("timed out waiting for the update engine")
