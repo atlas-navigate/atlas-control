@@ -294,3 +294,46 @@ class PowerLossTests(EngineTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EngineSwitchTests(EngineTestCase):
+    """A release that carries a newer engine installs it first, re-executes
+    into it, and the new engine finishes the same transaction."""
+
+    def test_newer_bundled_engine_installs_itself_and_finishes_the_update(self):
+        from atlas_engine import ENGINE_VERSION
+        repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        src = os.path.join(repo, "system", "atlas_engine")
+        newer = ENGINE_VERSION + 1
+        extra = {}
+        for name in os.listdir(src):
+            if name.endswith(".py"):
+                text = open(os.path.join(src, name)).read()
+                if name == "__init__.py":
+                    text = text.replace(f"ENGINE_VERSION = {ENGINE_VERSION}\n", f"ENGINE_VERSION = {newer}\n")
+                extra[f"system/atlas_engine/{name}"] = text
+        self.offer(extra_files=extra, manifest_overrides={"engine_version": newer})
+
+        class Exec(BaseException):          # the process is replaced; nothing in it runs on
+            pass
+
+        first = self.sb.engine()
+        execs = []
+
+        def fake_exec(exe, argv):
+            execs.append(argv)
+            raise Exec()                     # a real execv never returns
+        first.execv = fake_exec
+        with self.assertRaises(Exec):
+            first.run()
+        self.assertTrue(execs and execs[0][-1] == "run")
+        engine_dir = self.sb.paths.ENGINE_DIR
+        self.assertEqual(os.readlink(os.path.join(engine_dir, "current")), str(newer))
+        installed = open(os.path.join(engine_dir, str(newer), "atlas_engine", "__init__.py")).read()
+        self.assertIn(f"ENGINE_VERSION = {newer}", installed)
+        self.assertEqual(json.load(open(self.sb.paths.JOURNAL))["state"], "VENV")
+
+        # The re-executed engine picks the open transaction up where it left off.
+        self.assertEqual(self.sb.engine().run(), "done")
+        self.assertEqual(self.sb.current_version(), "1.1.0")
+        self.assertEqual(self.sb.last_result()["result"], "success")

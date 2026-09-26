@@ -9,6 +9,7 @@ writes one JSON response. There is no generic "run this command" verb and
 no sudo anywhere, so a compromised app process can do no more than these
 verbs allow.
 """
+import grp
 import json
 import os
 import pwd
@@ -29,11 +30,25 @@ def _peer_uid(sock):
 
 
 def _allowed_uids():
+    """Root and the Atlas service account. On developer units only, also the
+    members of the atlas group — the developer account, which has sudo there
+    anyway — so tools/dev/deploy works without sudo. Never on retail units:
+    group membership alone must not reach root actions."""
     uids = {0}
     try:
         uids.add(pwd.getpwnam(paths.SERVICE_USER).pw_uid)
     except KeyError:
         pass
+    if paths.dev_mode():
+        try:
+            members = grp.getgrnam(paths.SERVICE_USER).gr_mem
+        except KeyError:
+            members = []
+        for name in members:
+            try:
+                uids.add(pwd.getpwnam(name).pw_uid)
+            except KeyError:
+                pass
     return uids
 
 

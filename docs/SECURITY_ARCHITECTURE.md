@@ -89,7 +89,9 @@ The app runs as the unprivileged `atlas` account with `NoNewPrivileges=yes`,
 `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp` and write access to only
 `data/ logs/ updates/ cache/`. Root actions go through `atlas-helper`, a
 socket-activated root service (`/run/atlas/helper.sock`, `root:atlas 0660`,
-peer credentials checked) with a fixed verb table and validated arguments:
+peer credentials checked: root and the `atlas` account only — on developer
+units also members of the `atlas` group, so `tools/dev/deploy` needs no sudo)
+with a fixed verb table and validated arguments:
 Wi-Fi scan/connect/forget/disconnect, hotspot up/down, avahi reload, SMART
 read, reboot/shutdown, update apply/cancel/status. Wi-Fi passwords are
 written by root into NetworkManager keyfiles — never on a command line,

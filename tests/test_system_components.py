@@ -71,6 +71,18 @@ class HelperValidationTests(unittest.TestCase):
         self.assertIn("psk=s3cret-pass!", text)
         self.assertIn("ssid=72;111;109;101;59;78;101;116;", text)   # bytes of "Home;Net"
 
+    def test_only_root_and_atlas_everywhere_and_the_atlas_group_only_on_dev_units(self):
+        import collections
+        Pw = collections.namedtuple("Pw", "pw_uid")
+        Gr = collections.namedtuple("Gr", "gr_mem")
+        uids = {"atlas": 978, "admin": 1000}
+        with mock.patch.object(self.helper.pwd, "getpwnam", side_effect=lambda n: Pw(uids[n])), \
+                mock.patch.object(self.helper.grp, "getgrnam", return_value=Gr(["admin"])):
+            with mock.patch.object(self.helper.paths, "dev_mode", return_value=False):
+                self.assertEqual(self.helper._allowed_uids(), {0, 978})       # retail: group alone is not enough
+            with mock.patch.object(self.helper.paths, "dev_mode", return_value=True):
+                self.assertEqual(self.helper._allowed_uids(), {0, 978, 1000})
+
     def test_update_apply_writes_a_request_without_paths_from_the_app(self):
         with mock.patch.object(self.helper, "_run", return_value={"rc": 0, "out": "", "err": ""}):
             out = self.helper.handle({"verb": "update.apply", "args": {"handoff_dir": "/etc"}})

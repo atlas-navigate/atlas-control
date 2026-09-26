@@ -5,16 +5,21 @@
 #
 #   tools/dev/deploy [VERSION]          default: <VERSION>-dev.<UTC timestamp>
 #
-# Needs: membership of the `atlas` group (log in again after migration),
+# Needs: membership of the `atlas` group (log in again after migration, or
+# `sg atlas -c tools/dev/deploy`) on a developer unit, or sudo; and
 # ~/.config/atlas-dev/dev-release.key (tools/release/keygen.py --dev).
 set -euo pipefail
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
 PY=${ATLAS_BUILD_PYTHON:-/atlas_data/atlas-control/venv/bin/python3}
 STATE=${ATLAS_STATE_DIR:-/atlas_data/atlas-control}
-KEY=${ATLAS_DEV_KEY:-$HOME/.config/atlas-dev/dev-release.key}
+OWNER_HOME=$HOME
+[[ $EUID -eq 0 && -n "${SUDO_USER:-}" ]] && OWNER_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+KEY=${ATLAS_DEV_KEY:-$OWNER_HOME/.config/atlas-dev/dev-release.key}
 VERSION=${1:-$(cat "$REPO/VERSION")-dev.$(date -u +%Y%m%d%H%M%S)}
 
-id -nG | tr ' ' '\n' | grep -qx atlas || { echo "not in the atlas group yet: log in again (or run: sg atlas -c '$0 $*')" >&2; exit 1; }
+if [[ $EUID -ne 0 ]]; then
+    id -nG | tr ' ' '\n' | grep -qx atlas || { echo "not in the atlas group yet: log in again (or run: sg atlas -c '$0 $*')" >&2; exit 1; }
+fi
 [ -f "$KEY" ] || { echo "no developer key at $KEY (tools/release/keygen.py --out ${KEY%.key} --dev)" >&2; exit 1; }
 
 OUT=$(mktemp -d)
@@ -25,15 +30,25 @@ trap 'rm -rf "$OUT"' EXIT
 
 READY="$STATE/updates/ready"
 rm -f "$READY"/* 2>/dev/null || true
-cp "$OUT/$VERSION"/* "$READY/"
-chmod g+r "$READY"/*
+if [[ $EUID -eq 0 ]]; then
+    install -o atlas -g atlas -m 0640 "$OUT/$VERSION"/* "$READY/"
+else
+    cp "$OUT/$VERSION"/* "$READY/"
+    chmod g+r "$READY"/*
+fi
 
 /usr/bin/python3 -I - <<'PY'
 import json, socket, sys, time
 s = socket.socket(socket.AF_UNIX)
 s.connect("/run/atlas/helper.sock")
 s.sendall(b'{"verb": "update.apply", "args": {}}\n')
-print("apply:", s.recv(4096).decode().strip())
+reply = s.recv(4096).decode().strip()
+print("apply:", reply)
+try:
+    if not json.loads(reply).get("ok"):
+        sys.exit("the helper refused the request (on a retail unit, or not a developer unit): " + reply)
+except ValueError:
+    sys.exit("no answer from atlas-helper: " + reply)
 last = None
 for _ in range(900):
     try:
