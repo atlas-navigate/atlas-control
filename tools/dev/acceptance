@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# On-device acceptance test for a developer Atlas — see acceptance.py.
+#   sudo tools/dev/acceptance [run [--only NAMES]] | reboot-test | after-reboot
+exec /usr/bin/python3 -I "$(dirname "$(readlink -f "$0")")/acceptance.py" "$@"

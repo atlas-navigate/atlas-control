@@ -453,7 +453,7 @@ class Engine:
         spec = sysfiles.load_spec(target)
         sysfiles.reload_changed(changed, spec, self.runner)
         self.runner.run(["systemctl", "daemon-reload"], timeout=60)
-        self.runner.run(["systemctl", "restart", paths.APP_UNIT], timeout=120)
+        self._restart_app()
         self.runner.run(["systemctl", "reload-or-restart", "nginx"], timeout=60)
         return "SWITCHED"
 
@@ -461,7 +461,7 @@ class Engine:
         # Reached after a reboot during SWITCHED: make sure the app is running.
         if os.path.realpath(paths.CURRENT) != os.path.realpath(self.target_dir()):
             fsutil.atomic_symlink(os.path.relpath(self.target_dir(), paths.OPT), paths.CURRENT)
-            self.runner.run(["systemctl", "restart", paths.APP_UNIT], timeout=120)
+            self._restart_app()
         self.save("HEALTH_CHECK", message="Validating installation")
         return "HEALTH_CHECK"
 
@@ -506,7 +506,7 @@ class Engine:
         for kind in (self.j.get("to") or {}).get("changed", []):
             for cmd in sysfiles.KINDS_RELOAD.get(kind, []):
                 self.runner.run(cmd, timeout=120)
-        self.runner.run(["systemctl", "restart", paths.APP_UNIT], timeout=120)
+        self._restart_app()
         self.runner.run(["systemctl", "reload-or-restart", "nginx"], timeout=60)
         if frm.get("version") and release:
             result = self.health_check(frm["version"], release)
@@ -529,7 +529,7 @@ class Engine:
             self.j["recovery_attempts"] = attempts + 1
             self.save("RECOVERY_FAILED")
             fsutil.atomic_symlink(os.path.relpath(os.path.realpath(factory), paths.OPT), paths.CURRENT)
-            self.runner.run(["systemctl", "restart", paths.APP_UNIT], timeout=120)
+            self._restart_app()
             info = release_info(factory)
             if self.health_check(info["version"], os.path.realpath(factory)).ok:
                 self.finish("rolled_back", MSG_ROLLED_BACK, error=self.j.get("error"))
@@ -538,6 +538,12 @@ class Engine:
         return "recovery_failed"
 
     # ── helpers ───────────────────────────────────────────────────────────
+    def _restart_app(self):
+        # A release that crash-looped may have left the unit "failed"; a
+        # plain restart would then be refused and the rollback stall.
+        self.runner.run(["systemctl", "reset-failed", paths.APP_UNIT], timeout=30)
+        self.runner.run(["systemctl", "restart", paths.APP_UNIT], timeout=120)
+
     def _require_space(self, path, need):
         probe = path
         while not os.path.exists(probe):
