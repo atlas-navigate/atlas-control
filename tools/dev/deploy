@@ -22,11 +22,16 @@ if [[ $EUID -ne 0 ]]; then
 fi
 [ -f "$KEY" ] || { echo "no developer key at $KEY (tools/release/keygen.py --out ${KEY%.key} --dev)" >&2; exit 1; }
 
-OUT=$(mktemp -d)
+# Under sudo, build and sign as the developer: git refuses a checkout owned
+# by someone else, and the key is theirs.
+as_owner() {
+    if [[ $EUID -eq 0 && -n "${SUDO_USER:-}" ]]; then runuser -u "$SUDO_USER" -- "$@"; else "$@"; fi
+}
+OUT=$(as_owner mktemp -d)
 trap 'rm -rf "$OUT"' EXIT
-"$PY" "$REPO/tools/release/build_release.py" --version "$VERSION" --ref WORKTREE --channel dev \
+as_owner "$PY" "$REPO/tools/release/build_release.py" --version "$VERSION" --ref WORKTREE --channel dev \
       --out "$OUT" --python "$PY" --url-base https://localhost/dev
-"$PY" "$REPO/tools/release/sign_release.py" "$OUT/$VERSION/atlas-release.json" --key "$KEY" --yes
+as_owner "$PY" "$REPO/tools/release/sign_release.py" "$OUT/$VERSION/atlas-release.json" --key "$KEY" --yes
 
 READY="$STATE/updates/ready"
 rm -f "$READY"/* 2>/dev/null || true
