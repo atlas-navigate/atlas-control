@@ -77,8 +77,8 @@ build units.
    - checks Ollama is new enough for every model and has its GPU runners,
      and that every model is present (pulling any missing when online);
    - gives the unit its **own identity**: `Atlas-XXXX` name, `atlas-xxxx`
-     hostname, TLS key and certificate, hotspot name and random password,
-     setup code;
+     hostname, TLS key and certificate, hotspot name (the hotspot password
+     is the standard one every unit shares), setup code;
    - writes the **label** (`/root/atlas-labels/Atlas-XXXX.{png,svg,txt}`,
      copied to the drive's `labels/` when it is writable): a Wi-Fi QR code,
      the Atlas app QR code, the name, hotspot name and password, setup code
@@ -106,8 +106,14 @@ build units.
 
 The identity is never on the payload drive. It is created on each unit by
 `install.sh`, from the operating system's secure random source. It holds the
-setup code, TLS key, hotspot password, device id and proxy secret. Nothing is
+setup code, TLS key, Wi-Fi name, device id and proxy secret. None of these is
 shared between units: there is no default setup code.
+
+The hotspot **password** is the exception: it is the same on every unit (owner
+decision, `FACTORY_HOTSPOT_PASSWORD`), so it can be pre-printed on the box and
+in the manual. Only the label with the setup code is unit-specific. See
+[PAIRING.md](PAIRING.md) for what that means for security, and for
+compliance in markets that ban universal default passwords.
 
 If a line ever flashes a whole disk image instead, cloned from a finished
 unit, `atlas-firstboot.service` still catches it. It runs

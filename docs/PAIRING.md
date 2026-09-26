@@ -17,7 +17,9 @@ Any one of these proves the device belongs to the owner:
   matter. Five wrong codes from one address, or twenty in total, pause
   attempts for ten minutes.
 - **Join Atlas's own Wi-Fi** (its name and password are on the label) and
-  tap Connect — being on that network already proves physical access.
+  tap Connect — being on that network is taken as physical access. The Wi-Fi
+  password is the same on every Atlas (see below), so this holds only while
+  nobody else nearby knows it; owners can set their own.
 - **Allow it from a paired device**: the new device asks, and every paired
   device shows "Allow new device?" with a 4-digit code. Allow only if the
   code matches the one on the new device's screen.
@@ -35,9 +37,33 @@ PBKDF2 hash that pairing checks. It is printed on that unit's label.
 
 The same run gives the unit its own:
 - device id and TLS key (the apps pin it);
-- `atlas-xxxx` name;
-- hotspot password;
+- `Atlas-XXXX` / `atlas-xxxx` name (also its Wi-Fi name);
 - proxy secret.
+
+## The Wi-Fi password is the same on every Atlas
+
+Atlas's own Wi-Fi (hotspot) starts with one standard password on every unit,
+`FACTORY_HOTSPOT_PASSWORD` in `system/atlas_engine/identity.py`. This was an
+owner decision (2026-09-26) to simplify production: it can be printed on the
+box and in the manual. Its shape (four lowercase groups) still differs from a
+setup code's. The Wi-Fi name stays unique (`Atlas-XXXX`).
+
+Because the password is public, anyone who knows it and is within range of an
+Atlas whose hotspot is on can join that network. Being on the hotspot lets a
+device pair with one tap, and the owner chose to keep that. Such a device gets
+full control of that Atlas.
+
+The Wi-Fi page reminds owners to set their own password (Settings → Wi-Fi →
+Hotspot). The reminder disappears once they do, and comes back after a factory
+reset, which returns the hotspot to the standard password.
+`sudo atlas-identity factory-hotspot` moves an older unit to the standard
+password.
+
+Regulations to check before selling:
+- UK PSTI (2024);
+- EU radio-equipment cybersecurity (EN 18031, 2025);
+- California SB-327.
+They restrict universal default passwords on connected consumer products.
 
 It is persistent. Software updates, reboots and factory resets keep it, so the
 label works for the life of the unit. `atlas-identity new-setup-code` replaces
@@ -47,8 +73,8 @@ Mass production never duplicates it:
 - The payload drive carries no identity.
 - Every boot checks that the identity belongs to this module (its serial
   number, or the drive's if the module has none). A unit made from a cloned
-  disk image gets a fresh identity — code, key, hotspot — before anything
-  serves it.
+  disk image gets a fresh identity — code, key, name — before anything serves
+  it.
 - Pairings made with the old identity end (they were made with a different
   unit).
 - The old unit's hotspot profile is removed and rebuilt from the new label.

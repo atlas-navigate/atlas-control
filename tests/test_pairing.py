@@ -280,3 +280,21 @@ class PersistenceTests(PairingTestBase):
         row = self.app.db.get_db().execute("SELECT value FROM app_settings WHERE key=?",
                                            (pairing.IDENTITY_SETTING,)).fetchone()
         self.assertEqual(row["value"], device_identity.device()["device_id"])
+
+
+class HotspotReminderTests(PairingTestBase):
+    """Every Atlas ships with the same Wi-Fi password; the page reminds the
+    owner to set their own until they do (again after a factory reset)."""
+
+    def test_reminder_follows_the_running_password(self):
+        import tempfile
+        cfg = os.path.join(tempfile.mkdtemp(), "hotspot_config.json")
+        with mock.patch.object(self.app, "_HOTSPOT_CFG_PATH", cfg), \
+                mock.patch.object(self.app, "_nmcli", return_value=("", 0)):
+            state = self.app._current_hotspot_state()
+            self.assertTrue(state["standard_password"])
+            self.assertNotIn("password", state)                       # never in status
+            self.app._save_hotspot_cfg(state["ssid"], "our-private-wifi")
+            self.assertFalse(self.app._current_hotspot_state()["standard_password"])
+            os.remove(cfg)                                            # what factory reset does
+            self.assertTrue(self.app._current_hotspot_state()["standard_password"])

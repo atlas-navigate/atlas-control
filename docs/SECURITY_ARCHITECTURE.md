@@ -10,6 +10,7 @@ another.
 | Who | What they can reach | What must hold |
 |---|---|---|
 | Someone on the same Wi-Fi / LAN | ports 80/443, mDNS, the discovery beacon | nothing works until a device is paired; no secrets are disclosed before pairing |
+| Someone who knows the standard Wi-Fi password, within range of an Atlas with its hotspot on | Atlas's hotspot, and through it pairing | **accepted risk** (owner decision 2026-09-26): they can join and pair with one tap. Owners are reminded to set their own Wi-Fi password, which closes this |
 | A web page the owner visits | the owner's browser, which *can* reach Atlas | cross-site requests, DNS rebinding and forged forwarding headers are refused |
 | Another radio on the mesh | text, node names and positions arriving over LoRa | they are data, never markup or instructions (UI and Ray) |
 | A compromised app process | the `atlas` account | no sudo, no root path, no write access to code or other units' keys |
@@ -77,7 +78,8 @@ middleware (so `/socket.io/` is covered too):
 Created per unit on first install (never copied from a golden image):
 device id, `Atlas-XXXX` name and `atlas-xxxx` hostname, ECDSA P-256 key and
 self-signed certificate (valid 2024–2099 so a wrong clock never breaks it),
-hotspot SSID + random WPA2 password, setup code, the nginx proxy secret.
+hotspot SSID (the password is the standard one shared by every unit, see
+[PAIRING.md](PAIRING.md)), setup code, the nginx proxy secret.
 The apps pin the certificate's SPKI SHA-256 (from the label QR code, the
 mDNS/beacon advert and the pairing handshake) and warn loudly if the same
 device id ever presents a different key. The module serial is recorded and
@@ -159,6 +161,11 @@ Retail units have setup-account passwords locked and SSH masked. See
   the apps pin the key instead.
 - Anyone who can open the unit's case, or who has the label, can pair — by
   design, that is the owner.
+- The hotspot password is the same on every unit, and joining the hotspot
+  pairs with one tap. So until the owner sets their own Wi-Fi password, anyone
+  who knows the standard one can take control of an Atlas whose hotspot is on,
+  from within Wi-Fi range. Universal default passwords are restricted in some
+  markets (UK PSTI, EU EN 18031, California SB-327).
 - Typing the setup code (rather than scanning the label's QR code) trusts
   the first TLS key the phone sees; an attacker actively intercepting the
   LAN at that moment could capture the code. Scanning the QR code (which

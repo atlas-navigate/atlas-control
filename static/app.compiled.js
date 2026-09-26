@@ -13329,7 +13329,25 @@ function WifiPage() {
       ssid: hsSSID,
       password: hsPass,
       confirm: true
-    }).then(() => flash('Hotspot config saved')).catch(e => flash(errText(e, 'Failed to save config'), false));
+    }).then(() => {
+      flash('Hotspot config saved');
+      loadHotspot();
+    }).catch(e => flash(errText(e, 'Failed to save config'), false));
+  };
+  // Every Atlas ships with the same Wi-Fi password: offer to replace it.
+  const setOwnHotspotPassword = () => {
+    setActiveTab('hotspot');
+    setHsPass('');
+    setShowHsPass(true);
+    setTimeout(() => {
+      const el = document.getElementById('hotspot-password-input');
+      if (el) {
+        el.scrollIntoView({
+          block: 'center'
+        });
+        el.focus();
+      }
+    }, 50);
   };
   const currentSSID = status === null || status === void 0 || (_status$current = status.current) === null || _status$current === void 0 ? void 0 : _status$current.ssid;
   const currentKind = (status === null || status === void 0 || (_status$current2 = status.current) === null || _status$current2 === void 0 ? void 0 : _status$current2.kind) || 'wifi';
@@ -13445,7 +13463,29 @@ function WifiPage() {
       borderColor: 'var(--accent-red)',
       fontSize: 12
     }
-  }, "Disconnect")))), /*#__PURE__*/React.createElement("div", {
+  }, "Disconnect")))), (hotspot === null || hotspot === void 0 ? void 0 : hotspot.standard_password) && /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    role: "note",
+    style: {
+      borderColor: 'var(--accent-amber, #fbbf24)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 12,
+      alignItems: 'center',
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: '1 1 240px',
+      fontSize: 13,
+      color: 'var(--text-primary)'
+    }
+  }, "Atlas's Wi-Fi uses the standard password printed on every Atlas, so anyone who knows it can join. Set your own to keep it private."), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-sm",
+    onClick: setOwnHotspotPassword
+  }, "Set your own password"))), /*#__PURE__*/React.createElement("div", {
     className: "wifi-mode-tabs"
   }, /*#__PURE__*/React.createElement("button", {
     className: `wifi-tab-btn${activeTab === 'wifi' ? ' active' : ''}`,
@@ -13730,6 +13770,7 @@ function WifiPage() {
       gap: 6
     }
   }, /*#__PURE__*/React.createElement("input", {
+    id: "hotspot-password-input",
     className: "input",
     type: showHsPass ? 'text' : 'password',
     placeholder: "Min 8 characters",

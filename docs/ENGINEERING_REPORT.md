@@ -220,7 +220,8 @@ radio text a code path.
 - `device.json` — id, `Atlas-XXXX` name, `atlas-xxxx` hostname, module serial for clone
   detection;
 - an ECDSA P-256 key and certificate (2024–2099, clock-proof);
-- `hotspot.json` (random WPA2 password);
+- `hotspot.json` (its own Wi-Fi name; the password is the standard one shared by every unit —
+  see §14);
 - `setup_code` (root only) and its hash;
 - `proxy_secret` and the nginx include.
 
@@ -532,6 +533,25 @@ missing nftables `ct`/`reject` and rolled itself back, as designed.
   boot, a load failure, offline download, memory refusal, an old Ollama, busy, overrides and
   the embedder change.
 
+## 14. Shared hotspot password (owner decision, 2026-09-26)
+To simplify production, every unit's hotspot now starts with the same password,
+`FACTORY_HOTSPOT_PASSWORD` in `system/atlas_engine/identity.py`, which can be pre-printed on the
+box and manual.
+- **Still per unit:** setup codes, Wi-Fi names, TLS keys, device ids and proxy secrets.
+- **One-tap pairing on the hotspot stays** (owner decision).
+- **Resulting risk, accepted by the owner:** anyone who knows the standard password and is within
+  range of an Atlas with its hotspot on can join it and pair, taking full control. They can also
+  use its shared Internet uplink.
+- **Mitigation:**
+  - the Wi-Fi page reminds the owner to set their own password (`standard_password` in
+    `/api/hotspot/status`); that closes the risk;
+  - the apps pin Atlas's key, so the shared password doesn't expose them to interception;
+  - browsers that click through the certificate warning remain exposed to someone on the same
+    Wi-Fi.
+- **Compliance:** UK PSTI (2024), EU EN 18031 (2025) and California SB-327 restrict universal
+  default passwords on connected consumer products. Check before selling in those markets.
+- `atlas-identity factory-hotspot` moves an existing unit to the standard password.
+
 ## Explicit confirmations
 Where a claim is proven in tests or sandboxes but not yet on this device, that is stated.
 
@@ -570,5 +590,6 @@ Where a claim is proven in tests or sandboxes but not yet on this device, that i
   the real Ollama on this unit, and in tests for boot and updates.
 - **Clients reconnect automatically after an update:** yes (browser status page + reconnect; apps
   update-aware).
-- **Factory-new units ship without universal secrets:** yes. Per-unit identity, hotspot password,
-  setup code and TLS key; nothing per-unit on the payload drive; setup-account passwords locked.
+- **Factory-new units ship without universal secrets:** no longer fully — by owner decision the
+  hotspot password is the same on every unit (§14). Setup code, TLS key, device id and Wi-Fi name
+  are per unit; nothing per-unit is on the payload drive; setup-account passwords are locked.

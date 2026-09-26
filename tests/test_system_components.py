@@ -113,6 +113,38 @@ class IdentityTests(unittest.TestCase):
         self.assertNotIn(hotspot["password"], self.identity.DEFAULT_HOTSPOT_PASSWORDS)
         self.assertGreaterEqual(len(hotspot["password"]), 12)
 
+    def test_every_unit_gets_the_standard_wifi_password_and_its_own_everything_else(self):
+        d = self.sb.paths.IDENTITY
+        read = lambda *p: open(os.path.join(d, *p)).read()
+        a = self.identity.ensure()
+        a_hotspot, a_code = json.load(open(os.path.join(d, "hotspot.json"))), read("setup_code")
+        shutil.rmtree(d)
+        b = self.identity.ensure()
+        b_hotspot, b_code = json.load(open(os.path.join(d, "hotspot.json"))), read("setup_code")
+        # Owner decision: one Wi-Fi password for every unit (printed on box and manual)...
+        self.assertEqual(a_hotspot["password"], self.identity.FACTORY_HOTSPOT_PASSWORD)
+        self.assertEqual(b_hotspot["password"], a_hotspot["password"])
+        self.assertTrue(a_hotspot["shared"] and b_hotspot["shared"])
+        # ...and nothing else shared.
+        self.assertNotEqual(a_code, b_code)
+        self.assertNotEqual(a_hotspot["ssid"], b_hotspot["ssid"])
+        self.assertNotEqual(a["device_id"], b["device_id"])
+        self.assertNotEqual(a["tls_spki_sha256"], b["tls_spki_sha256"])
+        self.assertIn("(the standard password on every Atlas)", self.identity.label_text())
+
+    def test_factory_hotspot_moves_an_existing_unit_to_the_standard_password(self):
+        d = self.sb.paths.IDENTITY
+        self.identity.ensure(adopt_hotspot_password="our-own-wifi-9", hostname="atlas")
+        before = json.load(open(os.path.join(d, "hotspot.json")))
+        code = open(os.path.join(d, "setup_code")).read()
+        self.assertEqual((before["password"], before["shared"]), ("our-own-wifi-9", False))
+        self.assertEqual(self.identity.factory_hotspot(), before["ssid"])
+        after = json.load(open(os.path.join(d, "hotspot.json")))
+        self.assertEqual(after, {"ssid": before["ssid"], "password": self.identity.FACTORY_HOTSPOT_PASSWORD,
+                                 "shared": True})
+        self.assertEqual(open(os.path.join(d, "setup_code")).read(), code)
+        self.assertEqual(stat.S_IMODE(os.stat(os.path.join(d, "hotspot.json")).st_mode), 0o640)
+
     def test_universal_default_password_is_never_adopted(self):
         dev = self.identity.ensure(adopt_hotspot_password="AtlasControl")
         pw = json.load(open(os.path.join(self.sb.paths.IDENTITY, "hotspot.json")))["password"]

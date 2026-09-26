@@ -109,7 +109,8 @@ Wi-Fi, or "Allow" on a device that is already paired — see
 
 Browsers warn once about Atlas's own (self-signed) certificate.
 
-Every unit has its own setup code, key and hotspot password. Pairing survives
+Every unit has its own setup code and key; the Wi-Fi password is the same on
+every unit (owners are reminded to set their own). Pairing survives
 software updates, reboots and address changes; only removing a device, a
 factory reset or a new identity ends it.
 

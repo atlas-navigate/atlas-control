@@ -9665,8 +9665,18 @@ function WifiPage() {
       message: "Devices that joined the old network will need the new details, and the label on your Atlas won't match until a factory reset.",
       confirmLabel: 'Change' }))) return;
     api.post('/api/hotspot/config', {ssid: hsSSID, password: hsPass, confirm: true})
-      .then(() => flash('Hotspot config saved'))
+      .then(() => { flash('Hotspot config saved'); loadHotspot(); })
       .catch(e => flash(errText(e, 'Failed to save config'), false));
+  };
+  // Every Atlas ships with the same Wi-Fi password: offer to replace it.
+  const setOwnHotspotPassword = () => {
+    setActiveTab('hotspot');
+    setHsPass('');
+    setShowHsPass(true);
+    setTimeout(() => {
+      const el = document.getElementById('hotspot-password-input');
+      if (el) { el.scrollIntoView({ block: 'center' }); el.focus(); }
+    }, 50);
   };
 
   const currentSSID = status?.current?.ssid;
@@ -9751,6 +9761,18 @@ function WifiPage() {
             </div>
           </div>
         </div>
+
+        {hotspot?.standard_password && (
+          <div className="card" role="note" style={{borderColor:'var(--accent-amber, #fbbf24)'}}>
+            <div style={{display:'flex', gap:12, alignItems:'center', flexWrap:'wrap'}}>
+              <div style={{flex:'1 1 240px', fontSize:13, color:'var(--text-primary)'}}>
+                Atlas's Wi-Fi uses the standard password printed on every Atlas, so anyone who knows it can join.
+                Set your own to keep it private.
+              </div>
+              <button className="btn btn-sm" onClick={setOwnHotspotPassword}>Set your own password</button>
+            </div>
+          </div>
+        )}
 
         {/* ── Mode tabs ───────────────────────────────────────────────────── */}
         <div className="wifi-mode-tabs">
@@ -9976,6 +9998,7 @@ function WifiPage() {
                   </label>
                   <div style={{display:'flex', gap:6}}>
                     <input
+                      id="hotspot-password-input"
                       className="input"
                       type={showHsPass ? 'text' : 'password'}
                       placeholder="Min 8 characters"

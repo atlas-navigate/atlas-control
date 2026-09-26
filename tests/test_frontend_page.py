@@ -88,3 +88,12 @@ class RaySettingsTemplateTests(unittest.TestCase):
             self.assertNotIn(field, self.html)
         self.assertIn("Expert overrides", self.html)
         self.assertIn("Reset to optimized", self.html)
+
+
+class WifiReminderTemplateTests(unittest.TestCase):
+    def test_wifi_page_reminds_owners_to_replace_the_standard_password(self):
+        with open(os.path.join(REPO, "templates", "index.html"), encoding="utf-8") as f:
+            html = f.read()
+        self.assertIn("hotspot?.standard_password", html)
+        self.assertIn("Set your own password", html)
+        self.assertIn('id="hotspot-password-input"', html)

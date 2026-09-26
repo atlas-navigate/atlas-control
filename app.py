@@ -3764,7 +3764,11 @@ def _current_hotspot_state(include_password=False):
                     ssid = line.split(":", 1)[1].strip()
                 elif line.startswith("802-11-wireless-security.psk:") and not password:
                     password = line.split(":", 1)[1].strip()
-    state = {"active": active, "ssid": ssid, "passwordSet": bool(password)}
+    label = device_identity.hotspot() or {}
+    state = {"active": active, "ssid": ssid, "passwordSet": bool(password),
+             # Still the standard password every Atlas ships with (anyone who
+             # knows it can join): the page reminds the owner to set their own.
+             "standard_password": bool(label.get("shared") and password and password == label.get("password"))}
     if include_password:
         state["password"] = password
     return state
