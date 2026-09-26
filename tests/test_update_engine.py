@@ -292,6 +292,66 @@ class PowerLossTests(EngineTestCase):
         self.assertEqual(self.sb.current_version(), "1.0.0")
 
 
+class PairingSurvivesUpdatesTests(EngineTestCase):
+    """What a paired phone depends on — this unit's identity (device id, TLS
+    key, setup code, proxy secret) and the paired-device list and settings in
+    data/ — is never touched by an update, a rollback or a power cut."""
+
+    def setUp(self):
+        super().setUp()
+        import hashlib
+        from atlas_engine import identity
+        identity.ensure()
+        self.data = os.path.join(self.sb.app_state, "data")
+        os.makedirs(self.data, exist_ok=True)
+        self.db = os.path.join(self.data, "meshtastic.db")
+        c = sqlite3.connect(self.db)
+        c.execute("CREATE TABLE paired_clients (id TEXT, token_hash TEXT, revoked INTEGER DEFAULT 0)")
+        c.execute("INSERT INTO paired_clients VALUES ('phone', 'hash-of-token', 0)")
+        c.execute("CREATE TABLE ai_settings (key TEXT PRIMARY KEY, value TEXT)")
+        c.execute("INSERT INTO ai_settings VALUES ('model', 'qwen3.5:4b')")
+        c.commit(); c.close()
+
+        def snapshot():
+            out = {}
+            for dirpath, _, files in os.walk(self.sb.paths.IDENTITY):
+                for name in files:
+                    path = os.path.join(dirpath, name)
+                    out[os.path.relpath(path, self.sb.paths.IDENTITY)] = hashlib.sha256(open(path, "rb").read()).hexdigest()
+            return out
+        self.snapshot = snapshot
+        self.before = snapshot()
+        self.assertIn("tls/key.pem", self.before)
+
+    def assert_pairing_intact(self):
+        self.assertEqual(self.snapshot(), self.before)
+        c = sqlite3.connect(self.db)
+        self.assertEqual(c.execute("SELECT id, token_hash, revoked FROM paired_clients").fetchall(),
+                         [("phone", "hash-of-token", 0)])
+        self.assertEqual(c.execute("SELECT value FROM ai_settings WHERE key='model'").fetchone()[0], "qwen3.5:4b")
+
+    def test_update(self):
+        self.offer()
+        self.assertEqual(self.sb.engine().run(), "done")
+        self.assert_pairing_intact()
+
+    def test_rolled_back_update(self):
+        self.sb.healthy_versions = {"1.0.0"}
+        self.offer()
+        self.assertEqual(self.sb.engine().run(), "rolled_back")
+        self.assert_pairing_intact()
+
+    def test_power_cut_while_switching(self):
+        from atlas_engine import engine as engine_mod
+        self.offer()
+        with self.assertRaises(engine_mod.SimulatedCrash):
+            self.sb.engine(fault="SWITCHED:crash").run()
+        if self.sb.engine(boot_id="boot-2").recover() == "resume":
+            self.sb.engine(boot_id="boot-2").run()
+        self.assertEqual(self.sb.current_version(), "1.1.0")
+        self.assert_pairing_intact()
+
+
 if __name__ == "__main__":
     unittest.main()
 

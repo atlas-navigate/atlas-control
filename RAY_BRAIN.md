@@ -123,11 +123,11 @@ Everything below lives in [`ai_manager.py`](ai_manager.py).
           └──────────────────────────────────┬───────────────────────────────────┘
                                              │
           ╔══════════════════════════════════▼════════════════════════════╗
-          ║         STAGE 7 — LANGUAGE CORE (qwen2.5:3b via Ollama)      ║
+          ║   STAGE 7 — LANGUAGE CORE (Qwen2.5 3B / Qwen3.5 4B, Ollama)  ║
           ║                                                               ║
           ║  • Kept warm in VRAM (keep_alive = 10 h default)             ║
-          ║  • 4096-token context window                                  ║
-          ║  • Temperature 0.7, top_k 20, top_p 0.8                      ║
+          ║  • Profile per model (model_profiles.py): 4096-token window   ║
+          ║  • Each model's official sampling (Qwen2.5: 0.7/0.8/20)      ║
           ║  • Hybrid thinking DISABLED (think:false) — instant output    ║
           ║  • Streams tokens over local socket to app.py                 ║
           ║  • Cannot see the internet, only what's in context            ║
@@ -199,9 +199,12 @@ SEED DOCUMENTS (ai_manager.py)
               TTL: 120 s per query
 ```
 
-**GPU embedding:** the 0.6B embedder runs on the GPU (no `num_gpu:0` CPU pin).
-With `OLLAMA_MAX_LOADED_MODELS=2` it stays co-resident with the chat model, so
-embedding is fast (75 docs → ~240 passages in ~90 s) without evicting qwen2.5:3b.
+**Embedder placement follows the chat model's profile.** With Qwen2.5 3B the
+0.6B embedder runs on the GPU and loads first; with `OLLAMA_MAX_LOADED_MODELS=2`
+it stays co-resident with the chat model, so embedding is fast (75 docs → ~240
+passages in ~90 s) without evicting it. With Qwen3.5 4B on an 8 GB Orin Nano
+the chat model loads first (so it fits wholly on the GPU) and the embedder runs
+on the CPU (`num_gpu: 0`, ~0.5 s per query). See docs/AI_MODELS.md.
 
 **When a doc is edited:** its `embedding` column is set to NULL. The background
 thread re-chunks and re-embeds it on the next cycle. The FTS index updates in the
@@ -348,7 +351,7 @@ flowchart TD
     GM --> CTX
     ASK --> CTX
 
-    CTX --> LLM[Stage 7\nLanguage Core\nqwen2.5:3b via Ollama\n4096-token window · temp 0.7\nthink=false · streams tokens]
+    CTX --> LLM[Stage 7\nLanguage Core\nQwen2.5 3B or Qwen3.5 4B via Ollama\nper-model profile · 4096-token window\nthink=false · streams tokens]
     LLM --> PP[Stage 8\nPost-processing\nreplace CALC tags\nappend confidence footer]
     PP --> ANS([Answer])
 
@@ -514,8 +517,10 @@ Ray does not trust a 3B-parameter model with arithmetic. Two sub-paths:
 ### Stages 6–7 — Context Assembly & Generation (`chat()` / `chat_stream()`)
 
 The system prompt + all injected sections + the last 8 chat messages go to Ollama
-(default `qwen2.5:3b`, 4096-token window, temperature 0.7, top_k 20, top_p 0.8,
-hybrid-thinking disabled, kept warm in VRAM for 10 h).
+with the chosen model's profile (`model_profiles.resolve()`: build, 4096-token
+window, the model's own sampling — Qwen2.5 3B 0.7/0.8/20 with repeat 1.05,
+Qwen3.5 4B 0.7/0.8/20 with presence 1.5 — hybrid-thinking disabled, kept warm
+in VRAM for 10 h).
 The answer streams token by token over the local socket.
 
 ### Stage 8 — Confidence Footer (`_confidence_label`)

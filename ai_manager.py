@@ -11,6 +11,7 @@ import threading
 import logging
 import urllib.request
 import atlas_blocking
+import model_profiles
 import perf_metrics
 import safe_math as _safe_math
 import token_budget
@@ -556,6 +557,17 @@ _ROUTING_MIN_FREE_MB = 800
 _EMBED_CONCURRENT_MIN_FREE_MB = 600
 # How long the list of installed Ollama models is trusted.
 _MODEL_LIST_TTL_S = 60
+# Memory left free for the rest of Atlas when checking whether a model fits.
+_SWITCH_RESERVE_MB = 300
+# switch_model(overrides=…) default: keep the model's saved overrides.
+_UNCHANGED = object()
+
+
+class ModelSwitchError(Exception):
+    """A model switch that can't start or didn't finish; the message is for the owner."""
+    def __init__(self, message, busy=False):
+        super().__init__(message)
+        self.busy = busy
 
 
 def available_ram_mb():
@@ -4619,15 +4631,22 @@ ATLAS_DOCS = [
             "When you ask a question, the top-matching documents are retrieved and injected into the prompt. "
             "Documents cover: survival skills, radio comms, ballistics, first aid, field craft, "
             "long-term sustainability, and Atlas Control app usage (this guide).\n\n"
-            "AI SETTINGS (in Settings page → Settings tab → AI Settings section):\n"
-            "• Model          — Ollama model to use (default qwen2.5:3b)\n"
-            "• Embed model    — embedding model for RAG (default qwen3-embedding:0.6b)\n"
-            "• RAG enabled    — toggle retrieval-augmented generation on/off\n"
-            "• RAG top-k      — number of knowledge base chunks retrieved per query (default 3)\n"
-            "• Inject mesh context — include live mesh state in every prompt (default on)\n"
-            "• Temperature    — response creativity (0.0=deterministic, 1.0=creative; default 0.3)\n"
-            "• Context window — token context length (default 4096; larger = slower but more memory)\n"
-            "• Keep alive     — hours to keep the model loaded in VRAM (default 10 h)\n\n"
+            "RAY'S SETTINGS (Ray page → Settings tab):\n"
+            "• Model — choose Ray's language model: Qwen2.5 3B (standard, quickest answers) or "
+            "Qwen3.5 4B (newer and more thorough, answers arrive a little slower). Tap 'Use this model': "
+            "Atlas finishes any answer in progress, unloads the old model, loads the new one, checks it "
+            "answers, and only then saves the choice. The choice survives restarts and software updates. "
+            "If a model can't load, Ray keeps using the previous one.\n"
+            "• Automatic tuning — Atlas picks each model's build (quantization), context window, threads, "
+            "batch size and sampling for this Atlas's hardware; the 'Optimized for this Atlas' card shows "
+            "what is in use. Nothing needs to be set by hand.\n"
+            "• Expert overrides — optional, per model: temperature, top-p, top-k, penalties, response "
+            "length, context window, batch, threads and GPU layers, kept within what this Atlas can run. "
+            "'Reset to optimized' removes them. The embedding model can also be changed there; Ray then "
+            "rebuilds its knowledge index.\n"
+            "• RAG enabled / Top-K — retrieval of knowledge-base passages (default on, 5).\n"
+            "• Inject mesh context — include live mesh state when relevant (default on).\n"
+            "• Keep alive — hours to keep the model loaded (default 10 h).\n\n"
             "STARTING A NEW CHAT:\n"
             "Click the '+ New Chat' button in the left panel to start a fresh conversation. "
             "Old chats are preserved and can be revisited at any time."
@@ -4758,8 +4777,10 @@ RAY_SELF_DOC = {
         "Jetson Orin Nano's GPU via Ollama — no internet, no cloud. When asked how I think, "
         "retrieve, index, or process information, I answer in first person from this document.\n\n"
         "MY THOUGHT PROCESS, STAGE BY STAGE:\n"
-        "1. LANGUAGE CORE — my reasoning engine is a local qwen2.5:3b model (configurable) served "
-        "by Ollama, kept warm in VRAM with hybrid-thinking disabled for instant responses.\n"
+        "1. LANGUAGE CORE — my reasoning engine is a local language model served by Ollama: "
+        "Qwen2.5 3B by default, or Qwen3.5 4B if the owner chose it (Ray → Settings → Model). Atlas "
+        "tunes the chosen model for this hardware — its build, context window and sampling — and keeps "
+        "it warm in GPU memory with hybrid-thinking disabled for instant responses.\n"
         "2. INDEXING (how I learn) — my knowledge base is a set of curated reference documents "
         "(survival, comms, ballistics, first aid, Atlas Control usage, and this self-description) "
         "stored in SQLite. At startup I split each document into section-sized PASSAGES (a new "
@@ -5201,6 +5222,10 @@ class AIManager:
         self._model_names = (0.0, frozenset())   # cached /api/tags (monotonic ts, names)
         self._startup_warmup_done = threading.Event()
         self._thinking_caps = {}         # model name → bool ("thinking" capability)
+        self._notice = ""                # shown in Ray's settings (e.g. a model fell back)
+        self._switch = None              # the current/last model switch (see switch_model)
+        self._switch_lock = threading.Lock()
+        self._switch_cancel = threading.Event()
         self._startup_state_lock = threading.Lock()
         self._startup_phase = "init"
         self._startup_ready = False
@@ -5234,6 +5259,38 @@ class AIManager:
         return bool(status["ready"] and not status["warming_up"])
 
     # ------------------------------------------------------------------
+    @staticmethod
+    def runtime_settings(settings=None):
+        """Ray's settings with the chosen model's tuned profile applied.
+
+        model_profiles.resolve() decides the build, context, batch, threads
+        and sampling for this model on this hardware (plus any expert
+        overrides). They are written over the settings dict so everything
+        downstream — option blocks, the token budget, the RAG budget and the
+        /explain trace — sees the values the model really runs with.
+        """
+        import database as db
+        settings = dict(settings if settings is not None else db.ai_get_settings())
+        prof = model_profiles.resolve(settings)
+        settings.update({k: str(v) for k, v in prof["options"].items()})
+        settings["model"] = prof["tag"]
+        settings["keep_alive_hours"] = prof["keep_alive"][:-1]
+        settings["_profile"] = prof
+        return settings
+
+    @staticmethod
+    def _chat_options(settings):
+        """Ollama options for an answer: the profile's, as numbers."""
+        prof = settings.get("_profile") or model_profiles.resolve(settings)
+        return dict(prof["options"])
+
+    @staticmethod
+    def _runner_options(settings):
+        """Only what selects the loaded runner (a different value reloads the model)."""
+        opts = AIManager._chat_options(settings)
+        return {k: opts[k] for k in ("num_gpu", "num_ctx", "num_batch", "num_thread") if k in opts}
+
+    # ------------------------------------------------------------------
     def start(self):
         """Called at app startup. Seeds documents and triggers warmup."""
         import database as db
@@ -5254,21 +5311,19 @@ class AIManager:
     def _warmup(self):
         """Background thread: load the embed model first, then the chat model."""
         import database as db
-        settings = db.ai_get_settings()
-        model = settings.get("model", DEFAULT_SETTINGS["model"])
+        raw = db.ai_get_settings()
+        settings = self.runtime_settings(raw)
         embed_model = settings.get("embed_model", DEFAULT_SETTINGS["embed_model"])
-        keep_alive = f"{settings.get('keep_alive_hours', '10')}h"
         try:
             self._set_startup_state("warming_up", ready=False, error="")
             # Pulling a missing model can take many minutes: do it before
             # taking any slot so Ray stays usable meanwhile.
-            for m in (embed_model, model):
+            for m in (embed_model, settings["model"]):
                 if m:
                     self._ensure_model_present(m, allow_pull=True)
+            settings = self._fall_back_if_missing(raw, settings)
             with self._ollama_slot(timeout=600), self._embed_slot(timeout=600):
-                if embed_model:
-                    self._warmup_embed_model(embed_model)
-                self._warmup_chat_model(model, keep_alive, settings)
+                self._load_pair(settings)
             logger.info("AI warmup complete.")
             self._set_startup_state("ready", ready=True, error="", finished=True)
         except Exception as e:
@@ -5316,7 +5371,31 @@ class AIManager:
         logger.info(f"AI request waiting for startup warmup (timeout={timeout}s)")
         atlas_blocking.wait_event(self._startup_warmup_done, timeout=timeout)
 
-    def _warmup_embed_model(self, embed_model):
+    def _embed_options(self, settings=None):
+        """Where the embedder runs beside the current chat model (profile)."""
+        settings = settings if settings is not None and "_profile" in settings else self.runtime_settings(settings)
+        return dict(settings["_profile"]["embedder"]["options"])
+
+    def _load_pair(self, settings, reload_chat=True, reload_embedder=True):
+        """Load the chat model and the embedder in the order the chat model's
+        profile needs: on an 8 GB Jetson, Qwen3.5 4B fits wholly on the GPU
+        only if it loads before the embedder (which then runs on the CPU).
+        The caller holds both Ollama slots."""
+        prof = settings["_profile"]
+        embed_model = settings.get("embed_model", DEFAULT_SETTINGS["embed_model"])
+
+        def embedder():
+            if reload_embedder and embed_model:
+                self._warmup_embed_model(embed_model, settings)
+
+        def chat():
+            if reload_chat and self._warmup_chat_model(settings, timeout=300) is None:
+                raise ModelSwitchError(f"{prof['label']} could not be loaded.")
+
+        for step in ((embedder, chat) if prof["embedder"]["load_first"] else (chat, embedder)):
+            step()
+
+    def _warmup_embed_model(self, embed_model, settings=None):
         """Load the embedding model once so the first RAG query is not a cold start."""
         if not self._ensure_model_present(embed_model, refresh=True):
             logger.warning(f"AI embed warmup skipped; model not available: {embed_model}")
@@ -5332,7 +5411,7 @@ class AIManager:
         payload = json.dumps({
             "model": embed_model,
             "input": "warmup",
-            "options": {"num_ctx": _EMBED_NUM_CTX},
+            "options": self._embed_options(settings),
         }).encode()
         req = urllib.request.Request(
             f"{self.ollama_base}/api/embed",
@@ -5342,28 +5421,38 @@ class AIManager:
         )
         urllib.request.urlopen(req, timeout=60)
 
-    def _warmup_chat_model(self, model, keep_alive, settings):
-        """Load the chat model into VRAM using the current runtime settings."""
+    def _fall_back_if_missing(self, raw, settings):
+        """The chosen model is no longer offered, or its files are gone and
+        can't be fetched: run the standard model and tell the owner, rather
+        than leave Ray unable to answer."""
+        import database as db
+        prof = settings["_profile"]
+        default = model_profiles.default_id()
+        missing = prof["id"] != default and not self._ensure_model_present(prof["tag"], refresh=True)
+        if not (prof["fallback_from"] or missing):
+            return settings
+        was = prof["fallback_from"] or prof["label"]
+        db.ai_set_setting("model", default)
+        settings = self.runtime_settings(dict(raw, model=default))
+        self._notice = (f"{was} isn't available on this Atlas, so Ray is using "
+                        f"{settings['_profile']['label']}.")
+        logger.warning(self._notice)
+        return settings
+
+    def _warmup_chat_model(self, settings, timeout=60):
+        """Load the chat model with its tuned profile. Returns Ollama's reply."""
+        model = settings["model"]
         if not self._ensure_model_present(model, refresh=True):
             logger.warning(f"AI warmup skipped; model not available: {model}")
-            return
+            return None
+        keep_alive = settings["_profile"]["keep_alive"]
         logger.info(f"AI warmup: loading model {model} with keep_alive={keep_alive}")
         payload = json.dumps(self._finalize_payload({
             "model": model,
             "messages": [{"role": "user", "content": "hi"}],
             "keep_alive": keep_alive,
             "stream": False,
-            "options": {
-                "num_gpu":    int(settings.get("num_gpu",    DEFAULT_SETTINGS["num_gpu"])),
-                "num_ctx":    int(settings.get("num_ctx",    DEFAULT_SETTINGS["num_ctx"])),
-                "num_thread": int(settings.get("num_thread", DEFAULT_SETTINGS["num_thread"])),
-                "num_batch":  int(settings.get("num_batch",  DEFAULT_SETTINGS["num_batch"])),
-                "temperature": float(settings.get("temperature", DEFAULT_SETTINGS["temperature"])),
-                "top_p":      float(settings.get("top_p",    DEFAULT_SETTINGS["top_p"])),
-                "top_k":      int(settings.get("top_k",      DEFAULT_SETTINGS["top_k"])),
-                "repeat_penalty": float(settings.get("repeat_penalty", DEFAULT_SETTINGS["repeat_penalty"])),
-                "num_predict": int(settings.get("num_predict", DEFAULT_SETTINGS["num_predict"])),
-            },
+            "options": dict(self._chat_options(settings), num_predict=1),
         })).encode()
         req = urllib.request.Request(
             f"{self.ollama_base}/api/chat",
@@ -5371,15 +5460,14 @@ class AIManager:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        urllib.request.urlopen(req, timeout=60)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read() or b"{}")
 
     # ------------------------------------------------------------------
     def unload(self, model=None):
         """Unload the model from VRAM by sending keep_alive=0 to Ollama."""
-        import database as db
         if model is None:
-            settings = db.ai_get_settings()
-            model = settings.get("model", DEFAULT_SETTINGS["model"])
+            model = self.runtime_settings()["model"]
         payload = json.dumps({"model": model, "keep_alive": 0}).encode()
         try:
             req = urllib.request.Request(
@@ -5399,18 +5487,317 @@ class AIManager:
         the chat model, leaving the embed model resident. Used to free Ray's
         full RAM footprint during active turn-by-turn navigation.
         """
-        import database as db
-        settings    = db.ai_get_settings()
-        model       = settings.get("model", DEFAULT_SETTINGS["model"])
+        settings    = self.runtime_settings()
+        model       = settings["model"]
         embed_model = settings.get("embed_model", DEFAULT_SETTINGS["embed_model"])
         self.unload(model=model)
         if embed_model and embed_model != model:
             self.unload(model=embed_model)
 
     # ------------------------------------------------------------------
+    # Switching models. One job at a time, in a background thread: check the
+    # model can run here, download it if needed, wait for an answer in
+    # progress, unload the old model, load the new one with its tuned profile,
+    # prove it answers, and only then save the choice. Any failure puts the
+    # previous model back. Progress goes to paired clients as "ai_model".
+    def notice(self):
+        return self._notice
+
+    def switch_state(self):
+        job = self._switch
+        return dict(job) if job else None
+
+    def switch_model(self, target_id, overrides=_UNCHANGED, embed_model=None):
+        """Start switching Ray to `target_id` (or re-applying its settings).
+        Returns the job. Raises ModelSwitchError if it cannot start."""
+        import database as db
+        model = model_profiles.find(target_id)
+        if model is None:
+            raise ModelSwitchError("That model isn't offered on Atlas.")
+        need = model.get("min_ollama", "0")
+        have = self.ollama_version()
+        if have and model_profiles.version_tuple(have) < model_profiles.version_tuple(need):
+            raise ModelSwitchError(f"{model['label']} needs a newer AI engine (Ollama {need}; "
+                                   f"this Atlas has {have}). Install the latest Atlas software first.")
+        if not self._startup_warmup_done.is_set():
+            raise ModelSwitchError("Ray is still starting up — try again in a moment.", busy=True)
+        if not self._switch_lock.acquire(blocking=False):
+            raise ModelSwitchError("Ray is already switching models — wait for it to finish.", busy=True)
+        raw = db.ai_get_settings()
+        job = {"id": f"{int(time.time() * 1000):x}", "target": model["id"], "label": model["label"],
+               "previous": self.runtime_settings(raw)["_profile"]["id"], "stage": "starting",
+               "progress": None, "message": f"Switching Ray to {model['label']}…", "error": None,
+               "started": time.time(), "finished": None, "result": None}
+        self._switch = job
+        self._switch_cancel.clear()
+        threading.Thread(target=self._run_switch, args=(job, raw, overrides, embed_model),
+                         daemon=True, name="ai-model-switch").start()
+        return dict(job)
+
+    def cancel_switch(self):
+        """Stop a download in progress (Ollama keeps what it has; a later try resumes)."""
+        job = self._switch
+        if job and job["stage"] == "downloading":
+            self._switch_cancel.set()
+            return True
+        return False
+
+    def ollama_version(self):
+        try:
+            with urllib.request.urlopen(f"{self.ollama_base}/api/version", timeout=5) as r:
+                return json.loads(r.read()).get("version")
+        except Exception:
+            return None
+
+    def _stage(self, job, stage, message, progress=None):
+        job.update(stage=stage, message=message, progress=progress)
+        logger.info(f"AI model switch: {stage} — {message}")
+        self._emit_switch(job)
+
+    def _emit_switch(self, job):
+        if self.socketio:
+            try:
+                self.socketio.emit("ai_model", dict(job), to="paired", namespace="/")
+            except Exception as e:
+                logger.debug(f"ai_model emit failed: {e}")
+
+    def _loaded_models(self):
+        try:
+            with urllib.request.urlopen(f"{self.ollama_base}/api/ps", timeout=5) as r:
+                return {m.get("name"): m for m in json.loads(r.read()).get("models", [])}
+        except Exception:
+            return {}
+
+    def _unload_and_wait(self, model, timeout=20):
+        self.unload(model=model)
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if model not in self._loaded_models():
+                return True
+            time.sleep(0.5)
+        return False
+
+    def _run_switch(self, job, raw, overrides, embed_model):
+        import database as db
+        old = self.runtime_settings(raw)
+        new_raw = dict(raw, model=job["target"])
+        override_key = model_profiles.OVERRIDE_PREFIX + job["target"]
+        if overrides is not _UNCHANGED:
+            new_raw[override_key] = json.dumps(overrides or {})
+        if embed_model:
+            new_raw["embed_model"] = embed_model
+        new = self.runtime_settings(new_raw)
+        prof = new["_profile"]
+        loaded_new = touched = False
+        ready = True
+        try:
+            self._stage(job, "checking", f"Checking {prof['label']}…")
+            if embed_model and embed_model != old.get("embed_model"):
+                self._check_embedder(embed_model)
+            if not self._ensure_model_present(prof["tag"], refresh=True):
+                self._download(job, prof)
+            reload_chat, reload_embed = self._reload_plan(old, new)
+            self._check_memory(old, new, reload_chat, reload_embed)
+
+            self._stage(job, "waiting", "Waiting for Ray to finish its current answer…")
+            touched = True
+            self._set_startup_state("switching", ready=False, error="")
+            with self._ollama_slot(timeout=300), self._embed_slot(timeout=300):
+                if reload_chat:
+                    self._stage(job, "unloading", f"Unloading {old['_profile']['label']}…")
+                    self._unload_and_wait(old["model"])
+                if reload_embed:
+                    self._unload_and_wait(old.get("embed_model", DEFAULT_SETTINGS["embed_model"]))
+                self._stage(job, "loading", f"Loading {prof['label']} ({prof['quant']}, "
+                                            f"{prof['options']['num_ctx']}-token context)…")
+                loaded_new = True
+                started = time.monotonic()
+                self._load_pair(new, reload_chat=True, reload_embedder=reload_embed)
+                load_s = time.monotonic() - started
+                self._stage(job, "testing", "Checking that Ray answers…")
+                speed = self._test_generation(new)
+                gpu_pct = self._gpu_share(new["model"])
+            saved = {"model": job["target"]}
+            if embed_model:
+                saved["embed_model"] = embed_model
+            if overrides is not _UNCHANGED:
+                saved[override_key] = json.dumps(overrides or {})
+            saved["measured:" + job["target"]] = json.dumps(
+                {"tok_s": speed, "load_s": round(load_s, 1), "gpu_pct": gpu_pct,
+                 "at": int(time.time()), "tag": prof["tag"]})
+            db.ai_set_settings(saved)
+            if embed_model and embed_model != old.get("embed_model"):
+                self._stage(job, "reindexing", "Rebuilding Ray's knowledge index for the new embedding model…")
+                self._switch_embedder(embed_model)
+            self._notice = ""
+            partly = gpu_pct is not None and gpu_pct < 95
+            job.update(stage="done", result="success", progress=100, finished=time.time(), gpu_pct=gpu_pct,
+                       message=f"Ray is now using {prof['label']}." + (
+                           " Memory was short, so part of it runs on the CPU and answers are slower; "
+                           "it moves fully onto the GPU the next time Atlas restarts." if partly else ""))
+        except Exception as e:
+            reason = str(e) if isinstance(e, ModelSwitchError) else f"{prof['label']} could not be started ({e})."
+            logger.warning(f"AI model switch to {job['target']} failed: {e}")
+            if loaded_new:
+                ready = self._restore_after_failed_switch(old, new)
+            job.update(stage="failed", result="failed", error=reason, finished=time.time(),
+                       message=f"{reason} Ray is still using {old['_profile']['label']}.")
+        finally:
+            if touched:
+                self._set_startup_state("ready" if ready else "degraded", ready=ready,
+                                        error="" if ready else job.get("error"), finished=True)
+            self._switch_lock.release()
+            self._emit_switch(job)
+
+    def _restore_after_failed_switch(self, old, new):
+        """Put the previous model back, in its own load order. True when it answers again."""
+        reload_chat, reload_embed = self._reload_plan(new, old)
+        with self._ollama_slot(timeout=300), self._embed_slot(timeout=300):
+            self._unload_and_wait(new["model"])
+            if reload_embed:
+                self._unload_and_wait(new.get("embed_model", DEFAULT_SETTINGS["embed_model"]))
+            try:
+                self._load_pair(old, reload_chat=True, reload_embedder=reload_embed)
+                return True
+            except Exception as e:
+                logger.warning(f"AI model switch: could not reload {old['model']}: {e}")
+                return False
+
+    def _reload_plan(self, old, new):
+        """(reload the chat model?, reload the embedder?) to go from old to new."""
+        reload_chat = old["model"] != new["model"] or self._runner_options(old) != self._runner_options(new)
+        old_embed = (old.get("embed_model"), self._embed_options(old))
+        new_embed = (new.get("embed_model"), self._embed_options(new))
+        # A chat model that must load before the embedder takes it down too.
+        reload_embed = old_embed != new_embed or (reload_chat and not new["_profile"]["embedder"]["load_first"])
+        return reload_chat, reload_embed
+
+    def _gpu_share(self, model):
+        """Percent of the loaded model Ollama placed on the GPU, or None."""
+        info = self._loaded_models().get(model) or {}
+        if info.get("size"):
+            return round(100 * (info.get("size_vram") or 0) / info["size"])
+        return None
+
+    def _check_memory(self, old, new, reload_chat=True, reload_embed=False):
+        """Refuse a model this Atlas can't hold right now, before unloading
+        the one that works. What is about to be unloaded counts as free."""
+        prof = new["_profile"]
+        avail = model_profiles.available_mb()
+        if avail is None or not (reload_chat or reload_embed):
+            return
+        loaded = self._loaded_models()
+
+        def resident(name):
+            return int((loaded.get(name) or {}).get("size", 0) / 2**20)
+        freed = need = 0
+        if reload_chat:
+            freed += resident(old["model"])
+            need += prof["memory_mb"]
+        if reload_embed:
+            freed += resident(old.get("embed_model", DEFAULT_SETTINGS["embed_model"]))
+            need += model_profiles.embedder().get("memory_mb", 1300)
+        if need > avail + freed - _SWITCH_RESERVE_MB:
+            raise ModelSwitchError(
+                f"There isn't enough free memory for {prof['label']} right now "
+                f"({need} MB needed, {max(0, avail + freed)} MB free). "
+                "Try again when navigation or other heavy work has finished.")
+
+    def _download(self, job, prof):
+        """Fetch a model through Ollama, reporting progress. Partial downloads
+        are kept by Ollama and resume on the next try."""
+        import shutil
+        size = int(prof["size_mb"])
+        for path in (_os.environ.get("OLLAMA_MODELS") or "", "/atlas_data", "/"):
+            if path and _os.path.isdir(path):
+                free_mb = shutil.disk_usage(path).free // 2**20
+                if free_mb < size + 1024:
+                    raise ModelSwitchError(f"Not enough storage to download {prof['label']} "
+                                           f"({size} MB needed, {free_mb} MB free).")
+                break
+        self._stage(job, "downloading", f"Downloading {prof['label']} ({size / 1024:.1f} GB)…", 0)
+        req = urllib.request.Request(
+            f"{self.ollama_base}/api/pull",
+            data=json.dumps({"model": prof["tag"], "stream": True}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        layers, last_emit = {}, 0.0
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                for line in resp:
+                    if self._switch_cancel.is_set():
+                        raise ModelSwitchError("Download cancelled. It picks up where it stopped next time.")
+                    try:
+                        msg = json.loads(line)
+                    except ValueError:
+                        continue
+                    if msg.get("error"):
+                        raise ModelSwitchError(f"Couldn't download {prof['label']}: {msg['error']}.")
+                    if msg.get("digest") and msg.get("total"):
+                        layers[msg["digest"]] = (msg.get("completed") or 0, msg["total"])
+                    if time.monotonic() - last_emit >= 1 and layers:
+                        done = sum(c for c, _ in layers.values())
+                        total = max(sum(t for _, t in layers.values()), size * 2**20)
+                        self._stage(job, "downloading", job["message"], min(99, int(100 * done / total)))
+                        last_emit = time.monotonic()
+                    if msg.get("status") == "success":
+                        break
+        except ModelSwitchError:
+            raise
+        except Exception as e:
+            raise ModelSwitchError(f"Couldn't download {prof['label']} — Atlas needs an Internet "
+                                   f"connection for this ({e}).")
+        self._model_names = (0.0, frozenset())
+        if not self._ensure_model_present(prof["tag"], refresh=True):
+            raise ModelSwitchError(f"{prof['label']} did not finish downloading.")
+
+    def _test_generation(self, settings):
+        """A short real answer: proves the model works and measures its speed."""
+        payload = json.dumps(self._finalize_payload({
+            "model": settings["model"],
+            "messages": [{"role": "user", "content": "Reply with the single word: ready"}],
+            "keep_alive": settings["_profile"]["keep_alive"],
+            "stream": False,
+            "options": dict(self._chat_options(settings), num_predict=16),
+        })).encode()
+        req = urllib.request.Request(f"{self.ollama_base}/api/chat", data=payload,
+                                     headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            reply = json.loads(resp.read() or b"{}")
+        if not (reply.get("message", {}).get("content") or "").strip():
+            raise ModelSwitchError(f"{settings['_profile']['label']} loaded but gave no answer.")
+        if reply.get("eval_count") and reply.get("eval_duration"):
+            return round(reply["eval_count"] / (reply["eval_duration"] / 1e9), 1)
+        return None
+
+    def _check_embedder(self, embed_model):
+        if not self._ensure_model_present(embed_model, refresh=True):
+            raise ModelSwitchError(f"The embedding model {embed_model} isn't installed on this Atlas.")
+        try:
+            req = urllib.request.Request(f"{self.ollama_base}/api/show",
+                                         data=json.dumps({"model": embed_model}).encode(),
+                                         headers={"Content-Type": "application/json"}, method="POST")
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                caps = json.loads(resp.read()).get("capabilities") or []
+        except Exception as e:
+            raise ModelSwitchError(f"Couldn't check {embed_model}: {e}")
+        if "embedding" not in caps:
+            raise ModelSwitchError(f"{embed_model} is not an embedding model.")
+
+    def _switch_embedder(self, embed_model):
+        """New vectors for every document: vectors from two embedders can't be compared."""
+        import database as db
+        conn = db.get_db()
+        conn.execute("UPDATE ai_documents SET embedding=NULL")
+        conn.commit()
+        db._ai_docs_changed()
+        self._embed_unembedded_docs()
+
+    # ------------------------------------------------------------------
     def _embed_unembedded_docs(self):
         """Embed any documents that don't yet have embeddings (chunked format v3)."""
         import database as db
+        # Let the warmup load the models first, in their profile's order.
+        atlas_blocking.wait_event(self._startup_warmup_done, timeout=900)
         docs = db.ai_get_documents_with_embeddings()
         for doc in docs:
             if not doc.get("embedding"):
@@ -5737,7 +6124,9 @@ class AIManager:
             payload = json.dumps({
                 "model": embed_model,
                 "input": text,
-                "options": {"num_ctx": _EMBED_NUM_CTX},
+                # Same options as the warmup (context, GPU or CPU per the chat
+                # model's profile): a different set would reload the embedder.
+                "options": self._embed_options(),
             }).encode()
             req = urllib.request.Request(
                 f"{self.ollama_base}/api/embed",
@@ -5972,16 +6361,9 @@ class AIManager:
                 {"role": "user",   "content": extraction_user},
             ],
             "stream": False,
-            "options": {
-                "num_gpu":     int(settings.get("num_gpu",     DEFAULT_SETTINGS["num_gpu"])),
-                # Same num_ctx as the chat path: a different context size makes
-                # Ollama reload the whole model (~10 s) before answering.
-                "num_ctx":     int(settings.get("num_ctx",     DEFAULT_SETTINGS["num_ctx"])),
-                "num_batch":   int(settings.get("num_batch",   DEFAULT_SETTINGS["num_batch"])),
-                "num_thread":  int(settings.get("num_thread",  DEFAULT_SETTINGS["num_thread"])),
-                "temperature": 0.05,
-                "num_predict": 300,
-            },
+            # Same runner options as the chat path: a different context or
+            # batch size makes Ollama reload the whole model before answering.
+            "options": dict(self._runner_options(settings), temperature=0.05, num_predict=300),
         })).encode()
 
         try:
@@ -6608,7 +6990,7 @@ class AIManager:
         import database as db
         import system_stats
         if settings is None:
-            settings = db.ai_get_settings()
+            settings = self.runtime_settings()
         parts = []
         # Closes every fenced block of outside text in this prompt; see untrusted.py.
         boundary = _untrusted.new_boundary()
@@ -7349,13 +7731,8 @@ class AIManager:
             "path_label": path_labels.get(path, path),
             "category": self._classify_query_category(user_message),
             "model": model,
-            "params": {
-                "temperature":    settings.get("temperature", DEFAULT_SETTINGS["temperature"]),
-                "top_p":          settings.get("top_p", DEFAULT_SETTINGS["top_p"]),
-                "top_k":          settings.get("top_k", DEFAULT_SETTINGS["top_k"]),
-                "repeat_penalty": settings.get("repeat_penalty", DEFAULT_SETTINGS["repeat_penalty"]),
-                "num_ctx":        settings.get("num_ctx", DEFAULT_SETTINGS["num_ctx"]),
-            },
+            "params": {k: v for k, v in self._chat_options(settings).items()
+                       if k in ("temperature", "top_p", "top_k", "repeat_penalty", "presence_penalty", "num_ctx")},
             "confidence": confidence_label,
             "rag": {
                 "enabled": str(settings.get("rag_enabled", "true")).lower() == "true",
@@ -7539,9 +7916,9 @@ class AIManager:
         """Full pipeline: build context, call Ollama, store messages, return dict."""
         import database as db
         self._wait_for_startup_warmup()
-        settings = db.ai_get_settings()  # fetch once; passed downstream
-        model = settings.get("model", DEFAULT_SETTINGS["model"])
-        keep_alive = f"{settings.get('keep_alive_hours', DEFAULT_SETTINGS['keep_alive_hours'])}h"
+        settings = self.runtime_settings()  # fetch once (with the model's profile); passed downstream
+        model = settings["model"]
+        keep_alive = settings["_profile"]["keep_alive"]
         base_system = settings.get("system_prompt", DEFAULT_SETTINGS["system_prompt"])
 
         # ── /explain cross-check ─────────────────────────────────────────────
@@ -7645,17 +8022,7 @@ class AIManager:
             "messages": messages,
             "keep_alive": keep_alive,
             "stream": False,
-            "options": {
-                "num_gpu":    int(settings.get("num_gpu",    DEFAULT_SETTINGS["num_gpu"])),
-                "num_ctx":    int(settings.get("num_ctx",    DEFAULT_SETTINGS["num_ctx"])),
-                "num_thread": int(settings.get("num_thread", DEFAULT_SETTINGS["num_thread"])),
-                "num_batch":  int(settings.get("num_batch",  DEFAULT_SETTINGS["num_batch"])),
-                "temperature": float(settings.get("temperature", DEFAULT_SETTINGS["temperature"])),
-                "top_p":      float(settings.get("top_p",    DEFAULT_SETTINGS["top_p"])),
-                "top_k":      int(settings.get("top_k",      DEFAULT_SETTINGS["top_k"])),
-                "repeat_penalty": float(settings.get("repeat_penalty", DEFAULT_SETTINGS["repeat_penalty"])),
-                "num_predict": int(settings.get("num_predict", DEFAULT_SETTINGS["num_predict"])),
-            },
+            "options": self._chat_options(settings),
         })).encode()
         req = urllib.request.Request(
             f"{self.ollama_base}/api/chat",
@@ -7718,9 +8085,9 @@ class AIManager:
         """Streaming pipeline: yields str tokens, then a final metadata dict."""
         import database as db
         self._wait_for_startup_warmup()
-        settings = db.ai_get_settings()  # fetch once; passed downstream
-        model = settings.get("model", DEFAULT_SETTINGS["model"])
-        keep_alive = f"{settings.get('keep_alive_hours', DEFAULT_SETTINGS['keep_alive_hours'])}h"
+        settings = self.runtime_settings()  # fetch once (with the model's profile); passed downstream
+        model = settings["model"]
+        keep_alive = settings["_profile"]["keep_alive"]
         base_system = settings.get("system_prompt", DEFAULT_SETTINGS["system_prompt"])
 
         # ── /explain cross-check (see chat() for rationale) ──────────────────
@@ -7809,17 +8176,7 @@ class AIManager:
             "messages": messages,
             "keep_alive": keep_alive,
             "stream": True,
-            "options": {
-                "num_gpu":    int(settings.get("num_gpu",    DEFAULT_SETTINGS["num_gpu"])),
-                "num_ctx":    int(settings.get("num_ctx",    DEFAULT_SETTINGS["num_ctx"])),
-                "num_thread": int(settings.get("num_thread", DEFAULT_SETTINGS["num_thread"])),
-                "num_batch":  int(settings.get("num_batch",  DEFAULT_SETTINGS["num_batch"])),
-                "temperature": float(settings.get("temperature", DEFAULT_SETTINGS["temperature"])),
-                "top_p":      float(settings.get("top_p",    DEFAULT_SETTINGS["top_p"])),
-                "top_k":      int(settings.get("top_k",      DEFAULT_SETTINGS["top_k"])),
-                "repeat_penalty": float(settings.get("repeat_penalty", DEFAULT_SETTINGS["repeat_penalty"])),
-                "num_predict": int(settings.get("num_predict", DEFAULT_SETTINGS["num_predict"])),
-            },
+            "options": self._chat_options(settings),
         })).encode()
         req = urllib.request.Request(
             f"{self.ollama_base}/api/chat",

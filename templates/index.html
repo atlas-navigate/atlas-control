@@ -5514,6 +5514,231 @@ function KnowledgeMap() {
 }
 
 // ═══════════════════════════════════════════════
+// Ray's model: choose, switch, see how it runs here
+// ═══════════════════════════════════════════════
+// Atlas tunes each model for its own hardware (build, context window,
+// threads, sampling — model_profiles.py). Switching runs as a job on Atlas:
+// download if needed, unload, load, check it answers, then save.
+const OVERRIDE_FIELDS = [
+  ['temperature', 'Temperature', 0.05], ['top_p', 'Top-P', 0.05], ['top_k', 'Top-K', 1],
+  ['repeat_penalty', 'Repeat penalty', 0.05], ['presence_penalty', 'Presence penalty', 0.1],
+  ['num_predict', 'Max response tokens', 64], ['num_ctx', 'Context window (tokens)', 512],
+  ['num_batch', 'Batch size', 32], ['num_thread', 'CPU threads', 1], ['num_gpu', 'GPU layers (-1 = automatic)', 1],
+];
+const SWITCH_STAGE_LABEL = {
+  starting: 'Starting', checking: 'Checking', downloading: 'Downloading', waiting: 'Waiting',
+  unloading: 'Unloading', loading: 'Loading', testing: 'Testing', reindexing: 'Rebuilding index',
+  done: 'Done', failed: 'Stopped',
+};
+function fmtMB(mb) { return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`; }
+
+function RayModelPicker({ labelStyle, inputStyle, onChanged }) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+  const [expertOpen, setExpertOpen] = useState(false);
+  const [draft, setDraft] = useState({});
+  const [embedDraft, setEmbedDraft] = useState('');
+  const [clampNote, setClampNote] = useState(null);
+  const load = useCallback(() => api.get('/api/ai/models').then(d => { setData(d); setError(null); return d; })
+    .catch(e => setError(e.message || 'Could not load models')), []);
+  const job = data?.switch;
+  const busy = !!(job && !job.finished);
+  const active = data?.models?.find(m => m.active);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const sock = window._atlasSocket;
+    if (!sock) return;
+    const onJob = (j) => {
+      setData(d => d ? { ...d, switch: j } : d);
+      if (j.finished) { load(); onChanged && onChanged(); }
+    };
+    sock.on('ai_model', onJob);
+    return () => sock.off('ai_model', onJob);
+  }, [load, onChanged]);
+  // No socket (or a missed event): poll while a switch runs.
+  useEffect(() => {
+    if (!busy) return;
+    const iv = setInterval(load, 4000);
+    return () => clearInterval(iv);
+  }, [busy, load]);
+  useEffect(() => {
+    if (!active) return;
+    const d = {};
+    Object.entries(active.overrides || {}).forEach(([k, v]) => { d[k] = String(v); });
+    setDraft(d);
+    setEmbedDraft(data?.embed_model || '');
+  }, [active?.id, JSON.stringify(active?.overrides), data?.embed_model]);
+
+  async function choose(m) {
+    if (m.status === 'download' && !(await atlasConfirm({
+      title: `Download ${m.label}?`,
+      message: `${m.label} is ${fmtMB(m.size_mb)}. Atlas needs an Internet connection to download it; Ray keeps using ${active?.label || 'its current model'} until it is ready.`,
+      confirmLabel: 'Download and switch' }))) return;
+    try {
+      const r = await api.post('/api/ai/model', { model: m.id });
+      setData(d => ({ ...d, switch: r.switch }));
+    } catch (e) { setError(e.message); }
+  }
+  async function applyOverrides() {
+    const overrides = {};
+    Object.entries(draft).forEach(([k, v]) => { if (String(v).trim() !== '') overrides[k] = Number(v); });
+    try {
+      const r = await api.put(`/api/ai/models/${encodeURIComponent(active.id)}/overrides`, { overrides });
+      const clamped = Object.entries(r.clamped || {});
+      setClampNote(clamped.length ? clamped.map(([k, [asked, used]]) => `${k}: ${asked} → ${used}`).join(', ') : null);
+      if (r.switch) setData(d => ({ ...d, switch: r.switch })); else load();
+    } catch (e) { setError(e.message); }
+  }
+  async function resetOverrides() {
+    try {
+      const r = await api.del(`/api/ai/models/${encodeURIComponent(active.id)}/overrides`);
+      setClampNote(null);
+      if (r.switch) setData(d => ({ ...d, switch: r.switch })); else load();
+    } catch (e) { setError(e.message); }
+  }
+  async function changeEmbedder() {
+    const name = embedDraft.trim();
+    if (!name || name === data.embed_model) return;
+    if (!(await atlasConfirm({ title: 'Change the embedding model?',
+      message: `Ray will rebuild its knowledge index with ${name}. Search is unavailable for a few minutes.`,
+      confirmLabel: 'Change and rebuild' }))) return;
+    try {
+      const r = await api.post('/api/ai/model', { model: active.id, embed_model: name });
+      setData(d => ({ ...d, switch: r.switch }));
+    } catch (e) { setError(e.message); }
+  }
+
+  if (!data) return <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>{error || 'Loading models…'}</div>;
+  const o = active?.options || {};
+  const cardStyle = (m) => ({
+    background: 'var(--bg-input)', borderRadius: 'var(--radius)', padding: 12,
+    border: `1px solid ${m.active ? 'var(--accent)' : 'var(--border)'}`,
+  });
+  const statusText = (m) => m.active ? 'In use' : m.status === 'installed' ? 'Ready'
+    : m.status === 'download' ? `Download · ${fmtMB(m.size_mb)}` : `Needs Ollama ${m.min_ollama}+`;
+  const changed = Object.entries(draft).some(([k, v]) => String(v).trim() !== '' &&
+    Number(v) !== Number((active?.overrides || {})[k] ?? NaN)) ||
+    Object.keys(active?.overrides || {}).some(k => (draft[k] ?? '') === '');
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {data.notice && <div style={{ fontSize: 13, color: 'var(--accent-amber, #fbbf24)' }}>{data.notice}</div>}
+      <div className="settings-grid-2">
+        {data.models.map(m => (
+          <div key={m.id} style={cardStyle(m)} data-model={m.id}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline' }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{m.label}</div>
+              <div style={{ fontSize: 11, color: m.active ? 'var(--accent)' : 'var(--text-muted)' }}>{statusText(m)}</div>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary, var(--text-muted))', margin: '4px 0 8px' }}>{m.blurb}</div>
+            <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+              {m.quant} · {m.options.num_ctx.toLocaleString()}-token context · ~{fmtMB(m.memory_mb)}
+              {m.speed_tok_s ? ` · ${m.speed_tok_s} tokens/s here` : ''}
+            </div>
+            {!m.active && (
+              <button className="btn btn-secondary" style={{ marginTop: 10 }}
+                disabled={busy || m.status === 'needs_engine'} onClick={() => choose(m)}>
+                {m.status === 'download' ? 'Download and use' : 'Use this model'}
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {job && (job.stage !== 'done' || Date.now() / 1000 - (job.finished || 0) < 60) && (
+        <div style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12 }}
+             role="status" aria-live="polite">
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'var(--text-primary)' }}>
+            <span>{SWITCH_STAGE_LABEL[job.stage] || job.stage}: {job.message}</span>
+            {job.stage === 'downloading' && job.progress != null && <span className="mono">{job.progress}%</span>}
+          </div>
+          {busy && (
+            <div style={{ height: 6, background: 'var(--border)', borderRadius: 3, marginTop: 8, overflow: 'hidden' }}>
+              <div style={{ height: '100%', background: 'var(--accent)', transition: 'width .5s',
+                            width: `${job.stage === 'downloading' ? (job.progress || 2) :
+                                     ({ starting: 5, checking: 10, waiting: 20, unloading: 35, loading: 60, testing: 85, reindexing: 92 }[job.stage] || 50)}%` }} />
+            </div>
+          )}
+          {job.stage === 'downloading' && (
+            <button className="btn btn-secondary" style={{ marginTop: 8 }}
+              onClick={() => api.post('/api/ai/model/cancel', {}).then(load)}>Stop download</button>
+          )}
+          {job.result === 'failed' && <div style={{ fontSize: 12, color: 'var(--accent-red, #f87171)', marginTop: 6 }}>{job.error}</div>}
+        </div>
+      )}
+      {error && <div style={{ fontSize: 12, color: 'var(--accent-red, #f87171)' }}>{error}</div>}
+
+      {active && (
+        <div style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6 }}>
+            Optimized for this Atlas{data.hardware?.board ? ` · ${data.hardware.board.replace('NVIDIA ', '')}` : ''}
+          </div>
+          <div className="mono" style={{ fontSize: 12, color: 'var(--text-primary)', lineHeight: 1.7 }}>
+            {active.label} · {active.tag} ({active.quant}) · {o.num_ctx}-token context · {o.num_thread} threads ·
+            batch {o.num_batch} · GPU layers automatic · temperature {o.temperature} · top-p {o.top_p} · top-k {o.top_k}
+            {o.presence_penalty != null ? ` · presence ${o.presence_penalty}` : ''}{o.repeat_penalty != null ? ` · repeat ${o.repeat_penalty}` : ''}
+            {Object.keys(active.overrides || {}).length > 0 ? ' · with your overrides' : ''}
+          </div>
+        </div>
+      )}
+
+      {active && (
+        <div>
+          <div className="settings-disclosure-toggle" role="button" tabIndex={0}
+            onClick={() => setExpertOpen(v => !v)}
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpertOpen(v => !v); } }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+              Expert overrides — {active.label}
+            </span>
+            <span className="mono" style={{ fontSize: 12, color: 'var(--text-muted)' }}>{expertOpen ? '▲' : '▼'}</span>
+          </div>
+          {expertOpen && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                Not needed: Atlas already runs {active.label} at its best settings for this hardware. Empty fields use the
+                optimized value shown. Overrides apply to {active.label} only and are kept within what this Atlas can run.
+              </div>
+              <div className="settings-grid-2">
+                {OVERRIDE_FIELDS.filter(([k]) => (data.override_keys || []).includes(k) &&
+                    (k !== 'presence_penalty' || active.optimized.presence_penalty != null)).map(([k, label, step]) => {
+                  const set = (draft[k] ?? '') !== '';
+                  return (
+                    <div key={k}>
+                      <label style={{ ...labelStyle, color: set ? 'var(--accent)' : labelStyle.color }}>
+                        {label}{set ? ' · overridden' : ''}
+                      </label>
+                      <input type="number" step={step} style={{ ...inputStyle, width: '100%' }}
+                        placeholder={String(active.optimized[k] ?? '')} value={draft[k] ?? ''}
+                        onChange={e => setDraft(d => ({ ...d, [k]: e.target.value }))} />
+                    </div>
+                  );
+                })}
+              </div>
+              {clampNote && <div style={{ fontSize: 12, color: 'var(--accent-amber, #fbbf24)' }}>Adjusted to fit this Atlas: {clampNote}</div>}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button className="btn btn-primary" disabled={busy || !changed} onClick={applyOverrides}>Apply overrides</button>
+                <button className="btn btn-secondary" disabled={busy || Object.keys(active.overrides || {}).length === 0}
+                  onClick={resetOverrides}>Reset to optimized</button>
+              </div>
+              <div>
+                <label style={labelStyle}>Embedding model (used for knowledge-base search)</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} value={embedDraft}
+                    onChange={e => setEmbedDraft(e.target.value)} />
+                  <button className="btn btn-secondary" disabled={busy || !embedDraft.trim() || embedDraft.trim() === data.embed_model}
+                    onClick={changeEmbedder}>Change</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════
 // AI Page — RAG + Multi-Chat
 // ═══════════════════════════════════════════════
 function AIPage() {
@@ -5533,7 +5758,6 @@ function AIPage() {
   const [warmingUp, setWarmingUp] = useState(false);
   const [deletingChatId, setDeletingChatId] = useState(null);
   const [creatingChat, setCreatingChat] = useState(false);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [addDocOpen, setAddDocOpen] = useState(!isSmallScreen());
   const compact = isSmallScreen();
   const [mobileView, setMobileView] = useState('list'); // 'list' | 'chat' — mobile-only single-pane swap
@@ -5667,8 +5891,9 @@ function AIPage() {
           body: JSON.stringify({ text }),
         });
         if (response.ok || response.status !== 503 || attempt === 2) break;
+        const wait = await response.clone().json().catch(() => ({}));
         setMessages(prev => prev.map(m => m.id === tempAssistantId
-          ? { ...m, content: 'Ray is still starting. Retrying…', streaming: true }
+          ? { ...m, content: `${wait.error || 'Ray is still starting.'} Retrying…`, streaming: true }
           : m));
         await loadStatus().catch(() => {});
         await new Promise(resolve => setTimeout(resolve, attempt === 0 ? 2000 : 4000));
@@ -5744,25 +5969,12 @@ function AIPage() {
     setSavingSettings(true);
     setSaveError(null);
     try {
+      // Behaviour settings only; the model changes through the picker above.
       const result = await api.put('/api/ai/settings', settings);
       // Sync state with what the server actually persisted
       if (result?.settings) setSettings(result.settings);
       setSettingsSaved(true);
       setTimeout(() => setSettingsSaved(false), 2000);
-      if (result?.warming_up) {
-        setWarmingUp(true);
-        loadStatus();
-        const targetModel = settings.model;
-        const poll = setInterval(() => {
-          loadStatus().then(s => {
-            const loaded = s?.loaded_models || [];
-            if (loaded.some(m => m === targetModel || m.startsWith(targetModel + ':'))) {
-              setWarmingUp(false); clearInterval(poll);
-            }
-          });
-        }, 3000);
-        setTimeout(() => { setWarmingUp(false); clearInterval(poll); }, 120000);
-      }
     } catch (err) {
       setSaveError(err.message || 'Save failed');
     } finally {
@@ -5907,10 +6119,12 @@ function AIPage() {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--text-primary)' }}>Ray</div>
               <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {warmingUp
-                  ? `Loading ${settings.model || 'qwen2.5:3b'}…`
+                {status?.startup_phase === 'switching' && status?.switch
+                  ? `Switching to ${status.switch.label}…`
+                  : warmingUp
+                  ? `Loading ${status?.active_model?.label || 'Ray'}…`
                   : aiReady
-                    ? `${settings.model || 'qwen2.5:3b'} · RAG ${settings.rag_enabled === 'true' ? 'on' : 'off'} · ${status?.doc_count || 0} docs`
+                    ? `${status?.active_model?.label || settings.model || 'Ray'} · RAG ${settings.rag_enabled === 'true' ? 'on' : 'off'} · ${status?.doc_count || 0} docs`
                     : status?.running
                       ? `Starting Ray… ${status?.startup_phase || 'warming_up'}`
                       : 'Ollama not reachable'}
@@ -6199,7 +6413,9 @@ function AIPage() {
                 }}>
                   <div style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12 }}>
                     <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Active Chat Model</div>
-                    <div className="mono" style={{ fontSize: 13, color: 'var(--text-primary)' }}>{settings.model || '—'}</div>
+                    <div className="mono" style={{ fontSize: 13, color: 'var(--text-primary)' }}>
+                      {status?.active_model ? `${status.active_model.label} (${status.active_model.quant})` : (settings.model || '—')}
+                    </div>
                   </div>
                   <div style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12 }}>
                     <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Loaded In Ollama</div>
@@ -6223,29 +6439,7 @@ function AIPage() {
               {/* Model section */}
               <div>
                 <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 12 }}>Model</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  <div>
-                    <label style={labelStyle}>Chat Model</label>
-                    {status?.models && status.models.length > 0 ? (
-                      <select
-                        value={settings.model || ''}
-                        onChange={e => setSettings(p => ({...p, model: e.target.value}))}
-                        style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }}
-                      >
-                        {settings.model && !status.models.includes(settings.model) && (
-                          <option value={settings.model}>{settings.model} (not in Ollama)</option>
-                        )}
-                        {status.models.map(m => <option key={m} value={m}>{m}</option>)}
-                      </select>
-                    ) : (
-                      <input style={inputStyle} value={settings.model || ''} onChange={e => setSettings(p => ({...p, model: e.target.value}))} placeholder="qwen2.5:3b" />
-                    )}
-                  </div>
-                  <div>
-                    <label style={labelStyle}>Embed Model</label>
-                    <input style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} value={settings.embed_model || ''} onChange={e => setSettings(p => ({...p, embed_model: e.target.value}))} placeholder="qwen3-embedding:0.6b" />
-                  </div>
-                </div>
+                <RayModelPicker labelStyle={labelStyle} inputStyle={inputStyle} onChanged={() => { loadStatus(); loadSettings(); }} />
               </div>
 
               {/* Behavior section */}
@@ -6297,70 +6491,6 @@ function AIPage() {
               {/* Knowledge Map */}
               <div style={{ borderTop: '1px solid var(--border-color, #2a3040)', paddingTop: 16 }}>
                 <KnowledgeMap />
-              </div>
-
-              {/* Inference section (advanced — collapsed by default) */}
-              <div>
-                <div
-                  className="settings-disclosure-toggle"
-                  onClick={() => setAdvancedOpen(o => !o)}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setAdvancedOpen(o => !o); } }}
-                >
-                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Advanced (Inference)</span>
-                  <span className="mono" style={{ fontSize: 12, color: 'var(--text-muted)' }}>{advancedOpen ? '▲' : '▼'}</span>
-                </div>
-                {advancedOpen && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
-                  <div className="settings-grid-2">
-                    <div>
-                      <label style={labelStyle}>Temperature (0–2)</label>
-                      <input type="number" min="0" max="2" step="0.05" style={{ ...inputStyle, width: '100%' }} value={settings.temperature ?? '0.3'} onChange={e => setSettings(p => ({...p, temperature: e.target.value}))} />
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>Lower = focused, higher = creative</div>
-                    </div>
-                    <div>
-                      <label style={labelStyle}>Top-P (0–1)</label>
-                      <input type="number" min="0" max="1" step="0.05" style={{ ...inputStyle, width: '100%' }} value={settings.top_p ?? '0.9'} onChange={e => setSettings(p => ({...p, top_p: e.target.value}))} />
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>Nucleus sampling cutoff</div>
-                    </div>
-                    <div>
-                      <label style={labelStyle}>Top-K (1–100)</label>
-                      <input type="number" min="1" max="100" style={{ ...inputStyle, width: '100%' }} value={settings.top_k ?? '40'} onChange={e => setSettings(p => ({...p, top_k: e.target.value}))} />
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>Token candidates per step</div>
-                    </div>
-                    <div>
-                      <label style={labelStyle}>Max Response Tokens</label>
-                      <input type="number" min="64" max="4096" step="64" style={{ ...inputStyle, width: '100%' }} value={settings.num_predict ?? '1024'} onChange={e => setSettings(p => ({...p, num_predict: e.target.value}))} />
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>Max tokens generated per reply</div>
-                    </div>
-                  </div>
-                  <div className="settings-grid-2">
-                    <div>
-                      <label style={labelStyle}>Context Window (num_ctx)</label>
-                      <input type="number" min="512" max="8192" step="512" style={{ ...inputStyle, width: '100%' }} value={settings.num_ctx ?? '4096'} onChange={e => setSettings(p => ({...p, num_ctx: e.target.value}))} />
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>Lower = faster responses</div>
-                    </div>
-                    <div>
-                      <label style={labelStyle}>GPU Layers (num_gpu)</label>
-                      <input type="number" min="0" max="99" style={{ ...inputStyle, width: '100%' }} value={settings.num_gpu ?? '99'} onChange={e => setSettings(p => ({...p, num_gpu: e.target.value}))} />
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>99 = all layers on GPU</div>
-                    </div>
-                  </div>
-                  <div className="settings-grid-2">
-                    <div>
-                      <label style={labelStyle}>CPU Threads (num_thread)</label>
-                      <input type="number" min="1" max="32" style={{ ...inputStyle, width: '100%' }} value={settings.num_thread ?? '6'} onChange={e => setSettings(p => ({...p, num_thread: e.target.value}))} />
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>Inference worker threads</div>
-                    </div>
-                    <div>
-                      <label style={labelStyle}>Batch Size (num_batch)</label>
-                      <input type="number" min="1" max="2048" step="1" style={{ ...inputStyle, width: '100%' }} value={settings.num_batch ?? '512'} onChange={e => setSettings(p => ({...p, num_batch: e.target.value}))} />
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>Prompt processing batch size</div>
-                    </div>
-                  </div>
-                </div>
-                )}
               </div>
 
             </div>
@@ -10929,6 +11059,7 @@ const AUDIT_LABELS = {
   update_rolled_back: 'Update undone — previous version restored', update_failed: 'Update failed',
   retention_changed: 'History settings changed', ai_history_deleted: 'AI history deleted',
   location_history_deleted: 'Location history deleted', factory_reset: 'Factory reset',
+  identity_changed: 'New device identity — earlier pairings ended', ray_model_changed: 'Ray model changed',
 };
 
 function auditDetail(d) {

@@ -9,6 +9,7 @@ struct OnboardingView: View {
     @State private var advanced = false
     @State private var address = ""
     @State private var code = ""
+    @State private var wifiPasswordTyped = false
 
     var body: some View {
         ScrollView {
@@ -93,13 +94,22 @@ struct OnboardingView: View {
                 HStack { ProgressView(); Text("Connecting…").foregroundColor(AtlasTheme.muted) }
             } else {
                 Text("Enter the setup code from the label on your Atlas:").foregroundColor(AtlasTheme.onSurface)
-                TextField("XXXX-XXXX-XXXX", text: $code)
+                TextField("XXXX-XXXX-XXXX", text: Binding(
+                    get: { code },
+                    set: { typed in
+                        wifiPasswordTyped = SetupCode.looksLikeWifiPassword(typed)
+                        code = SetupCode.format(typed)
+                    }))
                     .font(.system(.title3, design: .monospaced))
                     .textInputAutocapitalization(.characters).autocorrectionDisabled()
                     .textFieldStyle(.roundedBorder)
+                Text(wifiPasswordTyped ? "That's the Wi-Fi password. Use the code labelled Setup code."
+                                       : "3 groups of 4 capitals and digits — not the Wi-Fi password")
+                    .font(.footnote)
+                    .foregroundColor(wifiPasswordTyped ? AtlasTheme.warning : AtlasTheme.muted)
                 Button("Connect") { model.pairWithCode(code) }
                     .buttonStyle(.borderedProminent)
-                    .disabled(code.filter { $0.isLetter || $0.isNumber }.count < 8)
+                    .disabled(!SetupCode.isComplete(code))
                 Button("Scan the label instead") { scanning = true }
                 Button("Ask someone using this Atlas to allow this iPhone") { model.askForApproval() }
             }

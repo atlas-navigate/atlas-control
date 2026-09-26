@@ -66,3 +66,25 @@ class AppPageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RaySettingsTemplateTests(unittest.TestCase):
+    """Ray's settings pick a model; nobody has to set quantization or context."""
+
+    def setUp(self):
+        with open(os.path.join(REPO, "templates", "index.html"), encoding="utf-8") as f:
+            self.html = f.read()
+
+    def test_models_are_chosen_from_the_catalog_not_typed(self):
+        self.assertIn("<RayModelPicker", self.html)
+        self.assertIn("api.get('/api/ai/models')", self.html)
+        self.assertIn("api.post('/api/ai/model'", self.html)
+        self.assertNotIn('placeholder="qwen2.5:3b"', self.html)
+
+    def test_no_global_inference_fields_remain(self):
+        # Low-level values live per model, behind "Expert overrides".
+        for field in ("settings.num_ctx", "settings.num_gpu", "settings.num_thread", "settings.num_batch",
+                      "settings.temperature", "settings.top_p", "settings.top_k", "settings.num_predict"):
+            self.assertNotIn(field, self.html)
+        self.assertIn("Expert overrides", self.html)
+        self.assertIn("Reset to optimized", self.html)

@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.atlascontrol.mobile.*
 import com.atlascontrol.mobile.network.QrPayload
+import com.atlascontrol.mobile.network.SetupCode
 
 /**
  * First run: find the Atlas and pair with it once.
@@ -50,6 +51,7 @@ fun OnboardingScreen(vm: ConnectionViewModel) {
     var advanced by remember { mutableStateOf(false) }
     var address by remember { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
+    var wifiPasswordTyped by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
     if (scanning) {
@@ -90,14 +92,25 @@ fun OnboardingScreen(vm: ConnectionViewModel) {
                             Text("Enter the setup code from the label on your Atlas:", color = AtlasOnSurface, fontSize = 14.sp)
                             Spacer(Modifier.height(8.dp))
                             OutlinedTextField(
-                                value = code, onValueChange = { code = it.uppercase().take(20) },
+                                value = code,
+                                onValueChange = {
+                                    wifiPasswordTyped = SetupCode.looksLikeWifiPassword(it)
+                                    code = SetupCode.format(it)
+                                },
                                 singleLine = true, placeholder = { Text("XXXX-XXXX-XXXX") },
+                                label = { Text("Setup code") },
+                                supportingText = {
+                                    Text(if (wifiPasswordTyped) "That's the Wi-Fi password. Use the code labelled Setup code."
+                                         else "3 groups of 4 capitals and digits — not the Wi-Fi password")
+                                },
+                                isError = wifiPasswordTyped,
                                 textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace, letterSpacing = 2.sp),
-                                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters),
+                                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters,
+                                    autoCorrectEnabled = false),
                                 modifier = Modifier.fillMaxWidth(),
                             )
                             Spacer(Modifier.height(10.dp))
-                            Button(onClick = { vm.pairWithCode(code) }, enabled = code.count { it.isLetterOrDigit() } >= 8,
+                            Button(onClick = { vm.pairWithCode(code) }, enabled = SetupCode.isComplete(code),
                                 modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("Connect") }
                             Spacer(Modifier.height(8.dp))
                             OutlinedButton(onClick = { scanning = true }, modifier = Modifier.fillMaxWidth()) {

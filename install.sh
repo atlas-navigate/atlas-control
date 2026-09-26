@@ -50,9 +50,9 @@ PROTOMAPS_FALLBACK_KEY="20260608.pmtiles"
 # Routing profiles to process per state (car always included; hiking optional)
 ROUTING_PROFILES=("car" "hiking")
 
-# Ollama models pulled on first run (also checked after updates)
-OLLAMA_CHAT_MODEL="qwen2.5:3b"
-OLLAMA_EMBED_MODEL="qwen3-embedding:0.6b"
+# Ray's models (Qwen2.5 3B, Qwen3.5 4B and the embedder), the Ollama version
+# they need and the build that suits this hardware all come from the release's
+# ai_models.json, read through model_profiles.py (sections 5 and 12).
 
 # ── Colors & helpers ────────────────────────────────────────────────────────
 RED='\033[0;31m'; GRN='\033[0;32m'; YLW='\033[1;33m'
@@ -534,12 +534,34 @@ STATE_INPUT="keep"
 # ════════════════════════════════════════════════════════════════════════════
 section "Ollama AI Engine"
 
+# Every model Ray offers must run on this Ollama (Qwen3.5 needs 0.17.1+), and
+# Ollama needs its GPU runners in /usr/local/lib/ollama — a bare binary
+# (as older payload drives staged) silently runs Ray on the CPU.
+OLLAMA_MIN="$(python3 -I "$SRC_DIR/model_profiles.py" --min-ollama)"
+ollama_version() { ollama --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1; }
+version_ge() { [[ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" == "$2" ]]; }
+
+OLLAMA_OK=false
 if command -v ollama &>/dev/null; then
-    log "Ollama already installed: $(ollama --version 2>/dev/null | head -1)"
-else
-    info "Downloading and installing Ollama ..."
-    curl -fsSL https://ollama.com/install.sh | OLLAMA_INSTALL_DIR=/usr/local/bin sh
-    log "Ollama installed"
+    if [[ ! -d /usr/local/lib/ollama ]]; then
+        warn "Ollama is installed without its GPU runners (/usr/local/lib/ollama) — reinstalling"
+    elif ! version_ge "$(ollama_version)" "$OLLAMA_MIN"; then
+        warn "Ollama $(ollama_version) is older than $OLLAMA_MIN, which Ray's models need — upgrading"
+    else
+        log "Ollama $(ollama_version) with GPU runners (Ray's models need $OLLAMA_MIN or newer)"
+        OLLAMA_OK=true
+    fi
+fi
+if ! $OLLAMA_OK; then
+    info "Downloading and installing Ollama (needs Internet) ..."
+    if curl -fsSL https://ollama.com/install.sh | OLLAMA_INSTALL_DIR=/usr/local/bin sh; then
+        log "Ollama $(ollama_version) installed"
+    elif command -v ollama &>/dev/null; then
+        warn "Could not update Ollama (offline?). Ray keeps working with the models this Ollama can run;"
+        warn "re-run install.sh when online to enable every model (needs Ollama $OLLAMA_MIN+)."
+    else
+        die "Ollama is required and could not be installed. Connect to the Internet, or stage it on the payload drive."
+    fi
 fi
 # Service file is written in section 10 alongside atlas-control.service
 
@@ -1176,20 +1198,30 @@ if systemctl is-active --quiet ollama; then
 
     if curl -fsS "http://127.0.0.1:11434/api/tags" >/dev/null 2>&1; then
         log "Ollama API is responding"
-        for model in "$OLLAMA_CHAT_MODEL" "$OLLAMA_EMBED_MODEL"; do
+        # Every model Ray offers, in the build that suits this unit's memory
+        # (e.g. Qwen3.5 4B as Q4_K_M on an 8 GB Orin Nano), plus the embedder.
+        # A unit sold off-grid can never download one later, so all of them
+        # ship. The owner's choice of model (Settings → Ray) is never changed.
+        mapfile -t RAY_MODELS < <(python3 -I "$SRC_DIR/model_profiles.py" --preinstall)
+        MODELS_MISSING=()
+        for model in "${RAY_MODELS[@]}"; do
             if ollama show "$model" >/dev/null 2>&1; then
                 log "Ollama model present: $model"
             else
                 info "Pulling Ollama model: $model"
                 # Never fatal: an off-grid box can't pull, and a failed pull
-                # must not abort the update before services restart.
+                # must not abort the install before services start.
                 if ollama pull "$model"; then
                     log "Ollama model ready: $model"
                 else
-                    warn "Could not pull $model (offline?) — Ray needs it; pull manually when online"
+                    warn "Could not pull $model (offline?)"
+                    MODELS_MISSING+=("$model")
                 fi
             fi
         done
+        if (( ${#MODELS_MISSING[@]} )); then
+            warn "Missing Ray models: ${MODELS_MISSING[*]} — put them on the payload drive, or re-run install.sh online."
+        fi
     else
         warn "Ollama service started but API did not become ready; skipping model pull"
     fi
@@ -1314,3 +1346,8 @@ if [[ ! -f "$APP_DIR/static/data/places.db" ]]; then
 fi
 echo -e "  ${CYN}Updates:${NC} Atlas installs signed releases itself — Settings → Software Update."
 echo ""
+if [[ -n "${RAY_MODELS[*]:-}" ]]; then
+    echo -e "  ${CYN}Ray's models:${NC} $(python3 -I "$SRC_DIR/model_profiles.py" --summary | awk '{print $1" "$2}' | paste -sd, - | sed 's/,/, /g')"
+    echo -e "  (each tuned for this unit automatically; the owner picks one in Settings → Ray)."
+    echo ""
+fi

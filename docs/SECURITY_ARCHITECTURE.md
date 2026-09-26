@@ -80,8 +80,11 @@ self-signed certificate (valid 2024–2099 so a wrong clock never breaks it),
 hotspot SSID + random WPA2 password, setup code, the nginx proxy secret.
 The apps pin the certificate's SPKI SHA-256 (from the label QR code, the
 mDNS/beacon advert and the pairing handshake) and warn loudly if the same
-device id ever presents a different key. The module serial is recorded, so
-storage cloned into another unit regenerates the identity.
+device id ever presents a different key. The module serial is recorded and
+checked on every boot (`atlas-firstboot.service`), so storage or a disk image
+cloned into another unit regenerates the identity before anything serves it;
+pairings made with the old identity end, and the cloned hotspot profile is
+removed.
 
 ## No sudo
 

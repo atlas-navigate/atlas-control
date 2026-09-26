@@ -1,0 +1,52 @@
+{
+  "schema": 1,
+  "about": "Ray's chat models. Read by model_profiles.py (the app) and install.sh. Sizes in MB. measured_mb is Ollama's resident size per context window, fully on the GPU of an 8 GB Jetson Orin Nano with Ollama 0.32 (tools/bench/models.py, docs/AI_MODELS.md).",
+  "default": "qwen2.5:3b",
+  "embedder": {"id": "qwen3-embedding:0.6b", "num_ctx": 1024, "size_mb": 639, "memory_mb": 1290},
+  "models": [
+    {
+      "id": "qwen2.5:3b",
+      "label": "Qwen2.5 3B",
+      "blurb": "Quickest answers. Ray's standard model.",
+      "aliases": [],
+      "min_ollama": "0.5.0",
+      "preinstall": true,
+      "variants": [
+        {"tag": "qwen2.5:3b", "quant": "Q4_K_M", "size_mb": 1929, "min_ram_mb": 0,
+         "measured_mb": {"2048": 1952, "4096": 1992, "8192": 2072}}
+      ],
+      "context": {"default": 4096, "by_ram": [], "limit_by_ram": [[7000, 8192]]},
+      "num_batch": 512,
+      "num_predict": 1024,
+      "sampling": {"temperature": 0.7, "top_p": 0.8, "top_k": 20, "repeat_penalty": 1.05},
+      "think": false,
+      "chars_per_token": 3.3,
+      "mb_per_1k_ctx": 20,
+      "embedder": {"on_gpu": true, "load_first": true},
+      "measured": {"gen_tok_s": 20.7, "prompt_tok_s": 760}
+    },
+    {
+      "id": "qwen3.5:4b",
+      "label": "Qwen3.5 4B",
+      "blurb": "Newer and more thorough; answers arrive a little slower.",
+      "aliases": ["qwen3.5:4b-q4_K_M"],
+      "min_ollama": "0.17.1",
+      "preinstall": true,
+      "variants": [
+        {"tag": "qwen3.5:4b-q8_0", "quant": "Q8_0", "size_mb": 5279, "min_ram_mb": 15000,
+         "measured_mb": {}},
+        {"tag": "qwen3.5:4b", "quant": "Q4_K_M", "size_mb": 3389, "min_ram_mb": 0,
+         "measured_mb": {"4096": 2997}}
+      ],
+      "context": {"default": 4096, "by_ram": [], "limit_by_ram": [[7000, 8192]]},
+      "num_batch": 512,
+      "num_predict": 1024,
+      "sampling": {"temperature": 0.7, "top_p": 0.8, "top_k": 20, "presence_penalty": 1.5, "repeat_penalty": 1.0},
+      "think": false,
+      "chars_per_token": 3.3,
+      "mb_per_1k_ctx": 17,
+      "embedder": {"on_gpu": false, "gpu_from_ram_mb": 15000, "load_first": false},
+      "measured": {"gen_tok_s": 14.8, "prompt_tok_s": 1200}
+    }
+  ]
+}

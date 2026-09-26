@@ -10,6 +10,8 @@ struct AtlasInfo: Equatable {
     /// The key this connection actually presented.
     var observedPin: String
     var version: String?
+    /// Pairing protocol Atlas speaks (/api/device/info "pairing"); see AtlasClient.pairingVersion.
+    var pairingVersion: Int = 1
 }
 
 struct PairingError: LocalizedError {
@@ -29,6 +31,9 @@ enum HealthResult { case up, restarting, unreachable, wrongKey }
 /// HTTPS calls to Atlas, always through a pinned (or, before pairing,
 /// observing) session. Nothing secret is sent over an observing session.
 enum AtlasClient {
+    /// The pairing protocol this app speaks. A higher number on Atlas means: update the app.
+    static let pairingVersion = 1
+
     static func normalize(_ url: String) -> String {
         var u = url.trimmingCharacters(in: .whitespacesAndNewlines)
         while u.hasSuffix("/") { u.removeLast() }
@@ -75,7 +80,35 @@ enum AtlasClient {
               let id = o["device_id"] as? String else { return nil }
         return AtlasInfo(baseUrl: base, deviceId: id, name: o["name"] as? String ?? "Atlas",
                          advertisedPin: o["tls_spki_sha256"] as? String, observedPin: pin,
-                         version: o["version"] as? String)
+                         version: o["version"] as? String, pairingVersion: o["pairing"] as? Int ?? 1)
+    }
+
+    /// Is this an Atlas running software from before pairing existed (it answers
+    /// /api/device but has no /api/device/info)? Only used to explain why the
+    /// app can't connect — never to connect without pairing.
+    static func isOlderAtlas(_ baseUrl: String) async -> Bool {
+        let (s, _) = session(pin: nil, timeout: 2.5)
+        defer { s.invalidateAndCancel() }
+        guard let req = request("\(normalize(baseUrl))/api/device"),
+              let (data, resp) = try? await s.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200 else { return false }
+        return object(data)["app"] as? String == "atlas-control"
+    }
+
+    /// Does Atlas still accept this iPhone's pairing? false = removed in
+    /// Settings → Connected devices, or Atlas was factory reset; nil = couldn't
+    /// tell right now (restarting, unreachable).
+    static func stillPaired(_ baseUrl: String, device: PairedDevice) async -> Bool? {
+        let (s, _) = session(pin: device.pin, timeout: 4)
+        defer { s.invalidateAndCancel() }
+        guard let req = request("\(normalize(baseUrl))/api/pair/status", token: device.token),
+              let (data, resp) = try? await s.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        let o = object(data)
+        guard let paired = o["paired"] as? Bool else { return nil }
+        if let id = (o["device"] as? [String: Any])?["id"] as? String, id != device.deviceId { return nil }
+        if o["required"] as? Bool == false { return true }
+        return paired
     }
 
     /// Is the paired Atlas answering at this address with its pinned key?
@@ -122,14 +155,19 @@ enum AtlasClient {
         return ApprovalRequest(requestId: id, secret: secret, serverNonce: sn, clientNonce: nonce)
     }
 
-    /// "pending" | "approved:<token>" | "denied" | "expired" | "unknown"
+    /// "pending" | "retry" | "approved:<token>" | "denied" | "expired" | "unknown".
+    /// "retry": Atlas was busy, restarting or briefly unreachable — keep waiting.
     static func pollApproval(_ baseUrl: String, pin: String, request req: ApprovalRequest) async -> String {
         let (s, _) = session(pin: pin, timeout: 10)
         defer { s.invalidateAndCancel() }
         let secret = req.secret.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
         guard let r = request("\(normalize(baseUrl))/api/pair/request/\(req.requestId)?secret=\(secret)&kind=ios"),
-              let (data, _) = try? await s.data(for: r) else { return "pending" }
-        let o = object(data)
+              let (data, resp) = try? await s.data(for: r),
+              (resp as? HTTPURLResponse)?.statusCode == 200 else { return "retry" }
+        return approvalStatus(object(data))
+    }
+
+    static func approvalStatus(_ o: [String: Any]) -> String {
         let status = o["status"] as? String ?? "unknown"
         return status == "approved" ? "approved:\(o["token"] as? String ?? "")" : status
     }

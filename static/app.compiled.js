@@ -5950,10 +5950,413 @@ function KnowledgeMap() {
 }
 
 // ═══════════════════════════════════════════════
+// Ray's model: choose, switch, see how it runs here
+// ═══════════════════════════════════════════════
+// Atlas tunes each model for its own hardware (build, context window,
+// threads, sampling — model_profiles.py). Switching runs as a job on Atlas:
+// download if needed, unload, load, check it answers, then save.
+const OVERRIDE_FIELDS = [['temperature', 'Temperature', 0.05], ['top_p', 'Top-P', 0.05], ['top_k', 'Top-K', 1], ['repeat_penalty', 'Repeat penalty', 0.05], ['presence_penalty', 'Presence penalty', 0.1], ['num_predict', 'Max response tokens', 64], ['num_ctx', 'Context window (tokens)', 512], ['num_batch', 'Batch size', 32], ['num_thread', 'CPU threads', 1], ['num_gpu', 'GPU layers (-1 = automatic)', 1]];
+const SWITCH_STAGE_LABEL = {
+  starting: 'Starting',
+  checking: 'Checking',
+  downloading: 'Downloading',
+  waiting: 'Waiting',
+  unloading: 'Unloading',
+  loading: 'Loading',
+  testing: 'Testing',
+  reindexing: 'Rebuilding index',
+  done: 'Done',
+  failed: 'Stopped'
+};
+function fmtMB(mb) {
+  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`;
+}
+function RayModelPicker({
+  labelStyle,
+  inputStyle,
+  onChanged
+}) {
+  var _data$models, _data$hardware;
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+  const [expertOpen, setExpertOpen] = useState(false);
+  const [draft, setDraft] = useState({});
+  const [embedDraft, setEmbedDraft] = useState('');
+  const [clampNote, setClampNote] = useState(null);
+  const load = useCallback(() => api.get('/api/ai/models').then(d => {
+    setData(d);
+    setError(null);
+    return d;
+  }).catch(e => setError(e.message || 'Could not load models')), []);
+  const job = data === null || data === void 0 ? void 0 : data.switch;
+  const busy = !!(job && !job.finished);
+  const active = data === null || data === void 0 || (_data$models = data.models) === null || _data$models === void 0 ? void 0 : _data$models.find(m => m.active);
+  useEffect(() => {
+    load();
+  }, [load]);
+  useEffect(() => {
+    const sock = window._atlasSocket;
+    if (!sock) return;
+    const onJob = j => {
+      setData(d => d ? {
+        ...d,
+        switch: j
+      } : d);
+      if (j.finished) {
+        load();
+        onChanged && onChanged();
+      }
+    };
+    sock.on('ai_model', onJob);
+    return () => sock.off('ai_model', onJob);
+  }, [load, onChanged]);
+  // No socket (or a missed event): poll while a switch runs.
+  useEffect(() => {
+    if (!busy) return;
+    const iv = setInterval(load, 4000);
+    return () => clearInterval(iv);
+  }, [busy, load]);
+  useEffect(() => {
+    if (!active) return;
+    const d = {};
+    Object.entries(active.overrides || {}).forEach(([k, v]) => {
+      d[k] = String(v);
+    });
+    setDraft(d);
+    setEmbedDraft((data === null || data === void 0 ? void 0 : data.embed_model) || '');
+  }, [active === null || active === void 0 ? void 0 : active.id, JSON.stringify(active === null || active === void 0 ? void 0 : active.overrides), data === null || data === void 0 ? void 0 : data.embed_model]);
+  async function choose(m) {
+    if (m.status === 'download' && !(await atlasConfirm({
+      title: `Download ${m.label}?`,
+      message: `${m.label} is ${fmtMB(m.size_mb)}. Atlas needs an Internet connection to download it; Ray keeps using ${(active === null || active === void 0 ? void 0 : active.label) || 'its current model'} until it is ready.`,
+      confirmLabel: 'Download and switch'
+    }))) return;
+    try {
+      const r = await api.post('/api/ai/model', {
+        model: m.id
+      });
+      setData(d => ({
+        ...d,
+        switch: r.switch
+      }));
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+  async function applyOverrides() {
+    const overrides = {};
+    Object.entries(draft).forEach(([k, v]) => {
+      if (String(v).trim() !== '') overrides[k] = Number(v);
+    });
+    try {
+      const r = await api.put(`/api/ai/models/${encodeURIComponent(active.id)}/overrides`, {
+        overrides
+      });
+      const clamped = Object.entries(r.clamped || {});
+      setClampNote(clamped.length ? clamped.map(([k, [asked, used]]) => `${k}: ${asked} → ${used}`).join(', ') : null);
+      if (r.switch) setData(d => ({
+        ...d,
+        switch: r.switch
+      }));else load();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+  async function resetOverrides() {
+    try {
+      const r = await api.del(`/api/ai/models/${encodeURIComponent(active.id)}/overrides`);
+      setClampNote(null);
+      if (r.switch) setData(d => ({
+        ...d,
+        switch: r.switch
+      }));else load();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+  async function changeEmbedder() {
+    const name = embedDraft.trim();
+    if (!name || name === data.embed_model) return;
+    if (!(await atlasConfirm({
+      title: 'Change the embedding model?',
+      message: `Ray will rebuild its knowledge index with ${name}. Search is unavailable for a few minutes.`,
+      confirmLabel: 'Change and rebuild'
+    }))) return;
+    try {
+      const r = await api.post('/api/ai/model', {
+        model: active.id,
+        embed_model: name
+      });
+      setData(d => ({
+        ...d,
+        switch: r.switch
+      }));
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+  if (!data) return /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: 'var(--text-muted)'
+    }
+  }, error || 'Loading models…');
+  const o = (active === null || active === void 0 ? void 0 : active.options) || {};
+  const cardStyle = m => ({
+    background: 'var(--bg-input)',
+    borderRadius: 'var(--radius)',
+    padding: 12,
+    border: `1px solid ${m.active ? 'var(--accent)' : 'var(--border)'}`
+  });
+  const statusText = m => m.active ? 'In use' : m.status === 'installed' ? 'Ready' : m.status === 'download' ? `Download · ${fmtMB(m.size_mb)}` : `Needs Ollama ${m.min_ollama}+`;
+  const changed = Object.entries(draft).some(([k, v]) => {
+    var _k;
+    return String(v).trim() !== '' && Number(v) !== Number((_k = ((active === null || active === void 0 ? void 0 : active.overrides) || {})[k]) !== null && _k !== void 0 ? _k : NaN);
+  }) || Object.keys((active === null || active === void 0 ? void 0 : active.overrides) || {}).some(k => {
+    var _draft$k;
+    return ((_draft$k = draft[k]) !== null && _draft$k !== void 0 ? _draft$k : '') === '';
+  });
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 10
+    }
+  }, data.notice && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: 'var(--accent-amber, #fbbf24)'
+    }
+  }, data.notice), /*#__PURE__*/React.createElement("div", {
+    className: "settings-grid-2"
+  }, data.models.map(m => /*#__PURE__*/React.createElement("div", {
+    key: m.id,
+    style: cardStyle(m),
+    "data-model": m.id
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      gap: 8,
+      alignItems: 'baseline'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 15,
+      fontWeight: 700,
+      color: 'var(--text-primary)'
+    }
+  }, m.label), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: m.active ? 'var(--accent)' : 'var(--text-muted)'
+    }
+  }, statusText(m))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: 'var(--text-secondary, var(--text-muted))',
+      margin: '4px 0 8px'
+    }
+  }, m.blurb), /*#__PURE__*/React.createElement("div", {
+    className: "mono",
+    style: {
+      fontSize: 11,
+      color: 'var(--text-muted)'
+    }
+  }, m.quant, " \xB7 ", m.options.num_ctx.toLocaleString(), "-token context \xB7 ~", fmtMB(m.memory_mb), m.speed_tok_s ? ` · ${m.speed_tok_s} tokens/s here` : ''), !m.active && /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-secondary",
+    style: {
+      marginTop: 10
+    },
+    disabled: busy || m.status === 'needs_engine',
+    onClick: () => choose(m)
+  }, m.status === 'download' ? 'Download and use' : 'Use this model')))), job && (job.stage !== 'done' || Date.now() / 1000 - (job.finished || 0) < 60) && /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'var(--bg-input)',
+      border: '1px solid var(--border)',
+      borderRadius: 'var(--radius)',
+      padding: 12
+    },
+    role: "status",
+    "aria-live": "polite"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      fontSize: 13,
+      color: 'var(--text-primary)'
+    }
+  }, /*#__PURE__*/React.createElement("span", null, SWITCH_STAGE_LABEL[job.stage] || job.stage, ": ", job.message), job.stage === 'downloading' && job.progress != null && /*#__PURE__*/React.createElement("span", {
+    className: "mono"
+  }, job.progress, "%")), busy && /*#__PURE__*/React.createElement("div", {
+    style: {
+      height: 6,
+      background: 'var(--border)',
+      borderRadius: 3,
+      marginTop: 8,
+      overflow: 'hidden'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      height: '100%',
+      background: 'var(--accent)',
+      transition: 'width .5s',
+      width: `${job.stage === 'downloading' ? job.progress || 2 : {
+        starting: 5,
+        checking: 10,
+        waiting: 20,
+        unloading: 35,
+        loading: 60,
+        testing: 85,
+        reindexing: 92
+      }[job.stage] || 50}%`
+    }
+  })), job.stage === 'downloading' && /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-secondary",
+    style: {
+      marginTop: 8
+    },
+    onClick: () => api.post('/api/ai/model/cancel', {}).then(load)
+  }, "Stop download"), job.result === 'failed' && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: 'var(--accent-red, #f87171)',
+      marginTop: 6
+    }
+  }, job.error)), error && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: 'var(--accent-red, #f87171)'
+    }
+  }, error), active && /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: 'var(--bg-input)',
+      border: '1px solid var(--border)',
+      borderRadius: 'var(--radius)',
+      padding: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      fontWeight: 700,
+      color: 'var(--text-muted)',
+      marginBottom: 6
+    }
+  }, "Optimized for this Atlas", (_data$hardware = data.hardware) !== null && _data$hardware !== void 0 && _data$hardware.board ? ` · ${data.hardware.board.replace('NVIDIA ', '')}` : ''), /*#__PURE__*/React.createElement("div", {
+    className: "mono",
+    style: {
+      fontSize: 12,
+      color: 'var(--text-primary)',
+      lineHeight: 1.7
+    }
+  }, active.label, " \xB7 ", active.tag, " (", active.quant, ") \xB7 ", o.num_ctx, "-token context \xB7 ", o.num_thread, " threads \xB7 batch ", o.num_batch, " \xB7 GPU layers automatic \xB7 temperature ", o.temperature, " \xB7 top-p ", o.top_p, " \xB7 top-k ", o.top_k, o.presence_penalty != null ? ` · presence ${o.presence_penalty}` : '', o.repeat_penalty != null ? ` · repeat ${o.repeat_penalty}` : '', Object.keys(active.overrides || {}).length > 0 ? ' · with your overrides' : '')), active && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "settings-disclosure-toggle",
+    role: "button",
+    tabIndex: 0,
+    onClick: () => setExpertOpen(v => !v),
+    onKeyDown: e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        setExpertOpen(v => !v);
+      }
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      fontWeight: 700,
+      color: 'var(--text-muted)',
+      letterSpacing: '0.08em',
+      textTransform: 'uppercase'
+    }
+  }, "Expert overrides \u2014 ", active.label), /*#__PURE__*/React.createElement("span", {
+    className: "mono",
+    style: {
+      fontSize: 12,
+      color: 'var(--text-muted)'
+    }
+  }, expertOpen ? '▲' : '▼')), expertOpen && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 10,
+      marginTop: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: 'var(--text-muted)'
+    }
+  }, "Not needed: Atlas already runs ", active.label, " at its best settings for this hardware. Empty fields use the optimized value shown. Overrides apply to ", active.label, " only and are kept within what this Atlas can run."), /*#__PURE__*/React.createElement("div", {
+    className: "settings-grid-2"
+  }, OVERRIDE_FIELDS.filter(([k]) => (data.override_keys || []).includes(k) && (k !== 'presence_penalty' || active.optimized.presence_penalty != null)).map(([k, label, step]) => {
+    var _draft$k2, _active$optimized$k, _draft$k3;
+    const set = ((_draft$k2 = draft[k]) !== null && _draft$k2 !== void 0 ? _draft$k2 : '') !== '';
+    return /*#__PURE__*/React.createElement("div", {
+      key: k
+    }, /*#__PURE__*/React.createElement("label", {
+      style: {
+        ...labelStyle,
+        color: set ? 'var(--accent)' : labelStyle.color
+      }
+    }, label, set ? ' · overridden' : ''), /*#__PURE__*/React.createElement("input", {
+      type: "number",
+      step: step,
+      style: {
+        ...inputStyle,
+        width: '100%'
+      },
+      placeholder: String((_active$optimized$k = active.optimized[k]) !== null && _active$optimized$k !== void 0 ? _active$optimized$k : ''),
+      value: (_draft$k3 = draft[k]) !== null && _draft$k3 !== void 0 ? _draft$k3 : '',
+      onChange: e => setDraft(d => ({
+        ...d,
+        [k]: e.target.value
+      }))
+    }));
+  })), clampNote && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: 'var(--accent-amber, #fbbf24)'
+    }
+  }, "Adjusted to fit this Atlas: ", clampNote), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary",
+    disabled: busy || !changed,
+    onClick: applyOverrides
+  }, "Apply overrides"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-secondary",
+    disabled: busy || Object.keys(active.overrides || {}).length === 0,
+    onClick: resetOverrides
+  }, "Reset to optimized")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    style: labelStyle
+  }, "Embedding model (used for knowledge-base search)"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    style: {
+      ...inputStyle,
+      fontFamily: 'var(--font-mono)'
+    },
+    value: embedDraft,
+    onChange: e => setEmbedDraft(e.target.value)
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-secondary",
+    disabled: busy || !embedDraft.trim() || embedDraft.trim() === data.embed_model,
+    onClick: changeEmbedder
+  }, "Change"))))));
+}
+
+// ═══════════════════════════════════════════════
 // AI Page — RAG + Multi-Chat
 // ═══════════════════════════════════════════════
 function AIPage() {
-  var _status$loaded_models, _status$doc_count, _settings$temperature, _settings$top_p, _settings$top_k, _settings$num_predict, _settings$num_ctx, _settings$num_gpu, _settings$num_thread, _settings$num_batch;
+  var _status$active_model, _status$active_model2, _status$loaded_models, _status$doc_count;
   const [status, setStatus] = useState(null);
   const [chats, setChats] = useState([]);
   const [activeChatId, setActiveChatId] = useState(null);
@@ -5974,7 +6377,6 @@ function AIPage() {
   const [warmingUp, setWarmingUp] = useState(false);
   const [deletingChatId, setDeletingChatId] = useState(null);
   const [creatingChat, setCreatingChat] = useState(false);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [addDocOpen, setAddDocOpen] = useState(!isSmallScreen());
   const compact = isSmallScreen();
   const [mobileView, setMobileView] = useState('list'); // 'list' | 'chat' — mobile-only single-pane swap
@@ -6147,9 +6549,10 @@ function AIPage() {
           })
         });
         if (response.ok || response.status !== 503 || attempt === 2) break;
+        const wait = await response.clone().json().catch(() => ({}));
         setMessages(prev => prev.map(m => m.id === tempAssistantId ? {
           ...m,
-          content: 'Ray is still starting. Retrying…',
+          content: `${wait.error || 'Ray is still starting.'} Retrying…`,
           streaming: true
         } : m));
         await loadStatus().catch(() => {});
@@ -6257,29 +6660,12 @@ function AIPage() {
     setSavingSettings(true);
     setSaveError(null);
     try {
+      // Behaviour settings only; the model changes through the picker above.
       const result = await api.put('/api/ai/settings', settings);
       // Sync state with what the server actually persisted
       if (result !== null && result !== void 0 && result.settings) setSettings(result.settings);
       setSettingsSaved(true);
       setTimeout(() => setSettingsSaved(false), 2000);
-      if (result !== null && result !== void 0 && result.warming_up) {
-        setWarmingUp(true);
-        loadStatus();
-        const targetModel = settings.model;
-        const poll = setInterval(() => {
-          loadStatus().then(s => {
-            const loaded = (s === null || s === void 0 ? void 0 : s.loaded_models) || [];
-            if (loaded.some(m => m === targetModel || m.startsWith(targetModel + ':'))) {
-              setWarmingUp(false);
-              clearInterval(poll);
-            }
-          });
-        }, 3000);
-        setTimeout(() => {
-          setWarmingUp(false);
-          clearInterval(poll);
-        }, 120000);
-      }
     } catch (err) {
       setSaveError(err.message || 'Save failed');
     } finally {
@@ -6563,7 +6949,7 @@ function AIPage() {
       textOverflow: 'ellipsis',
       whiteSpace: 'nowrap'
     }
-  }, warmingUp ? `Loading ${settings.model || 'qwen2.5:3b'}…` : aiReady ? `${settings.model || 'qwen2.5:3b'} · RAG ${settings.rag_enabled === 'true' ? 'on' : 'off'} · ${(status === null || status === void 0 ? void 0 : status.doc_count) || 0} docs` : status !== null && status !== void 0 && status.running ? `Starting Ray… ${(status === null || status === void 0 ? void 0 : status.startup_phase) || 'warming_up'}` : 'Ollama not reachable')), !compact && /*#__PURE__*/React.createElement("div", {
+  }, (status === null || status === void 0 ? void 0 : status.startup_phase) === 'switching' && status !== null && status !== void 0 && status.switch ? `Switching to ${status.switch.label}…` : warmingUp ? `Loading ${(status === null || status === void 0 || (_status$active_model = status.active_model) === null || _status$active_model === void 0 ? void 0 : _status$active_model.label) || 'Ray'}…` : aiReady ? `${(status === null || status === void 0 || (_status$active_model2 = status.active_model) === null || _status$active_model2 === void 0 ? void 0 : _status$active_model2.label) || settings.model || 'Ray'} · RAG ${settings.rag_enabled === 'true' ? 'on' : 'off'} · ${(status === null || status === void 0 ? void 0 : status.doc_count) || 0} docs` : status !== null && status !== void 0 && status.running ? `Starting Ray… ${(status === null || status === void 0 ? void 0 : status.startup_phase) || 'warming_up'}` : 'Ollama not reachable')), !compact && /*#__PURE__*/React.createElement("div", {
     className: "page-tab-bar"
   }, ['chat', 'kb', 'settings'].map(t => /*#__PURE__*/React.createElement("button", {
     key: t,
@@ -7028,7 +7414,7 @@ function AIPage() {
       fontSize: 13,
       color: 'var(--text-primary)'
     }
-  }, settings.model || '—')), /*#__PURE__*/React.createElement("div", {
+  }, status !== null && status !== void 0 && status.active_model ? `${status.active_model.label} (${status.active_model.quant})` : settings.model || '—')), /*#__PURE__*/React.createElement("div", {
     style: {
       background: 'var(--bg-input)',
       border: '1px solid var(--border)',
@@ -7094,51 +7480,14 @@ function AIPage() {
       textTransform: 'uppercase',
       marginBottom: 12
     }
-  }, "Model"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 10
+  }, "Model"), /*#__PURE__*/React.createElement(RayModelPicker, {
+    labelStyle: labelStyle,
+    inputStyle: inputStyle,
+    onChanged: () => {
+      loadStatus();
+      loadSettings();
     }
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
-    style: labelStyle
-  }, "Chat Model"), status !== null && status !== void 0 && status.models && status.models.length > 0 ? /*#__PURE__*/React.createElement("select", {
-    value: settings.model || '',
-    onChange: e => setSettings(p => ({
-      ...p,
-      model: e.target.value
-    })),
-    style: {
-      ...inputStyle,
-      fontFamily: 'var(--font-mono)'
-    }
-  }, settings.model && !status.models.includes(settings.model) && /*#__PURE__*/React.createElement("option", {
-    value: settings.model
-  }, settings.model, " (not in Ollama)"), status.models.map(m => /*#__PURE__*/React.createElement("option", {
-    key: m,
-    value: m
-  }, m))) : /*#__PURE__*/React.createElement("input", {
-    style: inputStyle,
-    value: settings.model || '',
-    onChange: e => setSettings(p => ({
-      ...p,
-      model: e.target.value
-    })),
-    placeholder: "qwen2.5:3b"
-  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
-    style: labelStyle
-  }, "Embed Model"), /*#__PURE__*/React.createElement("input", {
-    style: {
-      ...inputStyle,
-      fontFamily: 'var(--font-mono)'
-    },
-    value: settings.embed_model || '',
-    onChange: e => setSettings(p => ({
-      ...p,
-      embed_model: e.target.value
-    })),
-    placeholder: "qwen3-embedding:0.6b"
-  })))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       fontWeight: 700,
@@ -7265,218 +7614,7 @@ function AIPage() {
       borderTop: '1px solid var(--border-color, #2a3040)',
       paddingTop: 16
     }
-  }, /*#__PURE__*/React.createElement(KnowledgeMap, null)), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    className: "settings-disclosure-toggle",
-    onClick: () => setAdvancedOpen(o => !o),
-    role: "button",
-    tabIndex: 0,
-    onKeyDown: e => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        setAdvancedOpen(o => !o);
-      }
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 11,
-      fontWeight: 700,
-      color: 'var(--text-muted)',
-      letterSpacing: '0.08em',
-      textTransform: 'uppercase'
-    }
-  }, "Advanced (Inference)"), /*#__PURE__*/React.createElement("span", {
-    className: "mono",
-    style: {
-      fontSize: 12,
-      color: 'var(--text-muted)'
-    }
-  }, advancedOpen ? '▲' : '▼')), advancedOpen && /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 10,
-      marginTop: 12
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "settings-grid-2"
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
-    style: labelStyle
-  }, "Temperature (0\u20132)"), /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    min: "0",
-    max: "2",
-    step: "0.05",
-    style: {
-      ...inputStyle,
-      width: '100%'
-    },
-    value: (_settings$temperature = settings.temperature) !== null && _settings$temperature !== void 0 ? _settings$temperature : '0.3',
-    onChange: e => setSettings(p => ({
-      ...p,
-      temperature: e.target.value
-    }))
-  }), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 11,
-      color: 'var(--text-muted)',
-      marginTop: 3
-    }
-  }, "Lower = focused, higher = creative")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
-    style: labelStyle
-  }, "Top-P (0\u20131)"), /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    min: "0",
-    max: "1",
-    step: "0.05",
-    style: {
-      ...inputStyle,
-      width: '100%'
-    },
-    value: (_settings$top_p = settings.top_p) !== null && _settings$top_p !== void 0 ? _settings$top_p : '0.9',
-    onChange: e => setSettings(p => ({
-      ...p,
-      top_p: e.target.value
-    }))
-  }), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 11,
-      color: 'var(--text-muted)',
-      marginTop: 3
-    }
-  }, "Nucleus sampling cutoff")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
-    style: labelStyle
-  }, "Top-K (1\u2013100)"), /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    min: "1",
-    max: "100",
-    style: {
-      ...inputStyle,
-      width: '100%'
-    },
-    value: (_settings$top_k = settings.top_k) !== null && _settings$top_k !== void 0 ? _settings$top_k : '40',
-    onChange: e => setSettings(p => ({
-      ...p,
-      top_k: e.target.value
-    }))
-  }), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 11,
-      color: 'var(--text-muted)',
-      marginTop: 3
-    }
-  }, "Token candidates per step")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
-    style: labelStyle
-  }, "Max Response Tokens"), /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    min: "64",
-    max: "4096",
-    step: "64",
-    style: {
-      ...inputStyle,
-      width: '100%'
-    },
-    value: (_settings$num_predict = settings.num_predict) !== null && _settings$num_predict !== void 0 ? _settings$num_predict : '1024',
-    onChange: e => setSettings(p => ({
-      ...p,
-      num_predict: e.target.value
-    }))
-  }), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 11,
-      color: 'var(--text-muted)',
-      marginTop: 3
-    }
-  }, "Max tokens generated per reply"))), /*#__PURE__*/React.createElement("div", {
-    className: "settings-grid-2"
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
-    style: labelStyle
-  }, "Context Window (num_ctx)"), /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    min: "512",
-    max: "8192",
-    step: "512",
-    style: {
-      ...inputStyle,
-      width: '100%'
-    },
-    value: (_settings$num_ctx = settings.num_ctx) !== null && _settings$num_ctx !== void 0 ? _settings$num_ctx : '4096',
-    onChange: e => setSettings(p => ({
-      ...p,
-      num_ctx: e.target.value
-    }))
-  }), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 11,
-      color: 'var(--text-muted)',
-      marginTop: 3
-    }
-  }, "Lower = faster responses")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
-    style: labelStyle
-  }, "GPU Layers (num_gpu)"), /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    min: "0",
-    max: "99",
-    style: {
-      ...inputStyle,
-      width: '100%'
-    },
-    value: (_settings$num_gpu = settings.num_gpu) !== null && _settings$num_gpu !== void 0 ? _settings$num_gpu : '99',
-    onChange: e => setSettings(p => ({
-      ...p,
-      num_gpu: e.target.value
-    }))
-  }), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 11,
-      color: 'var(--text-muted)',
-      marginTop: 3
-    }
-  }, "99 = all layers on GPU"))), /*#__PURE__*/React.createElement("div", {
-    className: "settings-grid-2"
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
-    style: labelStyle
-  }, "CPU Threads (num_thread)"), /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    min: "1",
-    max: "32",
-    style: {
-      ...inputStyle,
-      width: '100%'
-    },
-    value: (_settings$num_thread = settings.num_thread) !== null && _settings$num_thread !== void 0 ? _settings$num_thread : '6',
-    onChange: e => setSettings(p => ({
-      ...p,
-      num_thread: e.target.value
-    }))
-  }), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 11,
-      color: 'var(--text-muted)',
-      marginTop: 3
-    }
-  }, "Inference worker threads")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
-    style: labelStyle
-  }, "Batch Size (num_batch)"), /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    min: "1",
-    max: "2048",
-    step: "1",
-    style: {
-      ...inputStyle,
-      width: '100%'
-    },
-    value: (_settings$num_batch = settings.num_batch) !== null && _settings$num_batch !== void 0 ? _settings$num_batch : '512',
-    onChange: e => setSettings(p => ({
-      ...p,
-      num_batch: e.target.value
-    }))
-  }), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 11,
-      color: 'var(--text-muted)',
-      marginTop: 3
-    }
-  }, "Prompt processing batch size"))))))), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement(KnowledgeMap, null)))), /*#__PURE__*/React.createElement("div", {
     className: "ai-settings-save-bar"
   }, /*#__PURE__*/React.createElement("button", {
     className: "btn btn-primary",
@@ -15463,7 +15601,9 @@ const AUDIT_LABELS = {
   retention_changed: 'History settings changed',
   ai_history_deleted: 'AI history deleted',
   location_history_deleted: 'Location history deleted',
-  factory_reset: 'Factory reset'
+  factory_reset: 'Factory reset',
+  identity_changed: 'New device identity — earlier pairings ended',
+  ray_model_changed: 'Ray model changed'
 };
 function auditDetail(d) {
   if (!d) return '';

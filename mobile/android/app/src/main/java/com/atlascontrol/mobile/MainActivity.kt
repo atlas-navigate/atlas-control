@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.GppMaybe
+import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -82,6 +83,15 @@ private fun AtlasApp(vm: ConnectionViewModel) {
                             "may be pretending to be your Atlas — don't continue.",
                         primary = "Connect again" to { vm.forgetDevice() },
                         secondary = "Try again" to { vm.relocate() },
+                    )
+                    Screen.Unpaired -> Problem(
+                        icon = Icons.Default.LinkOff,
+                        title = "Connect this phone again",
+                        body = "${vm.deviceName} no longer recognises this phone — it was removed in " +
+                            "Settings → Connected devices, or Atlas was reset. Connecting again takes a moment: " +
+                            "the setup code on the label, Atlas's own Wi-Fi, or an Allow from another device.",
+                        primary = "Connect again" to { vm.reconnectRemoved() },
+                        secondary = null,
                     )
                 }
             }

@@ -1,10 +1,11 @@
 # Managed by the Atlas updater. Gives a unit its own identity (TLS key,
-# hotspot password, setup code) if the production line did not.
+# hotspot password, setup code) if the production line did not, and checks on
+# every boot that the identity belongs to this module: storage or a disk image
+# cloned from another unit gets a fresh identity before anything serves it.
 [Unit]
 Description=Atlas device identity
-ConditionPathExists=!/etc/atlas/identity/device.json
 After=local-fs.target
-Before=nginx.service atlas-control.service
+Before=NetworkManager.service nginx.service atlas-control.service avahi-daemon.service
 
 [Service]
 Type=oneshot

@@ -135,6 +135,45 @@ class IdentityTests(unittest.TestCase):
         self.assertNotEqual(first["device_id"], second["device_id"])
         self.assertEqual(second["created_reason"], "cloned-storage")
 
+    def test_cloned_disk_image_gets_its_own_hotspot_on_the_next_boot(self):
+        from atlas_engine import netctl
+        conns = netctl.nm_connections_dir()
+        os.makedirs(conns, exist_ok=True)
+        with open(os.path.join(conns, "atlas-hotspot.nmconnection"), "w") as f:
+            f.write("[connection]\nid=Hotspot\n[wifi]\nmode=ap\nssid=65;\n")
+        with open(os.path.join(conns, "Home.nmconnection"), "w") as f:
+            f.write("[connection]\nid=Home\n[wifi]\nmode=infrastructure\n")
+        with mock.patch.object(self.identity, "module_serial", return_value="SERIAL-A"):
+            golden = self.identity.ensure()
+            code_a = open(os.path.join(self.sb.paths.IDENTITY, "setup_code")).read()
+            self.assertEqual(self.identity.ensure(), golden)          # same unit: nothing changes
+        self.assertEqual(sorted(os.listdir(conns)), ["Home.nmconnection", "atlas-hotspot.nmconnection"])
+        with mock.patch.object(self.identity, "module_serial", return_value="SERIAL-B"):
+            clone = self.identity.ensure()
+        code_b = open(os.path.join(self.sb.paths.IDENTITY, "setup_code")).read()
+        self.assertNotEqual(code_a, code_b)
+        self.assertNotEqual(golden["tls_spki_sha256"], clone["tls_spki_sha256"])
+        self.assertEqual(os.listdir(conns), ["Home.nmconnection"])  # client networks stay
+
+    def test_serial_falls_back_to_the_drive_when_the_module_has_none(self):
+        d = os.path.join(self.sb.root, "serials")
+        os.makedirs(d)
+        module, drive = os.path.join(d, "module"), os.path.join(d, "drive")
+        with open(drive, "w") as f:
+            f.write("S4EWNX0R123456\n")
+        with mock.patch.object(self.identity, "SERIAL_SOURCES", (module, drive)):
+            self.assertEqual(self.identity.module_serial(), "S4EWNX0R123456")
+            with open(module, "wb") as f:
+                f.write(b"1423123456789\x00")
+            self.assertEqual(self.identity.module_serial(), "1423123456789")
+
+    def test_identity_is_checked_on_every_boot_before_anything_serves_it(self):
+        unit = open(os.path.join(REPO, "system", "systemd", "atlas-firstboot.service")).read()
+        self.assertNotIn("ConditionPathExists", unit)
+        before = [l for l in unit.splitlines() if l.startswith("Before=")][0]
+        for svc in ("NetworkManager.service", "nginx.service", "atlas-control.service"):
+            self.assertIn(svc, before)
+
     def test_wifi_password_and_setup_code_cannot_be_mistaken_for_each_other(self):
         import re
         self.identity.ensure()

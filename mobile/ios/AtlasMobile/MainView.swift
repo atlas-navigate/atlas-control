@@ -25,6 +25,11 @@ struct MainView: View {
                             body: "\(model.deviceName) is answering with a different security key than when you connected it. If this Atlas was reset or replaced, connect it again. Otherwise, something on this network may be pretending to be your Atlas — don't continue.",
                             primary: ("Connect again", { model.forgetDevice() }),
                             secondary: ("Try again", { model.relocate() }))
+            case .unpaired:
+                ProblemView(icon: "link.badge.plus",
+                            title: "Connect this iPhone again",
+                            body: "\(model.deviceName) no longer recognises this iPhone — it was removed in Settings → Connected devices, or Atlas was reset. Connecting again takes a moment: the setup code on the label, Atlas's own Wi-Fi, or an Allow from another device.",
+                            primary: ("Connect again", { model.reconnectRemoved() }), secondary: nil)
             }
             if let notice = model.notice {
                 Text(notice).padding(.horizontal, 16).padding(.vertical, 10)

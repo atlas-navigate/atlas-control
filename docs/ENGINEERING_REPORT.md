@@ -438,11 +438,99 @@ missing nftables `ct`/`reject` and rolled itself back, as designed.
    add both public keys to `system/keys/keyring.json`.
 2. Merge the branch, then build, sign, verify and publish the first production release
    (`docs/RELEASES.md`).
-3. Migrate the golden unit, run the acceptance test on it, then run
-   `atlas-capture.sh --release dist/<version>`.
+3. Migrate the golden unit and make sure it carries every model in `ai_models.json`
+   (`model_profiles.py --preinstall | xargs -n1 ollama pull`). Run the acceptance test on it,
+   then `atlas-capture.sh --release dist/<version>`, which now also stages Ollama's GPU runners
+   and refuses a payload that is missing a model.
 4. Build the Android and iOS apps from `mobile/` and publish them before the units ship.
 5. Update `/opt/atlas-imaging` from `tools/manufacturing` (the kit on each drive already comes
    from the release).
+
+## 13. Final draft: pairing that lasts, and Ray's models (`final draft.txt`)
+
+**1. Setup codes.**
+- **Unique per unit, never static.** Each unit makes its own on the line (`identity.create`): 12
+  characters from a 29-letter alphabet, about 58 bits, stored root-only plus a PBKDF2 hash.
+  `2B7R-WFFX-D49J` is only this development unit's code; no code exists in the repo or on the
+  payload drive.
+- **Persistent.** It survives updates, reboots and factory reset.
+  `atlas-identity new-setup-code` exists for lost labels.
+- **Gap found and fixed:** clone detection never ran after the first boot, because
+  `atlas-firstboot.service` only started when no identity existed. A cloned disk image would
+  have shared one code, key and hotspot password across units.
+  - It now runs `atlas-identity ensure` on every boot, before NetworkManager, nginx and Atlas.
+    A different module serial (or NVMe serial, when the module has none) gives a fresh identity
+    and removes the cloned hotspot profile.
+  - The app binds pairings to the identity, and ends those made with another one.
+  - Tests: `IdentityTests`, `PersistenceTests`.
+
+**2. Android and iOS**, with the same changes on both:
+- **Removal detection:** a pairing ended on Atlas (removed in Settings, or factory reset) is
+  detected through `/api/pair/status`. The app shows "Connect this phone again" and re-pairs
+  with the same unit and key. It used to sit on the web view's pairing page.
+- **Approval polling** waits out 429/5xx/restarts for the request's 3 minutes, and handles
+  `issued`.
+- **The setup-code field** formats `XXXX-XXXX-XXXX` and recognises a pasted Wi-Fi password.
+- **Older Atlas software** is explained rather than connected to insecurely. A `pairing`
+  version marker lets a future Atlas ask for an app update.
+- **Cookies:** the web view's cookie is cleared when a pairing is forgotten.
+- **Verification** (neither app can be compiled on the Jetson):
+  - `tests/test_mobile_contract.py` checks both apps' sources against the server: endpoints,
+    fields, pairing version, the label QR as the server prints it, match-code vectors,
+    approval answers and screens;
+  - `PairingLogicTest` (Android JVM tests, `./gradlew test`).
+
+**3. Connections survive updates.**
+- Identity, tokens and settings live outside the release, and the update engine never touches
+  them. This is now proven:
+  - `PairingSurvivesUpdatesTests` covers an update, a rollback and a power cut mid-switch, and
+    checks identity files byte-for-byte, the paired-client rows and the AI model;
+  - `PersistenceTests` covers restarts and releases for bearer tokens and cookies.
+- The acceptance harness checks the same token, device id, TLS key and AI model after every
+  update, rollback and fault scenario, and after the reboot test.
+- Re-pairing is needed only after removal, factory reset, or a new identity; the last shows a
+  security warning.
+
+**4–6. Qwen3.5 4B, automatic optimisation, seamless switching.** Details are in
+`docs/AI_MODELS.md`.
+- **Catalog and profiles.** `ai_models.json` is the catalog. `model_profiles.py` resolves the
+  build for the unit's RAM (Q4_K_M on 8 GB, Q8_0 on 16 GB), the context, threads, batch, each
+  model's official non-thinking sampling, thinking off, and where the embedder runs. It
+  replaced five copy-pasted option blocks.
+- **Found by measuring on this unit.** Ollama 0.32 loads Qwen3.5 with its vision encoder, and
+  `llama-server` keeps 1 GB free. Loaded after the embedder, only 9 of 34 layers fit on the GPU:
+  5 tokens/s, 137 MB left.
+- **The profile fixes it.** Qwen3.5 loads first and the embedder runs on the CPU (0.5 s a
+  query). Result: 100% GPU, 14.8 tokens/s, 1,270 prompt tokens/s, 750 MB left.
+- **Qwen2.5 3B is unchanged:** 21 tokens/s, both on the GPU.
+- **Quality spot-check:** Qwen3.5 used all three facts from the passage (Qwen2.5 used two).
+- **Switching is a job:**
+  - check → download with progress (resumable, disk-checked) → wait for the current answer →
+    unload → load in the profile's order → test answer and speed → save;
+  - failures put the old model back;
+  - chats during a switch get a clear, retryable message.
+- **Measured on this unit** (real Ollama): Qwen2.5 → Qwen3.5 in 24 s, back in 23 s, both 100%
+  on the GPU.
+- **The choice persists.** It is stored in `data/` and loaded at boot. A missing model falls
+  back with a notice. The old startup guard, which forced any Qwen3.5 selection back to Qwen2.5
+  on every restart, is gone.
+- **The UI** has model cards, a progress bar, an "Optimized for this Atlas" card and per-model
+  "Expert overrides". The overrides are clamped to the hardware, applied like a switch, and
+  "Reset to optimized" removes them. The old global inference fields become per-model
+  overrides (migration 4).
+- **`install.sh`:**
+  - requires the Ollama version the catalog needs;
+  - reinstalls an Ollama that lacks its GPU runners;
+  - pulls every catalog model in this hardware's build.
+- **Manufacturing:**
+  - `atlas-capture.sh` stages `/usr/local/lib/ollama`. Before, only the binary was staged, so
+    a provisioned unit would have run Ray on the CPU.
+  - Capture refuses a payload without every model.
+  - `atlas-provision.sh` installs the runners.
+- **Tests:** `tests/test_ai_models.py` covers the catalog, profiles, overrides, the migration,
+  routes, and switching against a fake Ollama: success, order, back-and-forth, persistence and
+  boot, a load failure, offline download, memory refusal, an old Ollama, busy, overrides and
+  the embedder change.
 
 ## Explicit confirmations
 Where a claim is proven in tests or sandboxes but not yet on this device, that is stated.
@@ -468,6 +556,18 @@ Where a claim is proven in tests or sandboxes but not yet on this device, that i
 - **Failed releases roll back automatically:** yes (health check → rollback → factory fallback).
 - **Interrupted updates recover without Linux knowledge:** yes (boot recovery unit, one-tap
   retry).
+- **Every unit has its own setup code; none is shared or static:** yes, including units made
+  from a cloned disk image (per-boot check). Tested; the per-boot unit is confirmed on this
+  device after the next deploy.
+- **Paired phones and browsers keep working after Atlas updates, with no re-pairing:** yes.
+  Proven for update, rollback and power loss in the engine sandbox and by the pairing tests;
+  the acceptance harness checks it on the device.
+- **Both apps support the pairing workflow, and behave the same:** yes in code, and checked
+  against the server by the contract test. They still need compiling and a run on real phones.
+- **Qwen3.5 4B is selectable and tuned automatically:** yes, measured on this unit (100% on the
+  GPU, 14.8 tokens/s).
+- **Switching models is automatic and persists across reboots and updates:** yes. Verified with
+  the real Ollama on this unit, and in tests for boot and updates.
 - **Clients reconnect automatically after an update:** yes (browser status page + reconnect; apps
   update-aware).
 - **Factory-new units ship without universal secrets:** yes. Per-unit identity, hotspot password,

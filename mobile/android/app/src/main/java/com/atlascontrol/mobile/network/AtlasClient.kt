@@ -18,6 +18,8 @@ data class AtlasInfo(
     val observedPin: String,
     val version: String?,
     val pairingRequired: Boolean,
+    /** Pairing protocol Atlas speaks (/api/device/info "pairing"); see AtlasClient.PAIRING_VERSION. */
+    val pairingVersion: Int = 1,
 )
 
 class PairingException(message: String, val status: Int = 0) : Exception(message)
@@ -25,6 +27,9 @@ class PairingException(message: String, val status: Int = 0) : Exception(message
 /** Plain HTTPS calls to Atlas. All blocking work runs on Dispatchers.IO. */
 object AtlasClient {
     private val JSON = "application/json".toMediaType()
+
+    /** The pairing protocol this app speaks. A higher number on Atlas means: update the app. */
+    const val PAIRING_VERSION = 1
 
     fun normalize(url: String): String = url.trim().trimEnd('/')
 
@@ -44,6 +49,7 @@ object AtlasClient {
                     observedPin = observer.observedPin ?: return@runCatching null,
                     version = o.optString("version").ifBlank { null },
                     pairingRequired = o.optBoolean("pairing_required", true),
+                    pairingVersion = o.optInt("pairing", 1),
                 )
             }
         }.getOrNull()
@@ -60,6 +66,42 @@ object AtlasClient {
                     }
             }.getOrDefault(false)
         }
+
+    /**
+     * Is this an Atlas running software from before pairing existed (it
+     * answers /api/device but has no /api/device/info)? Only used to explain
+     * why the app can't connect — never to connect without pairing.
+     */
+    suspend fun isOlderAtlas(baseUrl: String): Boolean = withContext(Dispatchers.IO) {
+        val (client, _) = AtlasTrust.observingClient(2500)
+        runCatching {
+            client.newCall(Request.Builder().url("${normalize(baseUrl)}/api/device").build()).execute().use { r ->
+                r.isSuccessful && JSONObject(r.body?.string() ?: "{}").optString("app") == "atlas-control"
+            }
+        }.getOrDefault(false)
+    }
+
+    /**
+     * Does Atlas still accept this phone's pairing? false = the phone was
+     * removed in Settings → Connected devices, or Atlas was factory reset;
+     * null = couldn't tell right now (restarting, unreachable).
+     */
+    suspend fun stillPaired(baseUrl: String, device: PairedDevice): Boolean? = withContext(Dispatchers.IO) {
+        runCatching {
+            AtlasTrust.pinnedClient(device.pin, device.token, 4)
+                .newCall(Request.Builder().url("${normalize(baseUrl)}/api/pair/status").build())
+                .execute().use { r ->
+                    if (!r.isSuccessful) return@use null
+                    val o = JSONObject(r.body?.string() ?: return@use null)
+                    val id = o.optJSONObject("device")?.optString("id")
+                    when {
+                        !o.has("paired") || (id != null && id != device.deviceId) -> null
+                        !o.optBoolean("required", true) -> true
+                        else -> o.optBoolean("paired")
+                    }
+                }
+        }.getOrNull()
+    }
 
     private fun post(client: OkHttpClient, url: String, body: JSONObject): JSONObject {
         client.newCall(Request.Builder().url(url).post(body.toString().toRequestBody(JSON)).build())
@@ -98,15 +140,24 @@ object AtlasClient {
                 nonce, o.getString("match_code"))
         }
 
-    /** "pending" | "approved:<token>" | "denied" | "expired" | "unknown" */
+    /**
+     * "pending" | "retry" | "approved:<token>" | "denied" | "expired" | "unknown".
+     * "retry": Atlas was busy, restarting or briefly unreachable — keep waiting.
+     */
     suspend fun pollApproval(baseUrl: String, pin: String, req: ApprovalRequest): String = withContext(Dispatchers.IO) {
         val url = "${normalize(baseUrl)}/api/pair/request/${req.requestId}?secret=" +
             java.net.URLEncoder.encode(req.secret, "UTF-8") + "&kind=android"
-        AtlasTrust.pinnedClient(pin, null).newCall(Request.Builder().url(url).build()).execute().use { r ->
-            val o = JSONObject(r.body?.string() ?: "{}")
-            val status = o.optString("status", "unknown")
-            if (status == "approved") "approved:${o.optString("token")}" else status
-        }
+        runCatching {
+            AtlasTrust.pinnedClient(pin, null, 10).newCall(Request.Builder().url(url).build()).execute().use { r ->
+                if (!r.isSuccessful) return@use "retry"
+                approvalStatus(JSONObject(r.body?.string() ?: "{}"))
+            }
+        }.getOrDefault("retry")
+    }
+
+    fun approvalStatus(o: JSONObject): String {
+        val status = o.optString("status", "unknown")
+        return if (status == "approved") "approved:${o.optString("token")}" else status
     }
 
     /**

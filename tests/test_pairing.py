@@ -225,3 +225,58 @@ class RevokeAndSocketTests(PairingTestBase):
                                                                    "Cookie": f"{pairing.COOKIE}={cookie}"})
         self.assertTrue(sio.is_connected())
         sio.disconnect()
+
+
+class PersistenceTests(PairingTestBase):
+    """Pairing is done once: restarts, updates and resets of the app keep it."""
+
+    def pair_phone(self):
+        r = self.post("/api/pair/claim", json={"setup_code": self.setup_code, "name": "Pixel", "kind": "android"})
+        self.assertEqual(r.status_code, 200)
+        return r.get_json()["token"]
+
+    def paired(self, token):
+        r = self.client.get("/api/pair/status", base_url=BASE, environ_base=ENV,
+                            headers={"Authorization": f"Bearer {token}"})
+        return r.get_json()["paired"]
+
+    def restart(self):
+        """What a reboot or a new release sees: a fresh process, the same data/ and identity."""
+        pairing._cache.clear()
+        self.app.db._local.conn = None
+        self.app.db.init_db()
+        return pairing.bind_identity()
+
+    def test_pairing_survives_restarts_and_new_releases(self):
+        token = self.pair_phone()
+        self.assertFalse(self.restart())
+        self.assertFalse(self.restart())
+        self.assertTrue(self.paired(token))
+        info = self.get("/api/device/info").get_json()
+        self.assertEqual(info["pairing"], 1)
+
+    def test_first_start_on_an_existing_unit_only_records_the_identity(self):
+        token = self.pair_phone()
+        conn = self.app.db.get_db()
+        conn.execute("DELETE FROM app_settings WHERE key=?", (pairing.IDENTITY_SETTING,))
+        conn.commit()
+        self.assertFalse(self.restart())
+        self.assertTrue(self.paired(token))
+
+    def test_a_new_identity_ends_pairings_made_with_the_old_one(self):
+        token = self.pair_phone()
+        self.restart()
+        cloned = dict(device_identity.device(), device_id="f" * 32, created_reason="cloned-storage")
+        with mock.patch.object(device_identity, "device", return_value=cloned):
+            self.assertTrue(self.restart())
+            self.assertFalse(self.paired(token))
+            self.assertFalse(self.restart())                     # once, not on every start
+        rows = self.app.db.get_db().execute("SELECT action FROM audit_log WHERE action='identity_changed'").fetchall()
+        self.assertEqual(len(rows), 1)
+
+    def test_factory_reset_keeps_the_identity_binding(self):
+        self.restart()
+        self.app.db.factory_reset_data()
+        row = self.app.db.get_db().execute("SELECT value FROM app_settings WHERE key=?",
+                                           (pairing.IDENTITY_SETTING,)).fetchone()
+        self.assertEqual(row["value"], device_identity.device()["device_id"])

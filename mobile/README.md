@@ -32,6 +32,36 @@ itself after network changes, reboots and updates, and notifications.
    installing an update and restarting." (from nginx's `/update-status.json`)
    and "Update complete." when Atlas is back.
 
+## When a phone has to pair again
+
+Pairing is done once. It keeps working — with no action from the owner —
+after Atlas software updates (including one that was rolled back), reboots,
+power cuts, a new IP address or network, and updates of the app itself: the
+token, the device id and Atlas's TLS key never change for any of these.
+
+A phone pairs again only when Atlas itself ended the pairing:
+
+| What happened | What the app shows |
+|---|---|
+| The phone was removed in Settings → Connected devices | "Connect this phone again" — same Atlas, same key; one tap to start |
+| Atlas was factory reset (paired devices are cleared; the label stays valid) | the same |
+| Atlas answers with a different key (storage cloned into another unit, or someone impersonating it) | "Security warning" — never connects silently |
+
+The app notices removal within seconds of connecting (`/api/pair/status`
+with its token), rather than leaving the web view on a pairing page.
+
+## Compatibility
+
+- `/api/device/info` carries `"pairing": 1`. An app that finds a higher
+  number asks to be updated; an Atlas still running software from before
+  pairing (it answers `/api/device` but has no `/api/device/info`) is
+  explained ("Update Atlas first"), never connected to insecurely.
+- The setup-code field formats as `XXXX-XXXX-XXXX` while typing and says
+  it is not the Wi-Fi password (which is four lowercase groups); pasting the
+  Wi-Fi password shows that hint.
+- Approval requests wait out a busy or restarting Atlas for the request's
+  whole 3-minute life instead of failing early.
+
 ## Security properties
 
 - HTTPS only; no cleartext; no user-installed CAs (Android); no ATS arbitrary
@@ -43,9 +73,18 @@ itself after network changes, reboots and updates, and notifications.
 - Phone location sharing (iOS) is opt-in, foreground-only and throttled
   (≥30 s and ≥50 m between reports).
 
-## Building
+## Building and testing
 
 Neither app can be built on the Jetson (no JDK/Gradle/Xcode there).
+- `tests/test_mobile_contract.py` (run with the server's test suite) checks
+  both apps' sources against the server: endpoints, pairing version, label
+  QR format, match-code formula, approval answers and screens.
+- Android: `./gradlew test` runs `PairingLogicTest` (match code vectors from
+  the server, QR parsing, setup-code formatting, approval answers).
+- Before a release, on a real phone of each kind: pair by label QR, by typed
+  code and by Allow; install an Atlas update and watch the app reconnect by
+  itself; remove the phone in Settings → Connected devices and check it shows
+  "Connect this phone again".
 - Android: open `android/` in Android Studio (AGP 9, Kotlin 2.3, minSdk 29).
 - iOS: `cd ios && xcodegen` then open `AtlasMobile.xcodeproj` (iOS 17+).
   The HotspotConfiguration, Wi-Fi-info and multicast entitlements must be

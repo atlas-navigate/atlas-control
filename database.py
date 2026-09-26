@@ -514,10 +514,48 @@ def _migration_audit(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_tracker_last_seen ON tracker_devices(last_seen)")
 
 
+# Ray's inference settings used to be one global set, tuned for qwen2.5:3b.
+# They are per model now (model_profiles.py); these were the global keys.
+AI_RUNTIME_KEYS = ("num_ctx", "num_gpu", "num_thread", "num_batch", "temperature", "top_p", "top_k",
+                   "repeat_penalty", "num_predict")
+_OLD_RUNTIME_DEFAULTS = {"num_ctx": 4096, "num_gpu": -1, "num_thread": 6, "num_batch": 512, "temperature": 0.7,
+                         "top_p": 0.8, "top_k": 20, "repeat_penalty": 1.05, "num_predict": 1024}
+
+
+def _migration_model_profiles(conn):
+    """Inference settings become per model. A value the owner had changed from
+    the old defaults is kept as an expert override for the model it was tuned
+    on; everything else follows each model's tuned profile. Older releases
+    simply fall back to their own defaults for the removed keys."""
+    import json as _json
+    import model_profiles
+    rows = dict(conn.execute("SELECT key, value FROM ai_settings").fetchall())
+    model = model_profiles.find(rows.get("model") or AI_DEFAULTS["model"])
+    changed = {}
+    for key in AI_RUNTIME_KEYS:
+        if key not in rows:
+            continue
+        try:
+            value = float(rows[key])
+        except (TypeError, ValueError):
+            continue
+        if value == _OLD_RUNTIME_DEFAULTS[key] or (key == "num_gpu" and value >= 99):
+            continue                  # 99 was the old "all layers" convention; auto placement replaced it
+        changed[key] = rows[key]
+    if model and changed:
+        kept, _ = model_profiles.clean_overrides(model, changed)
+        if kept:
+            conn.execute("INSERT INTO ai_settings (key, value) VALUES (?, ?) "
+                         "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                         (model_profiles.OVERRIDE_PREFIX + model["id"], _json.dumps(kept)))
+    conn.executemany("DELETE FROM ai_settings WHERE key=?", [(k,) for k in AI_RUNTIME_KEYS])
+
+
 MIGRATIONS = [
     (1, "baseline", _migration_baseline),
     (2, "pairing", _migration_pairing),
     (3, "audit_log", _migration_audit),
+    (4, "model_profiles", _migration_model_profiles),
 ]
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 # Oldest schema version whose code can still use a database at SCHEMA_VERSION.
@@ -1376,20 +1414,9 @@ AI_DEFAULTS = {
     "rag_enabled": "true",
     "rag_top_k": "5",
     "inject_mesh_context": "true",
-    "num_ctx": "4096",
-    "num_gpu": "-1",      # -1 = let Ollama auto-place layers (forced counts hard-fail on tight RAM)
-    "num_thread": "6",    # Jetson Orin Nano: 6× Cortex-A78AE cores
-    "num_batch": "512",   # prompt tokens processed per GPU batch
-    # qwen2.5:3b official generation settings (Qwen2.5 generation_config.json):
-    # temp 0.7 / top_p 0.8 / top_k 20 / repetition_penalty 1.05. Lower temperatures
-    # push this small model into repetition loops, so 0.7 is the floor we ship.
-    "temperature": "0.7",
-    "top_p": "0.8",
-    "top_k": "20",
-    # Qwen2.5's recommended 1.05 — gentler than Ollama's 1.1 default, which can
-    # over-penalize legitimately repeated technical terms (node IDs, MOA, calibers).
-    "repeat_penalty": "1.05",
-    "num_predict": "1024",
+    # Context window, batch, threads, sampling and the build to load are not
+    # settings: model_profiles.py tunes them per model for this hardware
+    # (ai_models.json), with optional per-model expert overrides.
 }
 
 
@@ -1670,7 +1697,7 @@ def set_factory_defaults_device(snapshot):
 # Settings that describe this unit's hardware or internal bookkeeping rather
 # than the owner's preferences — kept across a factory reset.
 _RESET_KEEP_APP_SETTINGS = ("local_node_id", "factory_defaults_device_v1", "serial_port",
-                            "gps_port", "gps_baud", "web_port")
+                            "gps_port", "gps_baud", "web_port", "pairing_identity")
 _RESET_KEEP_AI_SETTINGS = ("embed_format_v",)
 
 

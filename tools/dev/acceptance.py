@@ -12,6 +12,8 @@ Sections of `run` (names for --only):
              by the service account, identity secrets unreadable to it
   function   Ray answers from the knowledge base, an offline route, stats,
              GPS/radio status, no outbound connections while doing so
+  models     every offered AI model is on the unit; switch to each, it
+             answers, and the choice survives an app restart
   download   a real app-driven update from a local release server: progress,
              "Internet" cut mid-download → paused → resumes with Range, app
              restarted mid-download → resumes, verified, installed, reconnect
@@ -19,6 +21,8 @@ Sections of `run` (names for --only):
   rollback   a deliberately unhealthy release is rolled back automatically
   faults     the engine crashes at every transaction state; recovery must
              leave a complete, healthy release every time
+After every update scenario the test's phone pairing must still work, with
+the same device id, TLS key and chosen AI model (pairing survives updates).
 
 Only on developer units (/etc/atlas/dev-mode). Everything temporary lives
 in /run (drop-ins, the test's pairing is revoked at the end), so even an
@@ -383,6 +387,29 @@ def unpair(token, client_id):
         api("DELETE", f"/api/pair/clients/{client_id}", token=token)
 
 
+def connection_facts(token=None):
+    """What a paired phone relies on: its token still accepted, the same
+    device id and TLS key, and the owner's chosen AI model."""
+    _, info = api("GET", "/api/device/info", timeout=10)
+    facts = {"device_id": info.get("device_id"), "pin": info.get("tls_spki_sha256")}
+    if token:
+        _, st = api("GET", "/api/pair/status", token=token, timeout=10)
+        _, ai = api("GET", "/api/ai/settings", token=token, timeout=10)
+        facts.update(paired=st.get("paired"), model=ai.get("model"))
+    return facts
+
+
+def check_persistence(rep, section, ctx, when):
+    """Spec: updates never make a paired device pair again or lose settings."""
+    before = ctx.get("facts")
+    if not before:
+        return
+    now = connection_facts(ctx.get("token"))
+    changed = sorted(k for k in before if now.get(k) != before[k])
+    rep.check(section, f"still paired, same key and AI model {when}", not changed,
+              ", ".join(f"{k} changed" for k in changed))
+
+
 # ── sections ─────────────────────────────────────────────────────────────
 def section_security(rep, ctx):
     S = "security"
@@ -451,6 +478,55 @@ def section_function(rep, ctx):
     after = outbound(pid)
     new = [c for c in after if c not in before]
     rep.check(S, "no outbound connections while using Ray, maps and routing", not new, "; ".join(new)[:300])
+
+
+def switch_ray_model(token, model, timeout=1800):
+    """Ask Atlas to switch Ray's model and wait for the job to finish."""
+    code, r = api("POST", "/api/ai/model", {"model": model}, token=token)
+    if code not in (200, 202):
+        return {"result": "failed", "error": r.get("error") or f"HTTP {code}"}
+    job_id = r["switch"]["id"]
+
+    def finished():
+        _, m = api("GET", "/api/ai/models", token=token)
+        job = m.get("switch") or {}
+        return job if job.get("id") == job_id and job.get("finished") else None
+    return wait(finished, timeout, 3, f"the switch to {model}")
+
+
+def ask_ray(token, question):
+    code, chat = api("POST", "/api/ai/chats", {}, token=token)
+    t = time.time()
+    code, ans = api("POST", f"/api/ai/chats/{chat.get('id')}/message", {"text": question}, token=token, timeout=600)
+    api("DELETE", f"/api/ai/chats/{chat.get('id')}", token=token)
+    return code, ans.get("content", ""), time.time() - t
+
+
+def section_models(rep, ctx):
+    """Spec: every offered model runs tuned for this unit, switching is
+    seamless, and the choice survives a restart."""
+    S = "models"
+    token = ctx["token"]
+    _, m = api("GET", "/api/ai/models", token=token)
+    start = m.get("active")
+    for x in m.get("models", []):
+        rep.note(S, x["label"], f"{x['status']} · {x['tag']} {x['quant']} · {x['options']['num_ctx']}-token context")
+        rep.check(S, f"{x['label']} is on this unit", x["status"] == "installed", x["status"])
+    order = [x["id"] for x in m.get("models", []) if x["id"] != start] + [start]
+    for model in order:
+        job = switch_ray_model(token, model)
+        rep.check(S, f"switch to {model}", job.get("result") == "success",
+                  job.get("error") or f"{job.get('gpu_pct')}% on the GPU")
+        wait(lambda: api("GET", "/api/ai/status", token=token)[1].get("ai_ready"), 300, 3, "Ray ready")
+        code, text, secs = ask_ray(token, "How do I purify water in the field?")
+        rep.check(S, f"{model} answers", code == 200 and len(text) > 80, f"{code} in {secs:.0f}s")
+        if model != start:
+            sh(["systemctl", "restart", "atlas-control.service"])
+            wait(health, 180, 2, "the app after a restart")
+            wait(lambda: api("GET", "/api/ai/status", token=token)[1].get("ai_ready"), 600, 3, "Ray ready")
+            _, after = api("GET", "/api/ai/models", token=token)
+            gpu = next((x.get("speed_tok_s") for x in after.get("models", []) if x["id"] == model), None)
+            rep.check(S, f"{model} still chosen after a restart", after.get("active") == model, f"{gpu} tokens/s")
 
 
 def wait_update(token, pred, timeout, what):
@@ -600,6 +676,7 @@ def section_faults(rep, ctx):
         ok, inv = invariant()
         outcome = "installed" if installed_version() == manifest(release)["version"] else "not installed"
         rep.check(S, f"crash at {state} → recovered ({outcome}, {result.get('result')})", ok, inv)
+        check_persistence(rep, S, ctx, f"after a crash at {state}")
 
 
 def ensure_latest(rep, ctx):
@@ -629,17 +706,24 @@ def cmd_run(args):
     preflight()
     rep = Report()
     only = set(filter(None, (args.only or "").split(","))) or \
-        {"security", "function", "download", "forged", "rollback", "faults"}
+        {"security", "function", "models", "download", "forged", "rollback", "faults"}
     ctx = {"builder": Builder()}
     server = None
     token = client_id = None
     try:
         token, client_id = pair()
         ctx["token"] = token
+        ctx["facts"] = connection_facts(token)
         if "security" in only:
             section_security(rep, ctx)
         if "function" in only:
             section_function(rep, ctx)
+        if "models" in only:
+            try:
+                section_models(rep, ctx)
+            except Exception as e:
+                rep.check("models", "section finished", False, f"{type(e).__name__}: {e}")
+                traceback.print_exc()
         if only & {"download", "forged", "rollback"}:
             ctx["r1"] = ctx["builder"].build("download")
             ctx["r_bad"] = ctx["builder"].build_unhealthy() if "rollback" in only else None
@@ -657,6 +741,7 @@ def cmd_run(args):
                     except Exception as e:
                         rep.check(name, "section finished", False, f"{type(e).__name__}: {e}")
                         traceback.print_exc()
+                    check_persistence(rep, name, ctx, f"after the {name} scenario")
         if "faults" in only:
             try:
                 section_faults(rep, ctx)
@@ -676,6 +761,7 @@ def cmd_run(args):
         try:
             if not args.no_final:
                 ensure_latest(rep, ctx)
+                check_persistence(rep, "final", ctx, "on the final release")
         except Exception as e:
             rep.check("final", "left on a fresh release", False, e)
         unpair(token, client_id)
@@ -690,6 +776,7 @@ def cmd_reboot_test(args):
     m = manifest(release)
     with open(REBOOT_STATE, "w") as f:
         json.dump({"version": m["version"], "from": installed_version(), "at": time.time(),
+                   "facts": connection_facts(),
                    "result_before": last_result().get("finished", 0),
                    "boot_id": open("/proc/sys/kernel/random/boot_id").read().strip()}, f)
     dropin("atlas-update-engine.service", "acceptance-fault", "[Service]\nEnvironment=ATLAS_ENGINE_FAULT=SWITCHED:panic\n")
@@ -720,6 +807,10 @@ def cmd_after_reboot(args):
     rep.check(S, "recovered on boot to a consistent state", ok, inv)
     rep.check(S, "the interrupted update was completed (health check resumed after boot)",
               installed_version() == state["version"] and result.get("result") == "success", result.get("result"))
+    if state.get("facts"):
+        now = connection_facts()
+        rep.check(S, "same device id and TLS key after the power cut (paired phones reconnect)",
+                  now == state["facts"], "")
     log = sh(["journalctl", "-b", "-u", "atlas-update-recover", "--no-pager", "-o", "cat"]).stdout.strip().splitlines()
     rep.note(S, "boot recovery log", " | ".join(log[-4:]))
     os.unlink(REBOOT_STATE)

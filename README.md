@@ -11,7 +11,7 @@ Runs 100% offline — no internet required after installation.
 - Turn-by-turn routing for all 50 states (OSRM, car + hiking profiles)
 - Meshtastic mesh radio integration
 - GPS with Kalman filtering and dead reckoning
-- AI chat assistant (Ollama, runs locally on Jetson GPU)
+- Ray, the AI assistant (Ollama, on the Jetson GPU): Qwen2.5 3B or Qwen3.5 4B, each tuned for the unit automatically
 - Phone tracker check-in
 - Offline city and NPS trail search
 - Native Android and iOS apps: pair once from the label QR code, pinned TLS, automatic rediscovery
@@ -108,6 +108,18 @@ Wi-Fi, or "Allow" on a device that is already paired — see
 | Atlas's Wi-Fi | `https://10.42.0.1` |
 
 Browsers warn once about Atlas's own (self-signed) certificate.
+
+Every unit has its own setup code, key and hotspot password. Pairing survives
+software updates, reboots and address changes; only removing a device, a
+factory reset or a new identity ends it.
+
+## Ray's models
+
+Ray → Settings → Model switches between Qwen2.5 3B (standard, quickest) and
+Qwen3.5 4B. Atlas picks each model's build, context window and sampling for
+its hardware, switches without a restart, and remembers the choice through
+reboots and updates. Measurements and the expert overrides:
+[docs/AI_MODELS.md](docs/AI_MODELS.md).
 
 ## Mobile
 

@@ -23,9 +23,10 @@ Capture refuses a release this unit's update engine does not trust
 
 | Path | Contents |
 |---|---|
-| `payload/` | `/atlas_data`: maps, routing graphs, datasets, Ollama models (~324 GB) |
+| `payload/` | `/atlas_data`: maps, routing graphs, datasets, Ray's models (~330 GB) |
 | `payload/osrm-native-bin/` | prebuilt OSRM binaries |
 | `stage/ollama` | the Ollama binary |
+| `stage/ollama-lib/` | its GPU runners (`/usr/local/lib/ollama`, ~2 GB) — without them Ray runs on the CPU |
 | `stage/release/` | the signed release every new unit installs |
 | `stage/kit/` | that same release unpacked (minus wheels): `install.sh`, tools, dataset builders |
 | `stage/atlas-imaging/` | these scripts |
@@ -38,6 +39,20 @@ checkout or worktrees. Its identity lives in `/etc/atlas`, outside the
 payload. Excluded files already on the drive from an older capture are
 deleted (`--delete-excluded`), and capture's final checks fail if any of
 them is present.
+
+**Ray's models**: every model in the release's `ai_models.json`, in the
+build for this hardware class, must be on the golden unit before capture:
+Qwen2.5 3B, Qwen3.5 4B and the embedder. Pull any that are missing:
+
+```bash
+python3 -I model_profiles.py --preinstall | xargs -n1 ollama pull
+```
+
+Capture checks each one is in `payload/ollama/models`, and fails otherwise.
+A unit sold off-grid can't download one later. Capture on a unit of the same
+memory class as the units being built (8 GB Orin Nano → Q4_K_M builds).
+Ollama must be recent enough for every model (`model_profiles.py --min-ollama`,
+0.17.1 for Qwen3.5); `install.sh` upgrades an older staged one when online.
 
 `atlas-mirror.sh` is a separate full-rootfs backup of the golden unit for
 disaster recovery — it contains that unit's own secrets and is never used to
@@ -59,6 +74,8 @@ build units.
    - installs the Atlas release through its update engine: the `atlas`
      service account, root helper, units, nginx, firewall, udev and mDNS
      files, a health check, and automatic rollback on failure;
+   - checks Ollama is new enough for every model and has its GPU runners,
+     and that every model is present (pulling any missing when online);
    - gives the unit its **own identity**: `Atlas-XXXX` name, `atlas-xxxx`
      hostname, TLS key and certificate, hotspot name and random password,
      setup code;
@@ -84,6 +101,26 @@ build units.
   loads, a cross-state route returns, Ray answers.
 - `ss -ltn` shows nothing on `*:5000`; `https://atlas-xxxx.local` shows the
   pairing screen to an unpaired browser.
+
+## Unique per unit, even from a cloned image
+
+The identity is never on the payload drive. It is created on each unit by
+`install.sh`, from the operating system's secure random source. It holds the
+setup code, TLS key, hotspot password, device id and proxy secret. Nothing is
+shared between units: there is no default setup code.
+
+If a line ever flashes a whole disk image instead, cloned from a finished
+unit, `atlas-firstboot.service` still catches it. It runs
+`atlas-identity ensure` on every boot, before NetworkManager, nginx and Atlas
+start:
+- the identity records the module's serial number (or the NVMe drive's, if
+  the module has none);
+- on a different module it makes a new identity and removes the cloned
+  hotspot profile;
+- the app ends pairings made with the old identity.
+
+Print the label after that first boot:
+`sudo atlas-identity label-json | make_label.py`.
 
 ## Developer units
 

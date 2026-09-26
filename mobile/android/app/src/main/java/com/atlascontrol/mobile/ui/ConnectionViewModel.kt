@@ -3,6 +3,7 @@ package com.atlascontrol.mobile.ui
 import android.app.Application
 import android.content.Context
 import android.os.Build
+import android.webkit.CookieManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.atlascontrol.mobile.network.AtlasClient
@@ -43,6 +44,8 @@ sealed interface Screen {
     data object NotFound : Screen
     /** The paired Atlas presented a different TLS key. */
     data object SecurityWarning : Screen
+    /** The same Atlas (same key) no longer accepts this phone: removed in Settings, or Atlas was reset. */
+    data object Unpaired : Screen
 }
 
 /** One pairing attempt in the onboarding flow. */
@@ -56,6 +59,8 @@ data class PairingTarget(val info: AtlasInfo, val onAtlasHotspot: Boolean)
  * reboot, update) it is found again by id and confirmed by its key; the
  * owner never re-adds it, clears data or types an address. A different key
  * for the same device id is a security warning, never accepted silently.
+ * Pairing is asked for again only when Atlas itself ended it — the phone was
+ * removed in Settings → Connected devices, or Atlas was factory reset.
  */
 class ConnectionViewModel(app: Application) : AndroidViewModel(app) {
     private val store = DeviceStore(app)
@@ -149,6 +154,7 @@ class ConnectionViewModel(app: Application) : AndroidViewModel(app) {
         monitorJob?.cancel()
         val dev = device ?: return
         monitorJob = viewModelScope.launch {
+            if (AtlasClient.stillPaired(url, dev) == false) { removed(); return@launch }
             var misses = 0
             while (isActive) {
                 delay(10_000L)
@@ -163,6 +169,7 @@ class ConnectionViewModel(app: Application) : AndroidViewModel(app) {
                 when (healthy) {
                     true -> {
                         misses = 0
+                        if (AtlasClient.stillPaired(url, dev) == false) { removed(); return@launch }
                         runCatching { withContext(Dispatchers.IO) { pollNotifications(url, dev) } }
                     }
                     false -> {
@@ -191,6 +198,24 @@ class ConnectionViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         relocate()
+    }
+
+    private fun removed() {
+        locateJob?.cancel()
+        _screen.value = Screen.Unpaired
+    }
+
+    /**
+     * "Connect again" after Atlas ended this phone's pairing. It is the same
+     * Atlas with the same key, so the new pairing trusts only that key.
+     */
+    fun reconnectRemoved() {
+        val dev = device ?: run { forgetDevice(); return }
+        monitorJob?.cancel(); locateJob?.cancel()
+        clearPairing()
+        _screen.value = Screen.Onboarding
+        searchNearby()
+        dev.lastUrl?.let { choose(it, expectedPin = dev.pin) }
     }
 
     // Called from the web UI (AtlasAndroid bridge) around Atlas Wi-Fi changes.
@@ -237,7 +262,12 @@ class ConnectionViewModel(app: Application) : AndroidViewModel(app) {
         _pairingError.value = null
         viewModelScope.launch {
             val info = AtlasClient.probe(baseUrl, 3_000L)
-            if (info == null) { _pairingError.value = "Couldn't reach Atlas at that address."; return@launch }
+            if (info == null) {
+                _pairingError.value = if (AtlasClient.isOlderAtlas(baseUrl)) OLDER_ATLAS
+                    else "Couldn't reach Atlas at that address."
+                return@launch
+            }
+            unsupported(info)?.let { _pairingError.value = it; return@launch }
             if (expectedPin != null && expectedPin != info.observedPin) {
                 _pairingError.value = "This Atlas presented an unexpected security key. Don't connect to it."
                 return@launch
@@ -267,17 +297,22 @@ class ConnectionViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val req = AtlasClient.requestApproval(t.info.baseUrl, t.info.observedPin, phoneName())
                 _matchCode.value = AtlasClient.matchCode(t.info.observedPin, req.serverNonce, req.clientNonce)
-                repeat(90) {
-                    delay(2_000L)
-                    val status = AtlasClient.pollApproval(t.info.baseUrl, t.info.observedPin, req)
+                // Atlas keeps a request for 3 minutes. A busy or restarting
+                // Atlas ("retry") is waited out, not reported as a failure.
+                val deadline = System.currentTimeMillis() + APPROVAL_WAIT_MS
+                var status = "pending"
+                while (System.currentTimeMillis() < deadline) {
+                    delay(if (status == "retry") 5_000L else 2_000L)
+                    if (_matchCode.value == null) return@launch
+                    status = AtlasClient.pollApproval(t.info.baseUrl, t.info.observedPin, req)
                     when {
                         status.startsWith("approved:") -> { finishPairing(t, status.removePrefix("approved:")); return@launch }
                         status == "denied" -> { _pairingError.value = "The request was declined."; _matchCode.value = null; return@launch }
-                        status == "expired" || status == "unknown" -> {
-                            _pairingError.value = "The request timed out. Try again."; _matchCode.value = null; return@launch
-                        }
+                        status == "expired" || status == "unknown" || status == "issued" -> break
                     }
                 }
+                _pairingError.value = "The request timed out. Try again."
+                _matchCode.value = null
             } catch (e: Exception) {
                 _pairingError.value = e.message ?: "Couldn't ask Atlas."
                 _matchCode.value = null
@@ -297,6 +332,7 @@ class ConnectionViewModel(app: Application) : AndroidViewModel(app) {
                 val info = AtlasClient.probe(url, 3_000L) ?: continue
                 if (label.pin != null && info.observedPin != label.pin) continue
                 if (label.deviceId != null && info.deviceId != label.deviceId) continue
+                unsupported(info)?.let { _pairingError.value = it; return@launch }
                 _target.value = PairingTarget(info, false)
                 if (label.setupCode != null) pairWithCode(label.setupCode) else pairViaHotspot()
                 return@launch
@@ -320,6 +356,7 @@ class ConnectionViewModel(app: Application) : AndroidViewModel(app) {
             val info = AtlasClient.probe(gw, 2_000L) ?: return@repeat
             if (label.pin != null && info.observedPin != label.pin) return@repeat
             _joinWifi.value = null
+            unsupported(info)?.let { _pairingError.value = it; return }
             _target.value = PairingTarget(info, true)
             if (label.setupCode != null) pairWithCode(label.setupCode) else pairViaHotspot()
             return
@@ -351,11 +388,23 @@ class ConnectionViewModel(app: Application) : AndroidViewModel(app) {
     /** Forget this Atlas (security warning → pair again, or owner's choice). */
     fun forgetDevice() {
         monitorJob?.cancel(); locateJob?.cancel()
-        store.forget()
-        device = null
+        clearPairing()
         _screen.value = Screen.Onboarding
         searchNearby()
     }
+
+    /** Drop the token everywhere this app kept it: the Keystore-sealed store and the web view's cookie. */
+    private fun clearPairing() {
+        store.forget()
+        device = null
+        CookieManager.getInstance().removeAllCookies(null)
+    }
+
+    /** Why this app can't pair with that Atlas, or null if it can. */
+    private fun unsupported(info: AtlasInfo): String? =
+        if (info.pairingVersion > AtlasClient.PAIRING_VERSION)
+            "This Atlas uses a newer way to connect. Update the Atlas app, then try again."
+        else null
 
     private fun phoneName(): String =
         (Build.MANUFACTURER.replaceFirstChar { it.uppercase() } + " " + Build.MODEL).take(60)
@@ -400,6 +449,9 @@ class ConnectionViewModel(app: Application) : AndroidViewModel(app) {
 
     companion object {
         const val RESTARTING_FOR_UPDATE = "Atlas is installing an update and restarting."
+        const val OLDER_ATLAS = "This Atlas is running older software. Update Atlas first " +
+            "(on the Atlas itself: Settings → Software Update), then connect this phone."
+        private const val APPROVAL_WAIT_MS = 180_000L
         private val UPDATE_STAGES = setOf("preparing", "installing", "restarting", "validating", "rolling_back", "verifying")
     }
 }

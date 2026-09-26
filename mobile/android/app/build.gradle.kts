@@ -68,4 +68,9 @@ dependencies {
     implementation("com.squareup.okio:okio:3.9.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
+
+    // Plain JVM tests of the pairing logic (./gradlew test); org.json because
+    // android.jar only ships stubs of it.
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20250517")
 }

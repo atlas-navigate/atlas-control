@@ -25,6 +25,56 @@ Any one of these proves the device belongs to the owner:
 Settings → Connected devices lists every paired device; remove any you don't
 recognise (its connection is closed at once). Factory reset removes them all.
 
+## Every Atlas has its own setup code
+
+There is no shared or default code. Each unit makes its own at provisioning
+(`atlas-identity`, from the operating system's secure random source). It is
+12 characters from a 29-letter alphabet, about 58 bits, so it can't be guessed
+within the rate limit. It is stored only on that unit: root-only, with a
+PBKDF2 hash that pairing checks. It is printed on that unit's label.
+
+The same run gives the unit its own:
+- device id and TLS key (the apps pin it);
+- `atlas-xxxx` name;
+- hotspot password;
+- proxy secret.
+
+It is persistent. Software updates, reboots and factory resets keep it, so the
+label works for the life of the unit. `atlas-identity new-setup-code` replaces
+it if a label is lost; paired devices are unaffected.
+
+Mass production never duplicates it:
+- The payload drive carries no identity.
+- Every boot checks that the identity belongs to this module (its serial
+  number, or the drive's if the module has none). A unit made from a cloned
+  disk image gets a fresh identity — code, key, hotspot — before anything
+  serves it.
+- Pairings made with the old identity end (they were made with a different
+  unit).
+- The old unit's hotspot profile is removed and rebuilt from the new label.
+
+## What keeps a pairing, and what ends it
+
+Pairing is done once. The same token, device id and TLS key carry on through:
+
+- Atlas software updates, including an update that was rolled back and a
+  power cut in the middle of one (`/etc/atlas/identity` and `data/` are
+  outside the release; the update engine never touches them);
+- reboots, a new IP address, network or Wi-Fi changes, and updates of the
+  apps themselves.
+
+A paired phone or browser has to pair again only when:
+
+| Cause | What happens |
+|---|---|
+| Removed in Settings → Connected devices | its connection closes; the app shows "Connect this phone again" |
+| Factory reset | all pairings are cleared; the label still works |
+| A new identity (cloned storage or a replaced module) | the app shows a security warning: the key changed |
+
+Browsers keep an HttpOnly cookie for ten years (`Max-Age`, so a wrong clock
+can't expire it early). The apps keep the token in the Android Keystore or the
+iOS Keychain, and detect removal within seconds of connecting.
+
 ## Finding Atlas without an address
 
 The apps remember Atlas by its device id and TLS key, never by address. They

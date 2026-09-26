@@ -139,7 +139,14 @@ section "Installing staged binaries"
 # and otherwise curls the installer, so put it on PATH first.
 if [[ -x "$STAGE/ollama" ]]; then
     install -m755 "$STAGE/ollama" /usr/local/bin/ollama
-    log "ollama installed: $(/usr/local/bin/ollama --version 2>/dev/null | head -1)"
+    if [[ -d "$STAGE/ollama-lib" ]]; then
+        # The GPU runners: without them Ollama runs Ray on the CPU.
+        mkdir -p /usr/local/lib/ollama
+        rsync -a --delete "$STAGE/ollama-lib/" /usr/local/lib/ollama/
+        log "ollama installed with its GPU runners: $(/usr/local/bin/ollama --version 2>/dev/null | head -1)"
+    else
+        warn "$STAGE/ollama-lib missing (drive captured by an older atlas-capture.sh) — install.sh reinstalls Ollama online."
+    fi
 else
     warn "$STAGE/ollama missing — install.sh will download ollama instead (needs internet)."
 fi

@@ -2,6 +2,7 @@ import Foundation
 import NetworkExtension
 import SwiftUI
 import UIKit
+import WebKit
 
 enum Screen: Equatable {
     case onboarding
@@ -10,6 +11,8 @@ enum Screen: Equatable {
     case restarting(String)
     case notFound
     case securityWarning
+    /// The same Atlas (same key) no longer accepts this iPhone: removed in Settings, or Atlas was reset.
+    case unpaired
 }
 
 struct PairingTarget: Equatable {
@@ -23,10 +26,14 @@ struct PairingTarget: Equatable {
 /// Atlas is remembered by device id + TLS key pin + pairing token (Keychain),
 /// never by address. When the connection drops (IP change, network switch,
 /// reboot, update) it is found again by id and confirmed by its key. A
-/// different key for the same device id is a security warning.
+/// different key for the same device id is a security warning. Pairing is
+/// asked for again only when Atlas itself ended it — the iPhone was removed in
+/// Settings → Connected devices, or Atlas was factory reset.
 @MainActor
 final class ConnectionModel: ObservableObject {
     static let restartingForUpdate = "Atlas is installing an update and restarting."
+    static let olderAtlas = "This Atlas is running older software. Update Atlas first (on the Atlas itself: Settings → Software Update), then connect this iPhone."
+    private static let approvalWait: TimeInterval = 180
     private static let updateStages: Set<String> = ["preparing", "installing", "restarting", "validating",
                                                     "rolling_back", "verifying"]
 
@@ -123,6 +130,7 @@ final class ConnectionModel: ObservableObject {
         monitorTask?.cancel()
         guard let dev = device else { return }
         monitorTask = Task { [weak self] in
+            if await AtlasClient.stillPaired(url, device: dev) == false { self?.removed(); return }
             var misses = 0
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 10_000_000_000)
@@ -133,6 +141,7 @@ final class ConnectionModel: ObservableObject {
                 switch await AtlasClient.health(url, device: dev) {
                 case .up:
                     misses = 0
+                    if await AtlasClient.stillPaired(url, device: dev) == false { self.removed(); return }
                     await AtlasNotifier.poll(url: url, device: dev)
                 case .restarting:
                     self.screen = .restarting(self.updateInProgress ? Self.restartingForUpdate : "Atlas is restarting…")
@@ -166,6 +175,23 @@ final class ConnectionModel: ObservableObject {
         relocate()
     }
 
+    private func removed() {
+        locateTask?.cancel()
+        tracker.stop()
+        screen = .unpaired
+    }
+
+    /// "Connect again" after Atlas ended this iPhone's pairing. It is the same
+    /// Atlas with the same key, so the new pairing trusts only that key.
+    func reconnectRemoved() {
+        guard let dev = device else { forgetDevice(); return }
+        locateTask?.cancel(); monitorTask?.cancel()
+        clearPairing()
+        screen = .onboarding
+        searchNearby()
+        if let url = dev.lastUrl { choose(url, expectedPin: dev.pin) }
+    }
+
     // Web UI bridge (window.AtlasIOS / AtlasAndroid)
     func atlasSwitchingNetworks() {
         screen = .locating("Atlas is switching networks. If your iPhone was on Atlas's Wi-Fi, it will rejoin your usual network — this can take a minute.")
@@ -197,8 +223,11 @@ final class ConnectionModel: ObservableObject {
         pairingError = nil
         Task {
             guard let info = await AtlasClient.probe(baseUrl, timeout: 3) else {
-                pairingError = "Couldn't reach Atlas at that address."; return
+                pairingError = await AtlasClient.isOlderAtlas(baseUrl) ? Self.olderAtlas
+                                                                        : "Couldn't reach Atlas at that address."
+                return
             }
+            if let why = unsupported(info) { pairingError = why; return }
             if let expectedPin, expectedPin != info.observedPin {
                 pairingError = "This Atlas presented an unexpected security key. Don't connect to it."; return
             }
@@ -226,16 +255,20 @@ final class ConnectionModel: ObservableObject {
                 let req = try await AtlasClient.requestApproval(t.info.baseUrl, pin: t.info.observedPin, name: Self.phoneName)
                 matchCode = AtlasClient.matchCode(observedPin: t.info.observedPin, serverNonce: req.serverNonce,
                                                   clientNonce: req.clientNonce)
-                for _ in 0..<90 {
-                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                // Atlas keeps a request for 3 minutes. A busy or restarting
+                // Atlas ("retry") is waited out, not reported as a failure.
+                let deadline = Date().addingTimeInterval(Self.approvalWait)
+                var status = "pending"
+                while Date() < deadline {
+                    try? await Task.sleep(nanoseconds: status == "retry" ? 5_000_000_000 : 2_000_000_000)
                     guard matchCode != nil else { return }
-                    let status = await AtlasClient.pollApproval(t.info.baseUrl, pin: t.info.observedPin, request: req)
+                    status = await AtlasClient.pollApproval(t.info.baseUrl, pin: t.info.observedPin, request: req)
                     if status.hasPrefix("approved:") { finishPairing(t, token: String(status.dropFirst(9))); return }
                     if status == "denied" { pairingError = "The request was declined."; matchCode = nil; return }
-                    if status == "expired" || status == "unknown" {
-                        pairingError = "The request timed out. Try again."; matchCode = nil; return
-                    }
+                    if status == "expired" || status == "unknown" || status == "issued" { break }
                 }
+                pairingError = "The request timed out. Try again."
+                matchCode = nil
             } catch {
                 pairingError = error.localizedDescription
                 matchCode = nil
@@ -254,6 +287,7 @@ final class ConnectionModel: ObservableObject {
                 guard let info = await AtlasClient.probe(url, timeout: 3) else { continue }
                 if let pin = label.pin, pin != info.observedPin { continue }
                 if let id = label.deviceId, id != info.deviceId { continue }
+                if let why = unsupported(info) { pairingError = why; return }
                 target = PairingTarget(info: info, onAtlasHotspot: url == AtlasDiscovery.hotspotUrl)
                 if let code = label.setupCode { pairWithCode(code) } else { pairViaHotspot() }
                 return
@@ -282,6 +316,7 @@ final class ConnectionModel: ObservableObject {
             guard let info = await AtlasClient.probe(AtlasDiscovery.hotspotUrl, timeout: 2) else { continue }
             if let pin = label.pin, pin != info.observedPin { continue }
             joiningWifi = nil
+            if let why = unsupported(info) { pairingError = why; return }
             target = PairingTarget(info: info, onAtlasHotspot: true)
             if let code = label.setupCode { pairWithCode(code) } else { pairViaHotspot() }
             return
@@ -310,11 +345,24 @@ final class ConnectionModel: ObservableObject {
 
     func forgetDevice() {
         locateTask?.cancel(); monitorTask?.cancel()
+        clearPairing()
+        screen = .onboarding
+        searchNearby()
+    }
+
+    /// Drop the token everywhere this app kept it: the Keychain and the web view's cookie.
+    private func clearPairing() {
         tracker.stop()
         DeviceStore.forget()
         device = nil
-        screen = .onboarding
-        searchNearby()
+        WKWebsiteDataStore.default().removeData(ofTypes: [WKWebsiteDataTypeCookies],
+                                                modifiedSince: .distantPast) {}
+    }
+
+    /// Why this app can't pair with that Atlas, or nil if it can.
+    private func unsupported(_ info: AtlasInfo) -> String? {
+        info.pairingVersion > AtlasClient.pairingVersion
+            ? "This Atlas uses a newer way to connect. Update the Atlas app, then try again." : nil
     }
 
     func appBecameActive() {

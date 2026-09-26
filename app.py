@@ -94,6 +94,7 @@ import meshtastic
 import meshtastic.util
 from mesh_manager import MeshManager
 from gps_node import GpsNode as GpsManager      # ground-up rewrite with UBX + Kalman + self-DR
+import ai_manager as ai_manager_mod
 from ai_manager import (AIManager, reverse_geocode, geocoder_status,
                         _CAT_STOPWORDS, _detect_category,
                         available_ram_mb as _available_ram_mb, _ROUTING_MIN_FREE_MB)
@@ -337,6 +338,9 @@ app.wsgi_app = request_guard.EdgeMiddleware(
 _AUDITED_ROUTES = [(m, re.compile(rf"^{pat}$"), action, keys) for m, pat, action, keys in (
     ("PUT", r"/api/settings", "settings_changed", True),
     ("PUT", r"/api/ai/settings", "ray_settings_changed", True),
+    ("POST", r"/api/ai/model", "ray_model_changed", True),
+    ("PUT", r"/api/ai/models/[\w.:-]+/overrides", "ray_settings_changed", True),
+    ("DELETE", r"/api/ai/models/[\w.:-]+/overrides", "ray_settings_changed", False),
     ("PUT", r"/api/gps/share", "location_sharing_changed", True),
     ("PUT", r"/api/device/config/[a-z_]+", "radio_settings_changed", True),
     ("PUT", r"/api/device/owner", "radio_name_changed", False),
@@ -818,6 +822,9 @@ def api_device_info():
     return jsonify({
         "app": "atlas-control",
         "api": 2,
+        # Pairing protocol the apps speak (claim / hotspot / approval, bearer
+        # tokens, SPKI pin). An app that sees a higher number asks to be updated.
+        "pairing": 1,
         "device_id": dev.get("device_id"),
         "name": dev.get("name"),
         "hostname": dev.get("hostname"),
@@ -1270,9 +1277,15 @@ def api_ai_status():
         geo = geocoder_status()
     except Exception as e:
         geo = {"ok": False, "error": str(e)}
+    import model_profiles
+    active = model_profiles.resolve(settings)
     return jsonify({
         "running": running,
         "ai_ready": ai_ready,
+        "active_model": {"id": active["id"], "label": active["label"], "tag": active["tag"],
+                         "quant": active["quant"], "num_ctx": active["options"]["num_ctx"]},
+        "switch": ai_manager.switch_state() if ai_manager else None,
+        "notice": ai_manager.notice() if ai_manager else "",
         "models": models,
         "loaded_models": loaded_models,
         "doc_count": doc_count,
@@ -1295,6 +1308,10 @@ def _require_ai_ready():
     status = ai_manager.startup_status()
     reason = "warming_up" if status.get("warming_up") else "not_ready"
     message = "Ray is still starting up. Please wait a moment and try again."
+    switch = ai_manager.switch_state()
+    if status.get("phase") == "switching" and switch:
+        return jsonify({"error": f"Ray is switching to {switch['label']} — it will answer again in a minute.",
+                        "reason": "switching", "retryable": True, "startup_phase": "switching"}), 503
     if status.get("last_error"):
         reason = "startup_failed"
         message = f"Ray startup failed: {status['last_error']}"
@@ -1425,20 +1442,137 @@ def api_ai_documents_delete(doc_id):
 def api_ai_settings_get():
     return jsonify(db.ai_get_settings())
 
+# What PUT /api/ai/settings may change. The model, its expert overrides and
+# the embedding model change through the switch job (POST /api/ai/model),
+# which loads and checks them before saving.
+_AI_BEHAVIOUR_SETTINGS = {
+    "system_prompt": lambda v: str(v)[:20000],
+    "warmup_on_start": lambda v: "true" if str(v).lower() == "true" else "false",
+    "keep_alive_hours": lambda v: str(min(24, max(1, int(float(v))))),
+    "rag_enabled": lambda v: "true" if str(v).lower() == "true" else "false",
+    "rag_top_k": lambda v: str(min(10, max(1, int(float(v))))),
+    "inject_mesh_context": lambda v: "true" if str(v).lower() == "true" else "false",
+}
+
+
 @app.route("/api/ai/settings", methods=["PUT"])
 def api_ai_settings_put():
-    data = request.json or {}
-    old_model = db.ai_get_settings().get("model")
-    db.ai_set_settings(data)
-    new_model = data.get("model")
-    model_changed = new_model and new_model != old_model
-    if model_changed and ai_manager:
-        _captured_old = old_model  # capture before thread starts
-        def _switch_model():
-            ai_manager.unload(model=_captured_old)
-            ai_manager._warmup()
-        threading.Thread(target=_switch_model, daemon=True).start()
-    return jsonify({"ok": True, "settings": db.ai_get_settings(), "warming_up": bool(model_changed)})
+    data = request.get_json(silent=True) or {}
+    clean, ignored = {}, []
+    for key, value in data.items():
+        fix = _AI_BEHAVIOUR_SETTINGS.get(key)
+        if fix is None:
+            ignored.append(key)
+            continue
+        try:
+            clean[key] = fix(value)
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": f"Invalid value for {key}."}), 400
+    if clean:
+        db.ai_set_settings(clean)
+    job = None
+    wanted = data.get("model")
+    if wanted and ai_manager and wanted != db.ai_get_settings().get("model"):
+        try:                        # older pages send the model with the rest
+            job = ai_manager.switch_model(str(wanted))
+        except ai_manager_mod.ModelSwitchError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 409 if exc.busy else 400
+    ignored = [k for k in ignored if k != "model"]
+    return jsonify({"ok": True, "settings": db.ai_get_settings(), "warming_up": bool(job),
+                    "switch": job, "ignored": ignored})
+
+
+def _model_entries():
+    """The models an owner can choose, with what each needs and how it runs here."""
+    import model_profiles
+    settings = db.ai_get_settings()
+    active = model_profiles.resolve(settings)
+    hw = model_profiles.hardware()
+    installed = set()
+    try:
+        import urllib.request as urlreq
+        with urlreq.urlopen(f"{OLLAMA_BASE}/api/tags", timeout=3) as r:
+            installed = {m["name"] for m in json.loads(r.read()).get("models", [])}
+    except Exception:
+        pass
+    ollama = ai_manager.ollama_version() if ai_manager else None
+    entries = []
+    for model in model_profiles.models():
+        prof = model_profiles.resolve(settings, model["id"], hw)
+        try:
+            measured = json.loads(settings.get("measured:" + model["id"]) or "{}")
+        except ValueError:
+            measured = {}
+        if ollama and model_profiles.version_tuple(ollama) < model_profiles.version_tuple(model.get("min_ollama", "0")):
+            status = "needs_engine"
+        elif prof["tag"] in installed or any(t.startswith(prof["tag"] + ":") for t in installed):
+            status = "installed"
+        else:
+            status = "download"
+        entries.append({
+            "id": model["id"], "label": model["label"], "blurb": model.get("blurb", ""),
+            "tag": prof["tag"], "quant": prof["quant"], "size_mb": prof["size_mb"],
+            "status": status, "active": model["id"] == active["id"],
+            "options": prof["options"], "optimized": prof["optimized"], "overrides": prof["overrides"],
+            "clamped": {k: list(v) for k, v in prof["clamped"].items()},
+            "memory_mb": prof["memory_mb"], "min_ollama": model.get("min_ollama"),
+            "speed_tok_s": measured.get("tok_s"),
+        })
+    return {"models": entries, "active": active["id"], "embed_model": settings.get("embed_model"),
+            "hardware": hw, "ollama_version": ollama,
+            "override_keys": sorted(model_profiles.OVERRIDE_RANGES),
+            "switch": ai_manager.switch_state() if ai_manager else None,
+            "notice": ai_manager.notice() if ai_manager else ""}
+
+
+@app.route("/api/ai/models")
+def api_ai_models():
+    return jsonify(_model_entries())
+
+
+@app.route("/api/ai/model", methods=["POST"])
+def api_ai_model_switch():
+    """Switch Ray to another model (or change its embedding model). 202 + the job."""
+    if not ai_manager:
+        return jsonify({"ok": False, "error": "Ray is turned off."}), 503
+    data = request.get_json(silent=True) or {}
+    embed = data.get("embed_model")
+    try:
+        job = ai_manager.switch_model(str(data.get("model") or db.ai_get_settings().get("model") or ""),
+                                      embed_model=str(embed).strip() if embed else None)
+    except ai_manager_mod.ModelSwitchError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 409 if exc.busy else 400
+    return jsonify({"ok": True, "switch": job}), 202
+
+
+@app.route("/api/ai/model/cancel", methods=["POST"])
+def api_ai_model_cancel():
+    return jsonify({"ok": bool(ai_manager and ai_manager.cancel_switch())})
+
+
+@app.route("/api/ai/models/<path:model_id>/overrides", methods=["PUT", "DELETE"])
+def api_ai_model_overrides(model_id):
+    """Expert overrides for one model. Saving them re-applies the model when it
+    is the one in use (the switch job loads and checks it, then saves)."""
+    import model_profiles
+    model = model_profiles.find(model_id)
+    if model is None:
+        return jsonify({"ok": False, "error": "Unknown model."}), 404
+    raw = {} if request.method == "DELETE" else ((request.get_json(silent=True) or {}).get("overrides") or {})
+    if not isinstance(raw, dict):
+        return jsonify({"ok": False, "error": "overrides must be an object"}), 400
+    kept, clamped = model_profiles.clean_overrides(model, raw)
+    settings = db.ai_get_settings()
+    job = None
+    if ai_manager and model_profiles.resolve(settings)["id"] == model["id"]:
+        try:
+            job = ai_manager.switch_model(model["id"], overrides=kept)
+        except ai_manager_mod.ModelSwitchError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 409 if exc.busy else 400
+    else:
+        db.ai_set_setting(model_profiles.OVERRIDE_PREFIX + model["id"], json.dumps(kept))
+    return jsonify({"ok": True, "overrides": kept, "clamped": {k: list(v) for k, v in clamped.items()},
+                    "switch": job}), (202 if job else 200)
 
 @app.route("/api/ai/warmup", methods=["POST"])
 def api_ai_warmup():
@@ -4568,6 +4702,15 @@ def main():
     args = parser.parse_args()
 
     db.init_db()
+    if pairing.bind_identity():
+        # A new identity (storage cloned from another unit): the old unit's
+        # pairings are gone; its hotspot and network hints must go too.
+        for path in (_HOTSPOT_CFG_PATH, _LAN_HINTS_PATH):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        logger.warning("This Atlas has a new identity; devices paired with the previous one must pair again.")
 
     # Per-subsystem kill switches so we can bisect what's pinning CPU.
     # Touch the corresponding file under data/ to disable, remove to re-enable.
@@ -4585,19 +4728,9 @@ def main():
     settings = db.get_app_settings()
     ai_settings = db.ai_get_settings()
     ai_updates = {}
-    if ai_settings.get("model") in (None, "", "llama3.2:3b", "qwen3:4b", "qwen3.5:2b", "qwen3.5:4b"):
-        ai_updates["model"] = "qwen2.5:3b"
-        # Qwen2.5 sampling: stored low-temp values from older models
-        # cause repetition loops; use Qwen2.5's recommended defaults
-        ai_updates["temperature"] = "0.7"
-        ai_updates["top_p"] = "0.8"
-        ai_updates["top_k"] = "20"
-        # Auto layer placement: forcing 99 layers hard-fails on the 8 GB Jetson
-        ai_updates["num_gpu"] = "-1"
-    # Stale 2048-token context from pre-Qwen3.5 defaults truncates the system
-    # prompt once RAG docs + 8-turn history are injected
-    if ai_settings.get("num_ctx") == "2048":
-        ai_updates["num_ctx"] = "4096"
+    # The model needs no fixing up here: a saved model that is no longer
+    # offered falls back to the standard one at warmup (with a notice), and
+    # each model's context/sampling come from model_profiles.
     # Migrate the embedder to qwen3-embedding:0.6b. nomic (768-dim) and qwen3
     # (1024-dim) vectors are incompatible, so switching wipes stored doc
     # embeddings; the background re-embed thread regenerates them on startup.

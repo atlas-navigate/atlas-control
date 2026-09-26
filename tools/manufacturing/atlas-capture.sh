@@ -10,6 +10,7 @@
 # ║    payload/            ~324 GB of /atlas_data, device secrets stripped   ║
 # ║    payload/osrm-native-bin/   OSRM binaries (install.sh prebuilt hatch)  ║
 # ║    stage/ollama        the ollama binary (lives outside /atlas_data)     ║
+# ║    stage/ollama-lib/   its GPU runners (/usr/local/lib/ollama)           ║
 # ║    stage/release/      the signed Atlas release every new unit installs  ║
 # ║    stage/kit/          that same release unpacked (minus wheels): its    ║
 # ║                        install.sh, tools and dataset builders            ║
@@ -172,6 +173,11 @@ log "OSRM binaries staged: $(ls "$PAYLOAD/osrm-native-bin/" | tr '\n' ' ')"
 
 install -m755 "$(command -v ollama)" "$STAGE/ollama"
 log "ollama staged ($("$STAGE/ollama" --version 2>/dev/null | head -1))"
+# Without its runners the binary falls back to the CPU and Ray crawls.
+[[ -d /usr/local/lib/ollama ]] \
+    || die "/usr/local/lib/ollama is missing — this unit's Ollama has no GPU runners. Reinstall Ollama, then capture."
+rsync -a --delete /usr/local/lib/ollama/ "$STAGE/ollama-lib/"
+log "ollama GPU runners staged ($(du -sh "$STAGE/ollama-lib" | cut -f1))"
 
 # The signed release, and the installer + tools from inside that same bundle
 # (so the kit a technician runs always matches the software it installs).
@@ -236,6 +242,15 @@ check "mesh history stripped"      '[[ ! -e "$PAYLOAD/atlas-control/data/meshtas
 check "hotspot password stripped"  '[[ ! -e "$PAYLOAD/atlas-control/data/hotspot_config.json" && ! -e "$PAYLOAD/atlas-control/hotspot_config.json" ]]'
 check "database copies stripped"   '[[ ! -e "$PAYLOAD/atlas-control/data/backups" ]]'
 check "release staged + kit"       '[[ -f "$STAGE/release/atlas-release.json" && -f "$STAGE/kit/install.sh" && -d "$STAGE/kit/system/atlas_engine" ]]'
+check "ollama GPU runners staged"  '[[ -d "$STAGE/ollama-lib" && -n "$(ls -A "$STAGE/ollama-lib")" ]]'
+# Every model the release offers (in this hardware's build) must be on the
+# drive: a unit sold off-grid can never download one.
+if [[ -f "$STAGE/kit/model_profiles.py" ]]; then
+    while read -r RAY_MODEL; do
+        RAY_MANIFEST="$PAYLOAD/ollama/models/manifests/registry.ollama.ai/library/${RAY_MODEL%%:*}/${RAY_MODEL#*:}"
+        check "Ray model $RAY_MODEL in payload" '[[ -f "$RAY_MANIFEST" ]]'
+    done < <(python3 -I "$STAGE/kit/model_profiles.py" --preinstall)
+fi
 
 sync
 echo

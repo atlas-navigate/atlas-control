@@ -15,9 +15,11 @@ unit skipped that step). Nothing here is shared between units.
   proxy_secret           nginx→Flask shared secret (0640 root:atlas)
   nginx-proxy-secret.conf  the same secret as an nginx include (0600)
 
-The identity survives factory reset — the printed label must keep working
-for the life of the device. If the module serial number no longer matches
-(the storage was cloned into another unit) everything is regenerated.
+The identity survives factory reset and software updates — the printed
+label must keep working for the life of the device. `ensure()` runs on every
+boot (atlas-firstboot.service): if the module serial number no longer matches
+(the storage, or a whole disk image, was cloned into another unit) everything
+is regenerated, so no two units ever share a setup code, key or password.
 """
 import base64
 import datetime
@@ -54,12 +56,20 @@ def _wifi_password():
     return "-".join("".join(secrets.choice(WIFI_ALPHABET) for _ in range(4)) for _ in range(4))
 
 
+SERIAL_SOURCES = ("/sys/firmware/devicetree/base/serial-number",   # the Jetson module
+                  "/sys/class/nvme/nvme0/serial")                  # fallback: the NVMe drive
+
+
 def module_serial():
-    try:
-        with open("/sys/firmware/devicetree/base/serial-number", "rb") as f:
-            return f.read().replace(b"\x00", b"").decode(errors="replace").strip() or None
-    except OSError:
-        return None
+    for source in SERIAL_SOURCES:
+        try:
+            with open(source, "rb") as f:
+                serial = f.read().replace(b"\x00", b"").decode(errors="replace").strip()
+        except OSError:
+            continue
+        if serial:
+            return serial
+    return None
 
 
 def _owner(path, user="root", group="root", mode=0o600):
@@ -186,12 +196,43 @@ def ensure(adopt_hotspot_password=None, hostname=None):
     if device:
         serial = module_serial()
         if serial and device.get("serial") and serial != device["serial"]:
-            return create(reason="cloned-storage")
+            device = create(reason="cloned-storage")
+            forget_hotspot_profiles()
         return device
     pw = adopt_hotspot_password
     if pw in DEFAULT_HOTSPOT_PASSWORDS:
         pw = None
     return create(hotspot_password=pw, hostname=hostname, reason="adopted" if hostname else "new")
+
+
+def forget_hotspot_profiles():
+    """Remove saved access-point (hotspot) profiles. A cloned disk carries the
+    original unit's hotspot password; without the profile, Atlas rebuilds its
+    hotspot from this unit's own label. Client Wi-Fi networks are kept."""
+    from . import netctl
+    directory = netctl.nm_connections_dir()
+    removed = 0
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return 0
+    for name in names:
+        path = os.path.join(directory, name)
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                text = f.read()
+        except OSError:
+            continue
+        if any(line.strip() == "mode=ap" for line in text.splitlines()):
+            try:
+                os.remove(path)
+                removed += 1
+            except OSError:
+                pass
+    if removed and paths.ROOT == "/" and os.geteuid() == 0:
+        import subprocess
+        subprocess.run(["nmcli", "connection", "reload"], capture_output=True)
+    return removed
 
 
 def _write_setup_code(setup):

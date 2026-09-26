@@ -159,6 +159,30 @@ def revoke_all():
         _cache.clear()
 
 
+IDENTITY_SETTING = "pairing_identity"
+
+
+def bind_identity():
+    """Pairings belong to the identity that issued them. Software updates,
+    reboots and factory resets keep the identity, so paired phones and
+    browsers keep working. Only a new identity (storage cloned into another
+    unit) ends them. Returns True when this start found a new identity."""
+    if not device_identity.present():
+        return False
+    current = device_identity.device().get("device_id")
+    if not current:
+        return False
+    row = db.get_db().execute("SELECT value FROM app_settings WHERE key=?", (IDENTITY_SETTING,)).fetchone()
+    stored = row["value"] if row else None
+    if stored == current:
+        return False
+    if stored:
+        revoke_all()
+        audit_log.record("identity_changed", reason=str(device_identity.device().get("created_reason") or "")[:40])
+    db.set_app_setting(IDENTITY_SETTING, current)
+    return bool(stored)
+
+
 # ── request identity ─────────────────────────────────────────────────────
 def token_from_environ(environ):
     auth = environ.get("HTTP_AUTHORIZATION", "")
