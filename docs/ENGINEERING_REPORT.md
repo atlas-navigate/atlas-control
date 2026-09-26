@@ -344,7 +344,7 @@ Tested with a fault injected at every journal state, in a sandbox.
   - discovery payloads, vector store, knowledge map, Ray context and token budget, GPS events,
     stats reader and push, frontend page/CSP, manufacturing.
 - `tests/js/safe_href.test.js` has 28 cases.
-- **Latest run: 207 passed, 4 skipped, 0 failed; JS 28/28.** Two intermittent failures found
+- **Latest run: 218 passed, 4 skipped, 0 failed; JS 28/28.** Two intermittent failures found
   during the work were test defects, and both are fixed: a corruption helper that wrote `X`
   (a no-op 1 time in 256), and a wall-clock assertion.
 - **Static checks:**
@@ -367,26 +367,56 @@ copy of the unit's database, AI and radio off in both):
 | Stats p50 / cold | 2.7 ms / ~1.8 s every expiry | 2.6 ms / ~1 s once, then pushed |
 | Server RSS (AI off) | — | 120–124 MB |
 
-## 10. Remaining verification (needs the migration on this unit)
-Run once, as you (it prompts for nothing else):
-```
-sudo /atlas_data/atlas-control-wt/tools/migrate/atlas-migrate apply \
-     --bundle /atlas_data/atlas-control-wt/dist/1.0.0-dev.202609252347 \
-     --dev-key /home/admin/.config/atlas-dev/dev-release.pub
-```
-Then, on the device:
-- `ss` shows Flask on loopback only, and the firewall chain is live with SSH still reachable
-  (dev mode);
-- XFF, CSRF, foreign Origin and Host requests are refused;
-- pairing with the setup code from `sudo /usr/local/lib/atlas/bin/atlas-identity label-json`;
-- Ray/RAG, maps, navigation, GPS and Meshtastic run as `atlas`;
-- update end-to-end with `tools/dev/deploy`: network cut mid-download, refresh, a bad signature,
-  a deliberately unhealthy build (rollback), kill and reboot at journal states;
-- browser reconnect after restart and update;
-- the phone apps once built (Android Studio / Xcode).
+## 10. On this unit (migrated 2026-09-25)
+The one-command migration succeeded on the second attempt; the first stopped on the kernel's
+missing nftables `ct`/`reject` and rolled itself back, as designed.
 
-Until then, items 9–33 of the spec's final verification are verified in tests and sandboxes, not
-on this device.
+**Verified on the device:**
+- `atlas-control` runs as `atlas` from `/opt/atlas/releases/…`, Flask listens on
+  `127.0.0.1:5000` only, and the firewall, helper socket and nginx are active.
+- Edge checks, run from the LAN side:
+  - unpaired API → 401; forged `X-Forwarded-For` or proxy secret → 401;
+  - foreign `Host` (rebinding) → 421; cross-site form → 403; `text/plain` body → 415;
+  - LAN `:5000` refused; HTTP → HTTPS 301; SSH reachable (dev mode).
+- Unpaired Socket.IO is refused. Nothing under `/opt/atlas` or `/usr/local/lib/atlas` is owned
+  by anyone but root, or writable by the service account.
+- The page is served from the content-hashed bundle under the strict CSP.
+
+**Found by first real use, and fixed:**
+- **Browser pairing looked broken.** The setup code and hotspot password were both
+  `XXXX-XXXX-XXXX` in `label-json`, so the wrong one was easy to type. The fallback, approval by
+  another device, then failed too: nginx's pairing limit (6/min) returned 503 to the 2-second
+  poll, and `error_page` turned that into "Atlas is restarting".
+
+  Now:
+  - throttling answers 429 (JSON), and only proof-carrying POSTs get the strict rate;
+  - new units' Wi-Fi passwords have a different shape;
+  - the error names the right label line;
+  - `atlas-identity label` / `check` / `new-setup-code` exist.
+- **`tools/dev/deploy` could never work without sudo.** The helper accepts only root and
+  `atlas`; now developer units also accept `atlas`-group members (engine 2, installed by the
+  engine's own self-upgrade — sandbox-tested). It also fails fast instead of waiting 15 minutes.
+- A misleading "serving in-browser Babel" warning on read-only releases (the prebuilt page was
+  served regardless).
+- **The rare test failures** (about 1 in 300 requests) were the threaded test servers wrapping
+  accepted connections in gevent's patched socket class. Fixed; 0 in 1000.
+- The engine now resets a failed app unit before restarting it, so a crash-looping release can't
+  block its own rollback.
+
+**Still to run on the device** — `sudo tools/dev/deploy` (installs the fixes above), then
+`sudo tools/dev/acceptance`. The harness covers:
+- root-side security;
+- Ray + RAG, an offline route, stats, no outbound traffic;
+- an app-driven download with an Internet cut → pause → Range resume, and an app restart
+  mid-download;
+- install + reconnect, a forged manifest, rollback of an unhealthy release;
+- a crash at every engine state followed by recovery.
+
+`acceptance reboot-test` / `after-reboot` add a real power-cut simulation. Its report lands in
+`/var/log/atlas-acceptance/`.
+
+**Needs hardware or builds:** Meshtastic and GPS (no radio or GPS attached today; the recurring
+"myInfo" mesh error is the scan finding no radio), and the Android and iOS apps.
 
 ## 11. Remaining risks
 - The mobile apps are not compiled here, and old app builds stop working after pairing is
