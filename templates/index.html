@@ -11536,6 +11536,16 @@ function App() {
         setSocketConnected(true);
         // Announce which rooms this client wants on (re)connect
         socket.emit('join_rooms', { rooms: pageRooms[page] || [] });
+        // Requests made while this page was closed (the live event only
+        // reaches pages that are open) are still waiting: show them too.
+        api.get('/api/pair/requests').then(list => {
+          if (!Array.isArray(list)) return;
+          setPairRequests(prev => {
+            const known = new Set(prev.map(r => r.request_id));
+            return prev.concat(list.filter(r => r && r.id && !known.has(r.id))
+              .map(r => ({ request_id: r.id, name: r.name, kind: r.kind, match_code: r.match_code })));
+          });
+        }).catch(() => {});
         // After a power loss with no internet, Atlas's clock is only a lower
         // bound: offer this device's clock (Atlas uses it only to move forward,
         // and never over internet or GPS time).

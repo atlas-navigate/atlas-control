@@ -453,7 +453,9 @@ useEffect(()=>{const socket=socketRef.current;if(!socket||!socket.connected)retu
 useEffect(()=>{try{const socket=io(window.location.origin,{transports:isAtlasMobileApp?['polling']:['websocket','polling'],upgrade:!isAtlasMobileApp// perMessageDeflate is negotiated automatically when server supports it
 });socketRef.current=socket;// Expose to MapPage so it can subscribe to position_update without a second connection.
 window._atlasSocket=socket;socket.on('connect',()=>{setSocketConnected(true);// Announce which rooms this client wants on (re)connect
-socket.emit('join_rooms',{rooms:pageRooms[page]||[]});// After a power loss with no internet, Atlas's clock is only a lower
+socket.emit('join_rooms',{rooms:pageRooms[page]||[]});// Requests made while this page was closed (the live event only
+// reaches pages that are open) are still waiting: show them too.
+api.get('/api/pair/requests').then(list=>{if(!Array.isArray(list))return;setPairRequests(prev=>{const known=new Set(prev.map(r=>r.request_id));return prev.concat(list.filter(r=>r&&r.id&&!known.has(r.id)).map(r=>({request_id:r.id,name:r.name,kind:r.kind,match_code:r.match_code})));});}).catch(()=>{});// After a power loss with no internet, Atlas's clock is only a lower
 // bound: offer this device's clock (Atlas uses it only to move forward,
 // and never over internet or GPS time).
 api.get('/api/device/local').then(d=>{if(d&&d.clock&&d.clock.managed&&!d.clock.verified&&d.clock.state!=='gps'){api.post('/api/device/clock-hint',{epoch_ms:Date.now()}).catch(()=>{});}}).catch(()=>{});});socket.on('disconnect',()=>{setSocketConnected(false);});// Another device asking to be allowed onto this Atlas.
