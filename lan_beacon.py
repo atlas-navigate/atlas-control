@@ -248,6 +248,8 @@ class LanBeacon:
             "id": device.get("id") or "",
             "name": device.get("name") or "",
             "shortName": device.get("shortName") or "",
+            # This unit's own .local name, for the app to show its owner.
+            "host": device.get("fqdn") or "",
             "fp": tls.get("spkiSha256") or "",
             "port": 443,
             "api": api.get("version") or 2,

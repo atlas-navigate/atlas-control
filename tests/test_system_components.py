@@ -123,10 +123,12 @@ class IdentityTests(unittest.TestCase):
     def test_every_unit_gets_the_standard_wifi_password_and_its_own_everything_else(self):
         d = self.sb.paths.IDENTITY
         read = lambda *p: open(os.path.join(d, *p)).read()
-        a = self.identity.ensure()
+        with mock.patch.object(self.identity, "module_serial", return_value="1423425090328"):
+            a = self.identity.ensure()
         a_hotspot, a_code = json.load(open(os.path.join(d, "hotspot.json"))), read("setup_code")
         shutil.rmtree(d)
-        b = self.identity.ensure()
+        with mock.patch.object(self.identity, "module_serial", return_value="1423425090329"):
+            b = self.identity.ensure()
         b_hotspot, b_code = json.load(open(os.path.join(d, "hotspot.json"))), read("setup_code")
         # Owner decision: one Wi-Fi password for every unit (printed on box and manual)...
         self.assertEqual(a_hotspot["password"], self.identity.FACTORY_HOTSPOT_PASSWORD)
@@ -141,7 +143,7 @@ class IdentityTests(unittest.TestCase):
 
     def test_factory_hotspot_moves_an_existing_unit_to_the_standard_password(self):
         d = self.sb.paths.IDENTITY
-        self.identity.ensure(adopt_hotspot_password="our-own-wifi-9", hostname="atlas")
+        self.identity.ensure(adopt_hotspot_password="our-own-wifi-9", legacy_alias="atlas")
         before = json.load(open(os.path.join(d, "hotspot.json")))
         code = open(os.path.join(d, "setup_code")).read()
         self.assertEqual((before["password"], before["shared"]), ("our-own-wifi-9", False))
@@ -200,11 +202,78 @@ class IdentityTests(unittest.TestCase):
         module, drive = os.path.join(d, "module"), os.path.join(d, "drive")
         with open(drive, "w") as f:
             f.write("S4EWNX0R123456\n")
-        with mock.patch.object(self.identity, "SERIAL_SOURCES", (module, drive)):
+        # The sources are read relative to ATLAS_ROOT (the sandbox).
+        with mock.patch.object(self.identity, "SERIAL_SOURCES", ("/serials/module", "/serials/drive")):
             self.assertEqual(self.identity.module_serial(), "S4EWNX0R123456")
             with open(module, "wb") as f:
                 f.write(b"1423123456789\x00")
             self.assertEqual(self.identity.module_serial(), "1423123456789")
+
+    def test_names_derive_from_the_module_serial(self):
+        derive = self.identity.derive_short
+        self.assertEqual(derive("1423425090328"), derive("1423425090328"))
+        self.assertNotEqual(derive("1423425090328"), derive("1423425090329"))
+        self.assertNotEqual(derive("1423425090328"), derive("1423425090328", salt=1))
+        code = derive("1423425090328")
+        self.assertEqual(len(code), 6)
+        self.assertTrue(set(code) <= set(self.identity.ALPHABET))
+        # Uniform over the label alphabet (no modulo bias): every character turns up.
+        seen = {}
+        for i in range(3000):
+            for ch in derive(f"serial-{i}"):
+                seen[ch] = seen.get(ch, 0) + 1
+        self.assertEqual(set(seen), set(self.identity.ALPHABET))
+        expected = 3000 * 6 / len(self.identity.ALPHABET)
+        self.assertTrue(all(abs(n - expected) < expected * 0.2 for n in seen.values()), seen)
+
+    def test_a_reflashed_module_gets_its_name_back(self):
+        with mock.patch.object(self.identity, "module_serial", return_value="1423425090328"):
+            a = self.identity.ensure()
+            shutil.rmtree(self.sb.paths.IDENTITY)
+            b = self.identity.ensure()
+        self.assertEqual((a["name"], a["hostname"]), (b["name"], b["hostname"]))
+        self.assertEqual(a["hostname"], "atlas-" + a["short"].lower())
+        self.assertEqual(a["name"], "Atlas-" + a["short"])
+        self.assertEqual(len(a["short"]), 6)
+        self.assertNotEqual(a["tls_spki_sha256"], b["tls_spki_sha256"])   # secrets are never derived
+
+    def test_no_serial_falls_back_to_a_random_code(self):
+        with mock.patch.object(self.identity, "module_serial", return_value=None):
+            a = self.identity.ensure()
+            shutil.rmtree(self.sb.paths.IDENTITY)
+            b = self.identity.ensure()
+        self.assertNotEqual(a["short"], b["short"])
+
+    def test_legacy_atlas_unit_moves_to_its_own_name_and_keeps_its_key(self):
+        from cryptography import x509
+        d = self.sb.paths.IDENTITY
+        with mock.patch.object(self.identity, "module_serial", return_value="1423425090328"):
+            self.identity.ensure()
+            # What migrate.py wrote for a unit adopted before per-unit names.
+            legacy = json.load(open(os.path.join(d, "device.json")))
+            legacy.update(hostname="atlas", short="PJNT", name="Atlas-PJNT", aliases=[])
+            json.dump(legacy, open(os.path.join(d, "device.json"), "w"))
+            moved = self.identity.ensure()
+            again = self.identity.ensure()
+        self.assertEqual(moved["hostname"], "atlas-pjnt")
+        self.assertEqual(moved["aliases"], ["atlas"])
+        self.assertEqual(moved["hostname_migrated_from"], "atlas")
+        self.assertEqual(moved["tls_spki_sha256"], legacy["tls_spki_sha256"])
+        self.assertEqual(moved["device_id"], legacy["device_id"])
+        self.assertEqual(again, moved)                              # idempotent
+        cert = x509.load_pem_x509_certificate(open(os.path.join(d, "tls", "cert.pem"), "rb").read())
+        names = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value.get_values_for_type(
+            x509.DNSName)
+        self.assertIn("atlas-pjnt.local", names)
+        self.assertIn("atlas.local", names)
+
+    def test_adopting_a_legacy_unit_names_it_and_keeps_the_alias(self):
+        with mock.patch.object(self.identity, "module_serial", return_value="1423425090328"), \
+                mock.patch.object(self.identity, "apply_hostname") as applied:
+            dev = self.identity.ensure(adopt_hotspot_password="our-own-wifi-9", legacy_alias="atlas")
+        self.assertEqual(dev["aliases"], ["atlas"])
+        self.assertTrue(dev["hostname"].startswith("atlas-"))
+        applied.assert_called_once_with(dev["hostname"])
 
     def test_identity_is_checked_on_every_boot_before_anything_serves_it(self):
         unit = open(os.path.join(REPO, "system", "systemd", "atlas-firstboot.service")).read()
@@ -371,7 +440,7 @@ class DiscoveryFilesTests(unittest.TestCase):
         sb = Sandbox()
         self.addCleanup(sb.cleanup)
         from atlas_engine import identity, sysfiles
-        device = identity.ensure(hostname="atlas")
+        device = identity.ensure(legacy_alias="atlas")
         old = sb.paths.p("/etc/avahi/services/atlas-http.service")
         os.makedirs(os.path.dirname(old), exist_ok=True)
         open(old, "w").write("<service-group>old _http._tcp 5000</service-group>")
@@ -385,10 +454,34 @@ class DiscoveryFilesTests(unittest.TestCase):
         self.assertIn("<type>_atlas._tcp</type>", advert)
         self.assertIn(f"id={device['device_id']}", advert)
         self.assertIn(f"fp={device['tls_spki_sha256']}", advert)
+        self.assertIn(f"host={device['hostname']}", advert)
         self.assertNotIn("5000", advert)
         sysfiles.restore(backup)
         self.assertTrue(os.path.exists(old))
         self.assertFalse(os.path.exists(sb.paths.p("/etc/avahi/services/atlas.service")))
+
+    def test_boot_rerenders_the_advert_after_a_cloned_disk_gets_a_new_identity(self):
+        sb = Sandbox()
+        self.addCleanup(sb.cleanup)
+        from atlas_engine import identity, sysfiles
+        release = os.path.join(sb.paths.RELEASES, "1.0.0")
+        shutil.copytree(os.path.join(REPO, "system"), os.path.join(release, "system"))
+        os.makedirs(os.path.dirname(sb.paths.CURRENT), exist_ok=True)
+        os.symlink(release, sb.paths.CURRENT)
+        with mock.patch.object(identity, "module_serial", return_value="SERIAL-A"):
+            golden = identity.ensure()
+        with mock.patch("atlas_engine.firewall.check", return_value=mock.Mock(returncode=0)):
+            sysfiles.install(release, os.path.join(sb.root, "bk"), sb.runner)
+        advert = sb.paths.p("/etc/avahi/services/atlas.service")
+        self.assertIn(golden["device_id"], open(advert).read())
+        with mock.patch.object(identity, "module_serial", return_value="SERIAL-B"):
+            clone = identity.ensure()
+        self.assertEqual(sysfiles.rerender_installed(), [advert])
+        text = open(advert).read()
+        self.assertNotIn(golden["device_id"], text)
+        self.assertIn(f"id={clone['device_id']}", text)
+        self.assertIn(f"fp={clone['tls_spki_sha256']}", text)
+        self.assertEqual(sysfiles.rerender_installed(), [])          # unchanged: nothing written
 
 
 class NginxDefaultSiteTests(unittest.TestCase):

@@ -155,6 +155,45 @@ class MobileContractTests(unittest.TestCase):
             self.assertIn("reconnectRemoved", text)
             self.assertIn("isOlderAtlas", text)
 
+    def test_both_apps_read_the_hostname_wherever_atlas_publishes_it(self):
+        # /api/device/info "fqdn"/"hostname", DNS-SD TXT host=, beacon "host".
+        info = self.app.app.test_client().get("/api/device/info", base_url="https://192.168.1.20",
+                                              environ_base={"REMOTE_ADDR": "127.0.0.1"}).get_json()
+        self.assertIn("hostname", info)
+        self.assertTrue(info["fqdn"].endswith(".local"))
+        advert = open(os.path.join(REPO, "system", "avahi", "atlas.service")).read()
+        self.assertIn("<txt-record>host=@ATLAS_HOSTNAME@</txt-record>", advert)
+        beacon = open(os.path.join(REPO, "lan_beacon.py")).read()
+        self.assertIn('"host": device.get("fqdn")', beacon)
+        kt = "\n".join(self.android.values())
+        sw = "\n".join(self.ios.values())
+        for text, txt_read in ((kt, 'attrs["host"]'), (sw, 'txt["host"]')):
+            self.assertIn('"fqdn"', text)
+            self.assertIn(txt_read, text)
+            self.assertIn('"host"', text)                    # the beacon field
+            self.assertIn("rememberHostname", text)
+
+    def test_both_apps_show_the_address_after_pairing_and_when_atlas_is_lost(self):
+        kt = "\n".join(self.android.values())
+        sw = "\n".join(self.ios.values())
+        self.assertRegex(kt, r"data class Paired\(")
+        self.assertRegex(sw, r"case paired\(")
+        for text in (kt, sw):
+            self.assertIn("continueAfterPairing", text)
+            self.assertIn("chooseTyped", text)
+        self.assertIn("DeviceDetailsCard(", kt)
+        self.assertIn("DeviceDetailsView(", sw)
+
+    def test_the_web_ui_copy_button_reaches_both_apps(self):
+        page = open(os.path.join(REPO, "templates", "index.html"), encoding="utf-8").read()
+        self.assertIn("window.AtlasAndroid.copyText", page)
+        self.assertIn("window.AtlasIOS.copyText", page)
+        kt = "\n".join(self.android.values())
+        sw = "\n".join(self.ios.values())
+        self.assertRegex(kt, r"@android\.webkit\.JavascriptInterface\s+fun copyText\(")
+        self.assertIn("copyText: function(text)", sw)
+        self.assertIn('case "copyText"', sw)
+
 
 if __name__ == "__main__":
     unittest.main()

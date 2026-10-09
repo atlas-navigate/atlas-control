@@ -220,8 +220,22 @@ class PrivacyRouteTests(PairingTestBase):
         app._save_hotspot_cfg("Owner-Net", "owner-password-1")
         db.get_db().execute("INSERT INTO calendar_events (title, start_ts, created_at) VALUES ('x', 1, 1)")
         db.get_db().commit()
-        r = self.send("POST", "/api/factory-reset", {"confirm": "RESET"})
+        os.makedirs(atlas_paths.LOG_DIR, exist_ok=True)
+        os.makedirs(os.path.join(atlas_paths.CACHE_DIR, "geocode"), exist_ok=True)
+        open(os.path.join(atlas_paths.LOG_DIR, "update.log"), "w").write("joined Owner-Net\n")
+        open(os.path.join(atlas_paths.CACHE_DIR, "geocode", "near-home.json"), "w").write("{}")
+        from unittest import mock
+        helper_calls = []
+        real_run = app.atlas_helper.run
+        def helper(verb, timeout=60, **args):
+            helper_calls.append(verb)
+            return real_run(verb, timeout=timeout, **args)
+        with mock.patch.object(app.atlas_helper, "run", side_effect=helper):
+            r = self.send("POST", "/api/factory-reset", {"confirm": "RESET"})
         self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+        self.assertEqual(open(os.path.join(atlas_paths.LOG_DIR, "update.log")).read(), "")
+        self.assertEqual(os.listdir(atlas_paths.CACHE_DIR), [])
+        self.assertIn("logs.vacuum", helper_calls)
         self.assertEqual(self.send("GET", "/api/nodes").status_code, 401)      # every device pairs again
         self.assertFalse(os.path.exists(atlas_paths.BACKUP_DIR))
         self.assertFalse(os.path.exists(app._HOTSPOT_CFG_PATH))

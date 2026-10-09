@@ -443,6 +443,14 @@ class Engine:
 
     def _step_applying_system(self):
         target = self.target_dir()
+        # Identity first (e.g. a legacy atlas.local unit moves to its own name),
+        # so the templates below render the names it will answer to.
+        try:
+            from . import identity
+            if identity.load():
+                identity.ensure()
+        except Exception as exc:
+            self.log(f"identity check skipped: {type(exc).__name__}: {exc}")
         try:
             changed = sysfiles.install(target, self.sysbackup_dir(), self.runner)
         except sysfiles.SystemFilesError as exc:

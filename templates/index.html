@@ -7109,6 +7109,8 @@ function SettingsPage({ onSettingsSaved, themeMode, onThemeModeChange, hiddenPag
         <RestartSetupCard SL={SL}/>
       )}
 
+      <LocalDeviceAddressSection />
+
       {/* 2-col grid: Connection | Dashboard, Nodes | Alerts */}
       <div className="two-col" style={{marginBottom:16}}>
         <div className="card">
@@ -9549,7 +9551,7 @@ function WifiPage() {
       ssid: result?.lan?.ssid || sw.ssid,
       kind: result?.lan?.kind || 'wifi',
       ip:   result?.lan?.ip || result?.ip || '',
-      url:  urls[0] || 'https://atlas.local',
+      url:  urls[0] || window.location.origin,
       pending: !!sw.pending,
       limited: !!result?.limited,
       ok: sw.ok,
@@ -9593,7 +9595,7 @@ function WifiPage() {
     })
       .then(res => {
         const urls = res?.accessUrls || [];
-        const primaryUrl = urls[0] || 'https://atlas.local';
+        const primaryUrl = urls[0] || window.location.origin;
         setLastSwitch({
           ssid: res?.lan?.ssid || targetSSID,
           kind: res?.lan?.kind || 'wifi',
@@ -9683,7 +9685,7 @@ function WifiPage() {
   const currentKind = status?.current?.kind || 'wifi';
   const internetOnline = !!status?.connectivity?.online;
   const connectivityChecked = !!status?.connectivity?.checked;
-  const primaryCurrentUrl = (status?.accessUrls || [])[0] || 'https://atlas.local';
+  const primaryCurrentUrl = (status?.accessUrls || [])[0] || window.location.origin;
 
   const PassToggle = ({show, onToggle}) => (
     <button className="btn btn-sm" onClick={onToggle}
@@ -11174,6 +11176,134 @@ function PrivacySection() {
   );
 }
 
+// ═══════════════════════════════════════════════
+// Settings → Local Device Address
+// ═══════════════════════════════════════════════
+// Copy text in a browser or inside the Atlas apps' WebView (whose clipboard
+// API may be unavailable on a self-signed origin): native bridge first.
+function copyText(text) {
+  try {
+    if (window.AtlasAndroid && window.AtlasAndroid.copyText) { window.AtlasAndroid.copyText(text); return Promise.resolve(true); }
+    if (window.AtlasIOS && window.AtlasIOS.copyText) { window.AtlasIOS.copyText(text); return Promise.resolve(true); }
+  } catch (e) {}
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(text).then(() => true).catch(() => legacyCopy(text));
+  }
+  return Promise.resolve(legacyCopy(text));
+}
+function legacyCopy(text) {
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch (e) { return false; }
+}
+
+function LocalDeviceAddressSection() {
+  const [info, setInfo] = useState(null);
+  const [connected, setConnected] = useState(() => !!(window._atlasSocket && window._atlasSocket.connected));
+  const [copied, setCopied] = useState('');
+  const [showAll, setShowAll] = useState(false);
+  const load = () => api.get('/api/device/local').then(d => { if (d && d.fqdn) setInfo(d); }).catch(() => {});
+  useEffect(() => {
+    load();
+    const sock = window._atlasSocket;
+    const onNet = (d) => { if (d && d.fqdn) setInfo(d); };
+    const onClock = (c) => { if (c && c.state) setInfo(p => p ? { ...p, clock: c } : p); };
+    const onUp = () => { setConnected(true); load(); };
+    const onDown = () => setConnected(false);
+    if (sock) {
+      sock.on('device_network', onNet); sock.on('device_clock', onClock);
+      sock.on('connect', onUp); sock.on('disconnect', onDown);
+      setConnected(!!sock.connected);
+    }
+    // Slow safety net in case socket events are unavailable.
+    const iv = setInterval(load, 60000);
+    return () => {
+      clearInterval(iv);
+      if (sock) {
+        sock.off('device_network', onNet); sock.off('device_clock', onClock);
+        sock.off('connect', onUp); sock.off('disconnect', onDown);
+      }
+    };
+  }, []);
+  const SL = {fontSize:11,fontWeight:700,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:12};
+  const label = {fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.06em'};
+  const muted = {fontSize:12,color:'var(--text-muted)',lineHeight:1.45};
+  const value = {fontSize:14,fontWeight:600,wordBreak:'break-all'};
+  const row = {display:'flex',alignItems:'center',gap:10,padding:'9px 0',borderTop:'1px solid var(--border)'};
+  if (!info) return null;
+  const doCopy = (text) => copyText(text).then(ok => { setCopied(ok ? text : ''); setTimeout(() => setCopied(''), 1800); });
+  const kindLabel = { wifi: 'Wi-Fi', ethernet: 'Ethernet', hotspot: "Atlas's own Wi-Fi", usb: 'USB cable', other: 'Network' };
+  const primary = (info.ips || []).find(r => r.address === info.primary_ip);
+  const others = (info.ips || []).filter(r => r.address !== info.primary_ip);
+  const via = window.location.host;
+  return (
+    <div className="card" style={{marginBottom:16}} data-section="local-device-address">
+      <div style={SL}>Local Device Address</div>
+      <div style={{...row,borderTop:'none',paddingTop:0}}>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={label}>Device name</div>
+          <div style={value}>{info.name}</div>
+        </div>
+      </div>
+      <div style={row}>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={label}>Local hostname</div>
+          <div style={value} data-testid="local-hostname">{info.fqdn}</div>
+        </div>
+        <button className="btn btn-sm" onClick={() => doCopy(info.fqdn)} aria-label="Copy hostname">
+          {copied === info.fqdn ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      <div style={row}>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={label}>Current local IP address</div>
+          <div style={value}>{info.primary_ip || '—'}{primary ? <span style={{...muted,fontWeight:400}}> · {kindLabel[primary.kind] || primary.kind}</span> : null}</div>
+          {others.length > 0 && (showAll
+            ? others.map(r => <div key={r.iface + r.address} style={muted}>{r.address} · {kindLabel[r.kind] || r.kind}</div>)
+            : <button className="btn btn-sm" style={{marginTop:4,padding:'2px 8px'}} onClick={() => setShowAll(true)}>Show {others.length} more</button>)}
+        </div>
+        {info.primary_ip && (
+          <button className="btn btn-sm" onClick={() => doCopy(info.primary_ip)} aria-label="Copy IP address">
+            {copied === info.primary_ip ? 'Copied' : 'Copy'}
+          </button>
+        )}
+      </div>
+      <div style={row}>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={label}>Connection status</div>
+          <div style={{...value,display:'flex',alignItems:'center',gap:8}}>
+            <span style={{width:9,height:9,borderRadius:'50%',background: connected ? 'var(--accent-green)' : 'var(--accent-red)',display:'inline-block'}}/>
+            {connected ? 'Connected' : 'Disconnected'}
+          </div>
+          <div style={muted}>This screen is connected through {via}.</div>
+        </div>
+      </div>
+      <div style={{...muted,marginTop:10}}>
+        Any phone, tablet or computer on the same Wi-Fi can open Atlas at <b>https://{info.fqdn}</b> — no need
+        to remember the IP address, which your router may change. Most computers and iPhones understand .local names;
+        some Android browsers don't, so use the IP address there (the Atlas app finds Atlas automatically).
+      </div>
+      {info.conflict && (
+        <div style={{...muted,marginTop:8,color:'var(--accent-yellow, #d97706)'}}>
+          Another device on this network is using {info.hostname}.local, so Atlas is answering at {info.fqdn} for now.
+          It takes its own name back automatically once the other device leaves.
+        </div>
+      )}
+      {(info.aliases || []).filter(a => a.active).map(a => (
+        <div key={a.fqdn} style={{...muted,marginTop:8}}>Also answers to {a.fqdn} (the old shared address) while no other Atlas uses it.</div>
+      ))}
+      {info.clock && info.clock.managed && !info.clock.verified && (
+        <div style={{...muted,marginTop:8}}>Clock: {info.clock.label}.</div>
+      )}
+    </div>
+  );
+}
+
 function ConnectedDevicesSection() {
   const [clients, setClients] = useState(null);
   const [confirm, setConfirm] = useState(null);
@@ -11388,6 +11518,14 @@ function App() {
         setSocketConnected(true);
         // Announce which rooms this client wants on (re)connect
         socket.emit('join_rooms', { rooms: pageRooms[page] || [] });
+        // After a power loss with no internet, Atlas's clock is only a lower
+        // bound: offer this device's clock (Atlas uses it only to move forward,
+        // and never over internet or GPS time).
+        api.get('/api/device/local').then(d => {
+          if (d && d.clock && d.clock.managed && !d.clock.verified && d.clock.state !== 'gps') {
+            api.post('/api/device/clock-hint', { epoch_ms: Date.now() }).catch(() => {});
+          }
+        }).catch(() => {});
       });
 
       socket.on('disconnect', () => {

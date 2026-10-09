@@ -304,11 +304,11 @@ class _I2CSerial:
             return 0
 
     def read(self, size=1):
-        deadline = time.time() + (self.timeout or 0.0)
+        deadline = time.monotonic() + (self.timeout or 0.0)
         while not self._buf:                      # wait for first byte(s)
             if self._poll():
                 break
-            if self.timeout is not None and time.time() >= deadline:
+            if self.timeout is not None and time.monotonic() >= deadline:
                 return b""
             time.sleep(0.02)
         self._poll()                              # opportunistically top up
@@ -348,9 +348,9 @@ def _i2c_has_gps(bus, addr=_DDC_DEFAULT_ADDR, budget=2.0):
     except OSError:
         return False
     try:
-        deadline = time.time() + budget
+        deadline = time.monotonic() + budget
         buf = bytearray()
-        while time.time() < deadline and len(buf) < 256:
+        while time.monotonic() < deadline and len(buf) < 256:
             chunk = s.read(256)
             if chunk:
                 buf.extend(chunk)
@@ -389,8 +389,8 @@ def _sniff_nmea(port, baud, budget=2.5, read_timeout=0.4):
     """
     try:
         with serial.Serial(port, baud, timeout=read_timeout) as s:
-            deadline = time.time() + budget
-            while time.time() < deadline:
+            deadline = time.monotonic() + budget
+            while time.monotonic() < deadline:
                 raw = s.readline()
                 if not raw:
                     continue
@@ -436,6 +436,54 @@ def _scan_gps_port(exclude=None, baud=9600, timeout=2):
 
 
 # ── Haversine ───────────────────────────────────────────────────────────────
+
+# Earliest UTC a receiver may report (2025-01-01). An older date means a GPS
+# week-number rollover bug or an unset receiver clock, never the real time.
+_GNSS_TIME_FLOOR = 1735689600
+
+
+def ubx_pvt_time(payload: bytes, gnss_ok: bool):
+    """(utc_epoch, accuracy_s) from a UBX-NAV-PVT payload, or None unless the
+    receiver marks the time valid, fully resolved and confirmed (or, on
+    receivers without the confirmation flags, backed by a GNSS fix)."""
+    import calendar
+    if len(payload) < 23:
+        return None
+    year = struct.unpack_from("<H", payload, 4)[0]
+    month, day, hour, minute, sec, valid = payload[6:12]
+    t_acc_ns = struct.unpack_from("<I", payload, 12)[0]
+    nano = struct.unpack_from("<i", payload, 16)[0]
+    flags2 = payload[22]
+    if valid & 0x07 != 0x07:                      # validDate, validTime, fullyResolved
+        return None
+    if flags2 & 0x20:                             # confirmedAvai: require confirmed date+time
+        if flags2 & 0xC0 != 0xC0:
+            return None
+    elif not gnss_ok:
+        return None
+    if t_acc_ns > 1_000_000_000:                  # worse than 1 s: not worth a clock step
+        return None
+    try:
+        epoch = calendar.timegm((year, month, day, hour, minute, min(sec, 59), 0, 0, 0)) + nano * 1e-9
+    except (ValueError, OverflowError):
+        return None
+    if epoch < _GNSS_TIME_FLOOR:
+        return None
+    return epoch, t_acc_ns * 1e-9
+
+
+def rmc_time(msg):
+    """UTC epoch from an active (status A) NMEA RMC sentence, or None."""
+    import datetime as _dt
+    try:
+        d, t = msg.datestamp, msg.timestamp
+        if not d or not t:
+            return None
+        epoch = _dt.datetime.combine(d, t.replace(tzinfo=None), tzinfo=_dt.timezone.utc).timestamp()
+    except (AttributeError, TypeError, ValueError):
+        return None
+    return epoch if epoch >= _GNSS_TIME_FLOOR else None
+
 
 def _hav_m(lat1, lon1, lat2, lon2):
     R = 6_371_000.0
@@ -574,6 +622,9 @@ class GpsNode:
         # Self-DR state
         self._self_dr_active = False
         self._self_dr_start  = 0.0
+        self._current_fix_mono = 0.0
+        self._last_gnss_fix_mono = 0.0
+        self._gnss_time = None   # (utc_epoch, monotonic_when_received, kind, accuracy_s)
 
         # Kalman filter
         self._kf = _Kalman2D()
@@ -615,12 +666,33 @@ class GpsNode:
         """Register callback for every position fix: cb(fix_dict)."""
         self._on_fix_cb = cb
 
+    def _fix_mono(self, fix) -> float:
+        """Monotonic time a fix was produced (for elapsed-time decisions)."""
+        if fix is self.current_fix:
+            return self._current_fix_mono
+        if fix is self._last_gnss_fix:
+            return self._last_gnss_fix_mono
+        return time.monotonic()
+
+    def gnss_time(self, max_age_s: float = 5.0):
+        """(utc_epoch_now, kind, accuracy_s) from the receiver's last valid,
+        confirmed time, advanced by the time since it arrived; None when there
+        is no recent one. Lets Atlas set its clock offline (local_device.py)."""
+        t = self._gnss_time
+        if not t:
+            return None
+        epoch, mono, kind, acc = t
+        age = time.monotonic() - mono
+        if age < 0 or age > max_age_s:
+            return None
+        return epoch + age, kind, acc
+
     def _fix_age(self) -> Optional[float]:
         """Seconds since the last positional sentence, or None if we have
         never had one this process."""
         if not self._last_fix_rx_ts:
             return None
-        return time.time() - self._last_fix_rx_ts
+        return time.monotonic() - self._last_fix_rx_ts
 
     def fix_is_live(self) -> bool:
         """True while the receiver is still delivering positions."""
@@ -744,11 +816,11 @@ class GpsNode:
                 with self._lock:
                     ref = self.current_fix or self._last_gnss_fix
                 if ref and FixType.has_position(ref.get("fix_type", 0)):
-                    elapsed = time.time() - ref.get("timestamp", 0)
+                    elapsed = time.monotonic() - self._fix_mono(ref)
                     if elapsed < _SELF_DR_TIMEOUT:
                         logger.info("GPS serial lost — activating self dead reckoning")
                         self._self_dr_active = True
-                        self._self_dr_start  = time.time()
+                        self._self_dr_start  = time.monotonic()
 
                 if self.running:
                     time.sleep(min(backoff, 60.0))
@@ -951,6 +1023,7 @@ class GpsNode:
 
         fix_type = FixType._FROM_UBX.get(fix_raw, FixType.NONE)
         gnss_ok  = bool(flags & 0x01)  # gnssFixOK flag
+        self._note_ubx_time(payload, gnss_ok)
 
         # If module says DR-only, accept it even without gnssFixOK
         if not gnss_ok and fix_type not in (FixType.MODULE_DR, FixType.GNSS_DR):
@@ -966,6 +1039,15 @@ class GpsNode:
             "sats":     num_sv,
             "fix_type": fix_type,
         }
+
+    def _note_ubx_time(self, payload: bytes, gnss_ok: bool):
+        """UTC from NAV-PVT bytes 4-19, kept only when the receiver vouches for
+        it: validDate+validTime+fullyResolved, and either the confirmed
+        date/time flags (when the receiver reports them) or a GNSS fix — a
+        receiver's own RTC or a week-rollover bug must not set Atlas's clock."""
+        t = ubx_pvt_time(payload, gnss_ok)
+        if t is not None:
+            self._gnss_time = (t[0], time.monotonic(), "ubx", t[1])
 
     def _decode_nav_att(self, payload: bytes):
         """UBX-NAV-ATT (0x01 0x05) — vehicle heading from internal IMU."""
@@ -1014,6 +1096,9 @@ class GpsNode:
 
         elif isinstance(msg, pynmea2.RMC):
             if msg.status == "A":
+                t = rmc_time(msg)
+                if t is not None:
+                    self._gnss_time = (t, time.monotonic(), "nmea", 1.0)
                 r["lat"] = float(msg.latitude)
                 r["lon"] = float(msg.longitude)
                 if msg.spd_over_grnd is not None:
@@ -1044,17 +1129,18 @@ class GpsNode:
     # ── Fix processing ──────────────────────────────────────────────────────
 
     def _handle_fix(self, lat, lon, alt, speed, heading, sats, fix_type, accuracy):
-        now   = time.time()
+        now   = time.time()          # the fix's timestamp (stored, shown)
+        mono  = time.monotonic()     # every interval below: immune to clock steps
         is_dr = FixType.is_dr(fix_type)
 
         # Liveness is "a position arrived", not "the position changed" — record
         # it before the DR rate-limit and the stationary dedup below, both of
         # which return early. Without this a parked receiver holding a perfect
         # lock would age out and report No Fix.
-        self._last_fix_rx_ts = now
+        self._last_fix_rx_ts = mono
 
         # Rate-limit DR emits
-        if is_dr and (now - self._last_dr_emit) < _MODULE_DR_INTERVAL:
+        if is_dr and (mono - self._last_dr_emit) < _MODULE_DR_INTERVAL:
             return
 
         # Deduplicate stationary fixes
@@ -1078,7 +1164,7 @@ class GpsNode:
         # (Calling _maybe_broadcast with raw lat/lon before smoothing caused the
         # device to store raw coords, which then oscillated against smooth coords
         # whenever a packet was received and _process_node re-read device state.)
-        self._maybe_broadcast(smooth_lat, smooth_lon, alt, now)
+        self._maybe_broadcast(smooth_lat, smooth_lon, alt, mono)
 
         # Use vehicle heading from UBX if motion heading unavailable
         if heading is None and self._vehicle_heading is not None:
@@ -1101,12 +1187,14 @@ class GpsNode:
 
         with self._lock:
             self.current_fix = fix
+            self._current_fix_mono = mono
             if FixType.is_gnss(fix_type):
                 self._last_gnss_fix = fix
+                self._last_gnss_fix_mono = mono
                 self._self_dr_active = False  # good GNSS → stop self-DR
 
         if is_dr:
-            self._last_dr_emit = now
+            self._last_dr_emit = mono
 
         self._store_fix(fix)
         self._emit_fix(fix)
@@ -1157,7 +1245,8 @@ class GpsNode:
                 continue
 
             now = time.time()
-            elapsed_dr = now - self._self_dr_start
+            mono = time.monotonic()
+            elapsed_dr = mono - self._self_dr_start
 
             if elapsed_dr > _SELF_DR_TIMEOUT:
                 logger.warning("Self-DR timeout (5 min) — position lost")
@@ -1177,7 +1266,7 @@ class GpsNode:
             if not ref:
                 continue
 
-            elapsed_fix = now - ref.get("timestamp", now)
+            elapsed_fix = mono - self._fix_mono(ref)
             speed   = ref.get("speed")   or 0.0
             heading = ref.get("heading") or 0.0
             ref_lat = ref["latitude"]
@@ -1220,11 +1309,12 @@ class GpsNode:
 
             with self._lock:
                 self.current_fix = fix
+                self._current_fix_mono = mono
             # Self-DR is a position we are still actively producing, so it
             # keeps the fix live the same way a real sentence would.
-            self._last_fix_rx_ts = now
+            self._last_fix_rx_ts = mono
 
-            self._maybe_broadcast(new_lat, new_lon, fix.get("altitude"), now)
+            self._maybe_broadcast(new_lat, new_lon, fix.get("altitude"), mono)
             self._store_fix(fix)
             self._emit_fix(fix)
             if self._on_fix_cb:
@@ -1288,6 +1378,10 @@ class GpsNode:
         # _emit_fix; only the SQLite persistence is rate-limited.
         now_ts = fix["timestamp"]
         elapsed = now_ts - self._last_db_write_ts
+        if elapsed < 0:
+            # The clock was stepped back (a correction after power loss):
+            # restart the interval instead of writing nothing until it catches up.
+            elapsed = float("inf")
         if elapsed < self._db_min_interval:
             return
         lat = fix["latitude"]
@@ -1337,6 +1431,8 @@ class GpsNode:
         now = fix["timestamp"]
         key = (round(fix["latitude"], 6), round(fix["longitude"], 6), fix.get("fix_type"))
         since = now - self._last_emit_ts
+        if since < 0:
+            since = float("inf")     # clock stepped back: don't freeze the map dot
         if since < 1.0 / self.EMIT_MAX_HZ or (key == self._last_emit_key and since < self.EMIT_HEARTBEAT_S):
             return
         self._last_emit_ts, self._last_emit_key = now, key

@@ -21,6 +21,15 @@ label must keep working for the life of the device. `ensure()` runs on every
 boot (atlas-firstboot.service): if the module serial number no longer matches
 (the storage, or a whole disk image, was cloned into another unit) everything
 is regenerated, so no two units ever share a setup code, key or password.
+
+Names: a unit's code (Atlas-7KQ3PM, atlas-7kq3pm.local, the hotspot's name)
+is derived one-way from the module serial (derive_short), so a reflash of the
+same module gets the same name back and a cloned disk gets a different one;
+the serial itself cannot be read back from it. Units provisioned before that
+keep their random 4-character code. Units from before per-unit names answered
+to atlas.local: they move to atlas-<code>.local and keep "atlas" as an alias
+(device.json "aliases"), which the app publishes only while no other device
+on the network claims it.
 """
 import base64
 import datetime
@@ -63,6 +72,33 @@ def _grouped(n_groups=3, size=4):
     return "-".join(_code(size) for _ in range(n_groups))
 
 
+NAME_LEN = 6
+_NAME_KEY = b"atlas-device-name-v1"
+
+
+def derive_short(serial, salt=0, n=NAME_LEN):
+    """n characters of ALPHABET, derived one-way from the module serial.
+
+    HMAC-SHA256 bytes are rejection-sampled (b < 232 = 8 * 29) so every
+    character is uniform. `salt` lets the factory move a unit whose code
+    collided with another unit's in its registry. The output (29^6 ≈ 5.9e8
+    values) is far smaller than the serial space, so it does not reveal the
+    serial."""
+    out, counter = [], 0
+    while len(out) < n:
+        digest = hmac.new(_NAME_KEY, f"{int(salt)}:{counter}:{serial}".encode(), hashlib.sha256).digest()
+        for b in digest:
+            if b < 232:
+                out.append(ALPHABET[b % len(ALPHABET)])
+                if len(out) == n:
+                    break
+        counter += 1
+    return "".join(out)
+
+
+HOSTNAME_RE = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+
+
 SERIAL_SOURCES = ("/sys/firmware/devicetree/base/serial-number",   # the Jetson module
                   "/sys/class/nvme/nvme0/serial")                  # fallback: the NVMe drive
 
@@ -70,7 +106,7 @@ SERIAL_SOURCES = ("/sys/firmware/devicetree/base/serial-number",   # the Jetson 
 def module_serial():
     for source in SERIAL_SOURCES:
         try:
-            with open(source, "rb") as f:
+            with open(paths.p(source), "rb") as f:
                 serial = f.read().replace(b"\x00", b"").decode(errors="replace").strip()
         except OSError:
             continue
@@ -98,18 +134,24 @@ def hash_setup_code(code, salt=None):
             "salt": base64.b64encode(salt).decode(), "hash": base64.b64encode(digest).decode()}
 
 
-def _make_tls(name, hostname):
+def _make_tls(name, hostname, key=None, aliases=()):
+    """A self-signed certificate for this unit; a new key unless one is given
+    (re-issuing with the same key keeps every app's pin valid)."""
     from cryptography import x509
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import ec
     from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
     import ipaddress
 
-    key = ec.generate_private_key(ec.SECP256R1())
+    key = key or ec.generate_private_key(ec.SECP256R1())
     subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, name),
                          x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Atlas")])
+    dns = []
+    for n in [hostname, *aliases, "atlas"]:
+        if f"{n}.local" not in dns:
+            dns.append(f"{n}.local")
     san = x509.SubjectAlternativeName([
-        x509.DNSName(f"{hostname}.local"), x509.DNSName("atlas.local"), x509.DNSName("localhost"),
+        *[x509.DNSName(d) for d in dns], x509.DNSName("localhost"),
         x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
         x509.IPAddress(ipaddress.ip_address("10.42.0.1")),
     ])
@@ -138,13 +180,15 @@ def load():
     return fsutil.read_json(_d("device.json"))
 
 
-def create(hotspot_password=None, hostname=None, reason="new"):
+def create(hotspot_password=None, legacy_alias=None, reason="new", salt=0):
     """Generate a complete identity. Returns device.json contents."""
-    short = _code(4)
+    serial = module_serial()
+    short = derive_short(serial, salt) if serial else _code(NAME_LEN)
     name = f"Atlas-{short}"
-    host = hostname or f"atlas-{short.lower()}"
+    host = f"atlas-{short.lower()}"
+    aliases = [legacy_alias] if legacy_alias and legacy_alias != host else []
     device_id = secrets.token_hex(16)
-    key_pem, cert_pem, pin = _make_tls(name, host)
+    key_pem, cert_pem, pin = _make_tls(name, host, aliases=aliases)
     os.makedirs(_d("tls"), mode=0o755, exist_ok=True)
     os.chmod(paths.IDENTITY, 0o755)
 
@@ -167,14 +211,15 @@ def create(hotspot_password=None, hostname=None, reason="new"):
         "device_id": device_id,
         "name": name,
         "short": short,
+        "name_salt": int(salt),
         "hostname": host,
-        "serial": module_serial(),
+        "aliases": aliases,
+        "serial": serial,
         "tls_spki_sha256": pin,
         "created_reason": reason,
     }
     fsutil.atomic_write_json(_d("device.json"), device, mode=0o644)
-    if not hostname:
-        apply_hostname(host)
+    apply_hostname(host)
     return device
 
 
@@ -197,19 +242,69 @@ def apply_hostname(host):
     return True
 
 
-def ensure(adopt_hotspot_password=None, hostname=None):
-    """Create the identity if missing or cloned; otherwise leave it alone."""
+def ensure(adopt_hotspot_password=None, legacy_alias=None):
+    """Create the identity if missing or cloned; move a legacy atlas.local unit
+    to its own name; make the OS hostname match. Otherwise leave it alone."""
     device = load()
     if device:
         serial = module_serial()
         if serial and device.get("serial") and serial != device["serial"]:
             device = create(reason="cloned-storage")
             forget_hotspot_profiles()
+            return device
+        device = migrate_legacy_hostname(device)
+        reconcile_hostname(device)
         return device
     pw = adopt_hotspot_password
     if pw in DEFAULT_HOTSPOT_PASSWORDS:
         pw = None
-    return create(hotspot_password=pw, hostname=hostname, reason="adopted" if hostname else "new")
+    return create(hotspot_password=pw, legacy_alias=legacy_alias,
+                  reason="adopted" if legacy_alias else "new")
+
+
+def migrate_legacy_hostname(device):
+    """A unit adopted from before per-unit names is called "atlas" (atlas.local,
+    shared by every such unit). Give it its own name from its code — the one
+    already in its Wi-Fi name — and keep "atlas" as an alias. The TLS key, and
+    with it every paired app's pin, stays the same."""
+    import re
+    host = str(device.get("hostname") or "")
+    short = str(device.get("short") or "")
+    if re.fullmatch(r"atlas-" + HOSTNAME_RE, host) or not re.fullmatch(r"[A-Za-z0-9]{3,12}", short):
+        return device
+    new_host = f"atlas-{short.lower()}"
+    aliases = sorted({*(device.get("aliases") or []), host} - {"", new_host})
+    device = dict(device, hostname=new_host, aliases=aliases, hostname_migrated_from=host)
+    try:
+        reissue_cert(device)
+    except Exception:
+        pass   # the old certificate still serves; browsers warn either way (self-signed)
+    fsutil.atomic_write_json(_d("device.json"), device, mode=0o644)
+    return device
+
+
+def reissue_cert(device):
+    """New certificate for the current names, same key (same pin)."""
+    from cryptography.hazmat.primitives import serialization
+    with open(_d("tls", "key.pem"), "rb") as f:
+        key = serialization.load_pem_private_key(f.read(), password=None)
+    _key_pem, cert_pem, pin = _make_tls(device["name"], device["hostname"], key=key,
+                                        aliases=device.get("aliases") or ())
+    if device.get("tls_spki_sha256") and pin != device["tls_spki_sha256"]:
+        raise RuntimeError("re-issued certificate does not match the pinned key")
+    fsutil.atomic_write_bytes(_d("tls", "cert.pem"), cert_pem, mode=0o644)
+    if paths.ROOT == "/" and os.geteuid() == 0:
+        import subprocess
+        subprocess.run(["systemctl", "try-reload-or-restart", "nginx"], capture_output=True)
+
+
+def reconcile_hostname(device):
+    """The OS hostname follows device.json (e.g. after a migration, or if
+    something else renamed the system)."""
+    import socket
+    host = device.get("hostname")
+    if host and paths.ROOT == "/" and socket.gethostname() != host:
+        apply_hostname(host)
 
 
 def _write_hotspot(hotspot):

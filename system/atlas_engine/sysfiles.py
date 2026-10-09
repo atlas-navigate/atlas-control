@@ -39,6 +39,7 @@ def template_vars():
         "ATLAS_DEVICE_NAME": _xml_safe(device.get("name") or "Atlas"),
         "ATLAS_DEVICE_ID": _xml_safe(device.get("device_id") or "unprovisioned"),
         "ATLAS_TLS_PIN": _xml_safe(device.get("tls_spki_sha256") or ""),
+        "ATLAS_HOSTNAME": _xml_safe(device.get("hostname") or "atlas"),
         "ATLAS_STATE_DIR": paths.APP_STATE,
         "ATLAS_SERVICE_USER": paths.SERVICE_USER,
         "ATLAS_TLS_CERT": "/etc/atlas/identity/tls/cert.pem",
@@ -202,6 +203,43 @@ def restore(backup_dir):
                 os.unlink(dst)
             except FileNotFoundError:
                 pass
+
+
+def rerender_installed(kinds=("avahi",), runner=None):
+    """Re-render the installed release's templated files of these kinds from
+    the current identity (atlas-identity ensure, at boot). Skipped while an
+    update is in progress — the engine renders them itself then. Returns the
+    destinations rewritten."""
+    journal = fsutil.read_json(paths.JOURNAL, {}) or {}
+    if journal.get("state") not in (None, "IDLE"):
+        return []
+    current = os.path.realpath(paths.CURRENT)
+    try:
+        spec = load_spec(current)
+    except (OSError, ValueError, SystemFilesError):
+        return []
+    written = []
+    for entry in spec.get("files", []):
+        if entry.get("kind") not in kinds or not entry.get("template"):
+            continue
+        dst = paths.p(entry["dst"])
+        try:
+            new = render(current, entry)
+            with open(dst, "rb") as f:
+                if f.read() == new:
+                    continue
+        except FileNotFoundError:
+            pass
+        except OSError:
+            continue
+        fsutil.atomic_write_bytes(dst, new, mode=int(entry.get("mode", "0644"), 8))
+        written.append(dst)
+    if written and paths.ROOT == "/":
+        import subprocess
+        for kind in kinds:
+            for cmd in KINDS_RELOAD.get(kind, []):
+                subprocess.run(cmd, capture_output=True, timeout=60)
+    return written
 
 
 def reload_changed(kinds, spec_or_none, runner):

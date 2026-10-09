@@ -8,4 +8,4 @@ Installed to /usr/local/lib/atlas/engine/<ENGINE_VERSION>/ and run with
 Nothing here may import code from a directory the Atlas service account can
 write to.
 """
-ENGINE_VERSION = 2
+ENGINE_VERSION = 3

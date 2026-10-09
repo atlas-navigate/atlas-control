@@ -1,0 +1,26 @@
+# Managed by the Atlas updater. Gives the wall clock a sane starting point
+# before anything that depends on it starts.
+#
+# The PMIC RTC has no backup cell on most units: after being unplugged it
+# counts from 1970, and its driver registers ~15 s into boot, when the kernel
+# sets the clock from it — after systemd-timesyncd restored its saved clock.
+# This waits (bounded) for that step, floors the clock at the release's build
+# time, and lets systemd-timesyncd (ordered after us) restore its own saved
+# clock on top. avahi and the app start after this local step, never after
+# NTP: Atlas is discoverable and usable fully offline.
+[Unit]
+Description=Atlas wall clock after power loss
+DefaultDependencies=no
+After=local-fs.target
+Before=systemd-timesyncd.service time-set.target sysinit.target shutdown.target
+Before=avahi-daemon.service atlas-firstboot.service atlas-control.service
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/lib/atlas/bin/atlas-engine clock boot
+TimeoutStartSec=40
+
+[Install]
+WantedBy=sysinit.target

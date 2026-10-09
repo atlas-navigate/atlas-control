@@ -269,10 +269,14 @@ def step_identity(state, args):
         cfg = fsutil.read_json(os.path.join(APP, "hotspot_config.json"), {}) or \
             fsutil.read_json(os.path.join(APP, "data", "hotspot_config.json"), {}) or {}
         adopt = cfg.get("password")
-    device = identity.ensure(adopt_hotspot_password=adopt, hostname="atlas")
+    # A unit from before per-unit names answered to atlas.local: it gets its
+    # own name now and keeps "atlas" as an alias, published while no other
+    # device on the network claims it (local_device.AvahiAlias).
+    device = identity.ensure(adopt_hotspot_password=adopt, legacy_alias="atlas")
     hotspot = fsutil.read_json(os.path.join(paths.IDENTITY, "hotspot.json"), {})
     rotated = hotspot.get("password") != adopt
-    say(f"identity {device['name']} (TLS pin {device['tls_spki_sha256'][:12]}…)")
+    say(f"identity {device['name']} ({device['hostname']}.local, also atlas.local while unclaimed; "
+        f"TLS pin {device['tls_spki_sha256'][:12]}…)")
     mark(state, "identity", hotspot_rotated=rotated)
 
 

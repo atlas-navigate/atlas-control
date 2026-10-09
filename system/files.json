@@ -48,6 +48,18 @@
       "kind": "systemd"
     },
     {
+      "src": "systemd/atlas-clock.service",
+      "dst": "/etc/systemd/system/atlas-clock.service",
+      "mode": "0644",
+      "kind": "systemd"
+    },
+    {
+      "src": "systemd/atlas-clock-rtc.service",
+      "dst": "/etc/systemd/system/atlas-clock-rtc.service",
+      "mode": "0644",
+      "kind": "systemd"
+    },
+    {
       "src": "nginx/atlas-proxy.conf",
       "dst": "/etc/nginx/snippets/atlas-proxy.conf",
       "mode": "0644",
@@ -124,6 +136,7 @@
     }
   ],
   "enable": [
+    "atlas-clock.service",
     "atlas-helper.socket",
     "atlas-update-recover.service",
     "atlas-firstboot.service",

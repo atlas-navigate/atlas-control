@@ -46,6 +46,14 @@ RUN = p("run/atlas-update")
 STATUS = p("run/atlas-update/status.json")
 LOCK = p("run/atlas-update/lock")
 
+# The wall clock (clock.py): the RTCs, timesyncd's saved clock and sync flag,
+# and what Atlas knows about the clock's basis.
+RTC_CLASS = p("sys/class/rtc")
+TIMESYNC_CLOCK = p("var/lib/systemd/timesync/clock")
+TIMESYNC_SYNCED = p("run/systemd/timesync/synchronized")
+CLOCK_RUN = p("run/atlas-clock")
+CLOCK_STATE = p("run/atlas-clock/state.json")
+
 # The app's state directory; downloads are handed over from here.
 APP_STATE = os.path.abspath(os.environ.get("ATLAS_STATE_DIR") or p("atlas_data/atlas-control"))
 HANDOFF = os.path.join(APP_STATE, "updates", "ready")

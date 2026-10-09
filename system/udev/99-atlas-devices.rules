@@ -8,3 +8,7 @@ SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="4001", SYMLINK+="m
 
 # u-blox NEO-M8U / M9N GPS over USB.
 SUBSYSTEM=="tty", ATTRS{idVendor}=="1546", ATTRS{idProduct}=="01a8", SYMLINK+="gps", GROUP="dialout", MODE="0660"
+
+# The RTC (see atlas-clock.service): when it registers, make sure its 1970
+# reading did not move the clock back after boot.
+ACTION=="add", SUBSYSTEM=="rtc", KERNEL=="rtc0", TAG+="systemd", ENV{SYSTEMD_WANTS}+="atlas-clock-rtc.service"

@@ -1,0 +1,13 @@
+# Managed by the Atlas updater. Started by udev when an RTC registers. If it
+# registers after atlas-clock.service stopped waiting, the kernel's hctosys
+# step can move the clock back to the RTC's 1970; this moves it forward again
+# and restarts avahi, whose timers follow the wall clock.
+[Unit]
+Description=Atlas wall clock after a late RTC
+DefaultDependencies=no
+After=local-fs.target atlas-clock.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/atlas/bin/atlas-engine clock rtc
+TimeoutStartSec=30

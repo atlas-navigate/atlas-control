@@ -23,10 +23,14 @@ def engine_main(argv):
         return firewall.down()
     elif cmd == "version":
         result = str(ENGINE_VERSION)
+    elif cmd == "clock":
+        from . import clock
+        return clock.main(argv[1:])
     elif cmd == "verify" and len(argv) == 2:
         return verify_release_dir(argv[1])
     else:
-        print("usage: atlas-engine run|recover|prune|version|verify RELEASE_DIR", file=sys.stderr)
+        print("usage: atlas-engine run|recover|prune|version|verify RELEASE_DIR|clock boot|rtc|status",
+              file=sys.stderr)
         return 2
     print(result)
     return 0 if result not in ("failed", "recovery_failed") else 1
@@ -66,6 +70,11 @@ def identity_main(argv):
     cmd = argv[0] if argv else "show"
     if cmd == "ensure":
         device = identity.ensure()
+        # The advert carries the id, key pin and host name: after a cloned
+        # disk got a new identity, or a legacy unit its own name, it must not
+        # keep announcing the old ones until the next update.
+        from . import sysfiles
+        sysfiles.rerender_installed(kinds=("avahi",))
     elif cmd == "show":
         device = identity.load() or {}
     elif cmd == "label-json":

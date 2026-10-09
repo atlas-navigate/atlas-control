@@ -123,7 +123,8 @@ def lookup(token):
         "SELECT id, name, kind, created, last_seen FROM paired_clients WHERE token_hash=? AND revoked=0",
         (th,)).fetchone()
     client = dict(row, token_hash=th) if row else None
-    if client and (client["last_seen"] or 0) < time.time() - 300:
+    seen = (client["last_seen"] or 0) if client else 0
+    if client and (seen < time.time() - 300 or seen > time.time() + 300):
         conn = db.get_db()
         conn.execute("UPDATE paired_clients SET last_seen=? WHERE id=?", (int(time.time()), client["id"]))
         conn.commit()
@@ -290,9 +291,10 @@ def create_request(name, kind, client_nonce):
     server_nonce = secrets.token_hex(8)
     code = device_identity.match_code(server_nonce, str(client_nonce or "")[:64])
     conn = db.get_db()
-    conn.execute("DELETE FROM pair_requests WHERE created < ?", (int(time.time()) - 3600,))
-    pending = conn.execute("SELECT COUNT(*) FROM pair_requests WHERE status='pending' AND created > ?",
-                           (int(time.time()) - REQUEST_TTL,)).fetchone()[0]
+    now = int(time.time())
+    conn.execute("DELETE FROM pair_requests WHERE created < ? OR created > ?", (now - 3600, now + 3600))
+    pending = conn.execute("SELECT COUNT(*) FROM pair_requests WHERE status='pending' AND " + _LIVE,
+                           _live_args()).fetchone()[0]
     if pending >= 5:
         raise ValueError("Too many devices are waiting to be allowed. Try again in a few minutes.")
     conn.execute("INSERT INTO pair_requests (id, secret_hash, name, kind, server_nonce, match_code, created) "
@@ -304,18 +306,29 @@ def create_request(name, kind, client_nonce):
             "match_code": code, "expires_in": REQUEST_TTL}
 
 
+# A request is live for REQUEST_TTL seconds. One "created" in the future was
+# made before the clock was corrected backward (after power loss): treat it as
+# expired rather than approvable until the clock catches up.
+_LIVE = "created > ? AND created <= ?"
+
+
+def _live_args():
+    now = int(time.time())
+    return (now - REQUEST_TTL, now + 60)
+
+
 def pending_requests():
     rows = db.get_db().execute(
-        "SELECT id, name, kind, match_code, created FROM pair_requests WHERE status='pending' AND created > ?",
-        (int(time.time()) - REQUEST_TTL,)).fetchall()
+        "SELECT id, name, kind, match_code, created FROM pair_requests WHERE status='pending' AND " + _LIVE,
+        _live_args()).fetchall()
     return [dict(r) for r in rows]
 
 
 def decide(request_id, approve, by_client_id):
     conn = db.get_db()
     cur = conn.execute("UPDATE pair_requests SET status=?, decided_by=? WHERE id=? AND status='pending' "
-                       "AND created > ?", ("approved" if approve else "denied", by_client_id,
-                                           request_id, int(time.time()) - REQUEST_TTL))
+                       "AND " + _LIVE, ("approved" if approve else "denied", by_client_id, request_id)
+                       + _live_args())
     conn.commit()
     return cur.rowcount > 0
 
@@ -325,7 +338,8 @@ def poll_request(request_id, secret):
     row = db.get_db().execute("SELECT * FROM pair_requests WHERE id=?", (request_id,)).fetchone()
     if not row or not hmac.compare_digest(row["secret_hash"], _hash(str(secret or ""))):
         return {"status": "unknown"}
-    if row["status"] == "pending" and row["created"] <= int(time.time()) - REQUEST_TTL:
+    low, high = _live_args()
+    if row["status"] == "pending" and not (low < row["created"] <= high):
         return {"status": "expired"}
     if row["status"] != "approved":
         return {"status": row["status"]}

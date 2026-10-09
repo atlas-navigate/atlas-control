@@ -7022,17 +7022,36 @@ class AIManager:
         # suggested a QUINZHEE snow shelter in June.
         import datetime as _dt
         _now = _dt.datetime.now()
-        _season = _season_for(_now.month)
-        parts.append(
-            "=== CURRENT DATE ===\n"
-            f"{_now.strftime('%A, %B %d, %Y')} — season: {_season} (Northern Hemisphere).\n"
-            f"IMPORTANT: Tailor every season-dependent answer to {_season}. Lead with the "
-            f"method that fits {_season}. Do NOT recommend or lead with cold/winter-only "
-            "techniques (snow shelters, quinzhee, ice fishing) unless the user explicitly "
-            "asks about winter or snow.\n"
-            "=== END DATE ==="
-        )
-        meta["season"] = _season
+        # After power loss with no internet, GPS or paired phone yet, the clock
+        # is only a lower bound (restored) or meaningless (unset, e.g. 1970):
+        # say so rather than give confidently wrong seasonal advice.
+        try:
+            import local_device
+            _qual = local_device.date_qualifier()
+        except Exception:
+            _qual = ""
+        if _qual is None:
+            parts.append(
+                "=== CURRENT DATE ===\n"
+                "Unknown — Atlas's clock has not been set since it lost power. If a date or "
+                "season matters to the answer, ask the user for it.\n"
+                "=== END DATE ==="
+            )
+            meta["season"] = None
+        else:
+            _season = _season_for(_now.month)
+            _date = _now.strftime('%A, %B %d, %Y') if not _qual else \
+                f"approximately {_now.strftime('%B %d, %Y')} or a little later (clock restored after power loss)"
+            parts.append(
+                "=== CURRENT DATE ===\n"
+                f"{_date} — season: {_season} (Northern Hemisphere).\n"
+                f"IMPORTANT: Tailor every season-dependent answer to {_season}. Lead with the "
+                f"method that fits {_season}. Do NOT recommend or lead with cold/winter-only "
+                "techniques (snow shelters, quinzhee, ice fishing) unless the user explicitly "
+                "asks about winter or snow.\n"
+                "=== END DATE ==="
+            )
+            meta["season"] = _season
 
         # Live "senses" are retrieved on demand, not always-on.  An unrelated
         # survival/ballistics/general question is no longer flooded with host

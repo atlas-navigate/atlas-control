@@ -221,7 +221,7 @@ app.config["SECRET_KEY"] = _load_secret_key()
 
 
 def _discover_local_networks(cache_ttl=30):
-    now = time.time()
+    now = time.monotonic()
     with _LOCAL_NETWORKS_LOCK:
         cached = _LOCAL_NETWORKS_CACHE
         if now - cached["fetched_at"] < cache_ttl:
@@ -306,12 +306,39 @@ socketio = SocketIO(
 )
 
 def _extra_hostnames():
-    """Owner-configured extra names for this Atlas (e.g. a VPN MagicDNS name)."""
+    """Names besides <hostname>.local this Atlas answers to: what avahi
+    advertises right now (atlas-xxxx-2 after a name conflict), legacy aliases
+    (atlas.local), and owner-configured names (e.g. a VPN MagicDNS name)."""
+    names = []
+    try:
+        names += [f"{n}.local" for n in local_device_state.host_names()] + local_device_state.host_names()
+    except Exception:
+        pass
     try:
         raw = db.get_app_settings().get("extra_hostnames", "")
     except Exception:
-        return ()
-    return [n for n in (raw or "").replace(";", ",").split(",") if n.strip()]
+        raw = ""
+    return names + [n for n in (raw or "").replace(";", ",").split(",") if n.strip()]
+
+
+def _on_clock_step(direction, seconds):
+    """The wall clock was stepped (a correction after power loss). Durations
+    use the monotonic clock; drop what was keyed on wall time."""
+    with _LOCAL_NETWORKS_LOCK:
+        _LOCAL_NETWORKS_CACHE["fetched_at"] = 0.0
+    if direction == "backward":
+        try:
+            limiter.reset()   # in-memory windows are wall-clock: they would stay blocked
+        except Exception:
+            pass
+
+
+import local_device
+local_device_state = local_device.LocalDevice(
+    emit=lambda event, data: socketio.emit(event, data, to="paired", namespace="/"),
+    gps_time=lambda: gps_manager.gnss_time() if gps_manager is not None else None,
+    on_clock_step=lambda direction, seconds: _on_clock_step(direction, seconds),
+)
 
 
 # Outermost WSGI layer: must wrap Flask-SocketIO's middleware, not sit inside
@@ -431,6 +458,15 @@ def _is_local(ip):
     except ValueError:
         return False
 
+def _local_hostname():
+    return device_identity.device().get("hostname") or "atlas"
+
+
+def _html_escape(text):
+    import html
+    return html.escape(str(text), quote=True)
+
+
 @app.before_request
 def restrict_to_local():
     ip = request.remote_addr or ""
@@ -440,7 +476,7 @@ def restrict_to_local():
         "<html><body style='font-family:sans-serif;padding:40px'>"
         "<h2>Access Denied</h2>"
         "<p>Atlas Control is only accessible from local networks.</p>"
-        "<p>On your hotspot or LAN: <code>https://atlas.local</code></p>"
+        f"<p>On your hotspot or LAN: <code>https://{_html_escape(_local_hostname())}.local</code></p>"
         "<p style='font-size:12px;color:#888'>Accept the certificate warning once — "
         "it is self-signed but the connection is encrypted and fully local.</p>"
         "</body></html>",
@@ -828,10 +864,33 @@ def api_device_info():
         "device_id": dev.get("device_id"),
         "name": dev.get("name"),
         "hostname": dev.get("hostname"),
+        # The .local name that resolves right now (differs from hostname only
+        # while avahi has renamed itself after a name conflict).
+        "fqdn": local_device_state.snapshot()["fqdn"],
         "tls_spki_sha256": dev.get("tls_spki_sha256"),
         "version": atlas_version.version(),
         "pairing_required": pairing.required(),
     })
+
+
+@app.route("/api/device/local")
+def api_device_local():
+    """This Atlas on the local network, for Settings → Local Device Address and
+    the apps: name, .local hostname, addresses, and the clock's basis. Served
+    from the background snapshot; updates arrive as `device_network` events."""
+    return jsonify(local_device_state.snapshot())
+
+
+@app.route("/api/device/clock-hint", methods=["POST"])
+@limiter.limit("6 per minute")
+def api_device_clock_hint():
+    """A paired phone or browser's clock, used only while Atlas has neither
+    internet time nor GPS time (after power loss, offline). The root clock
+    service only ever moves the clock forward on a phone's word."""
+    data = request.get_json(silent=True) or {}
+    result = local_device_state.phone_hint(data.get("epoch_ms"))
+    return jsonify({"ok": True, "applied": bool(result.get("applied")), "reason": result.get("reason"),
+                    "clock": local_device.clock_info()})
 
 
 # ------------------------------------------------------------------ API: pairing
@@ -3159,18 +3218,18 @@ def _update_background_loop():
     updates.reconcile_after_restart()
     if updates.state.get("state") == "paused" and updates.state.get("manifest"):
         updates.start(install=bool(updates.state.get("install_when_ready")))
-    next_check = time.time() + 90
+    next_check = time.monotonic() + 90
     while True:
         try:
             if updates.poll_engine():
                 gevent.sleep(1)
                 continue
-            if time.time() >= next_check:
+            if time.monotonic() >= next_check:
                 if _network_connectivity_state().get("online"):
                     updates.check()
-                    next_check = time.time() + _UPDATE_AUTO_CHECK_S
+                    next_check = time.monotonic() + _UPDATE_AUTO_CHECK_S
                 else:
-                    next_check = time.time() + 300
+                    next_check = time.monotonic() + 300
         except Exception as exc:
             logger.warning("software update loop: %s", exc)
         gevent.sleep(5)
@@ -3306,7 +3365,45 @@ def _factory_reset_local_state():
     out, rc = atlas_helper.run("net.forget_all", timeout=60)
     if rc != 0:
         problems.append("saved Wi-Fi networks: " + (out or "helper unavailable")[:120])
+    # Logs and caches can name the owner's networks, places and devices.
+    # Truncate logs (a writer may hold them open); empty the cache.
+    for name in _listdir(atlas_paths.LOG_DIR):
+        path = os.path.join(atlas_paths.LOG_DIR, name)
+        try:
+            if os.path.isfile(path) and not os.path.islink(path):
+                with open(path, "w"):
+                    pass
+            elif os.path.isdir(path):
+                shutil.rmtree(path, ignore_errors=True)
+        except OSError as exc:
+            problems.append(f"logs/{name}: {exc.strerror}")
+    for name in _listdir(atlas_paths.CACHE_DIR):
+        path = os.path.join(atlas_paths.CACHE_DIR, name)
+        try:
+            if os.path.isdir(path) and not os.path.islink(path):
+                shutil.rmtree(path)
+            else:
+                os.remove(path)
+        except OSError as exc:
+            problems.append(f"cache/{name}: {exc.strerror}")
+    out, rc = atlas_helper.run("logs.vacuum", timeout=120)
+    if rc != 0:
+        problems.append("system log: " + (out or "helper unavailable")[:120])
+    # Ray's runners keep the last conversations in memory (KV and prompt
+    # caches): unload them; Ray loads fresh for the next owner.
+    if ai_manager:
+        try:
+            ai_manager.unload_all()
+        except Exception as exc:
+            problems.append(f"Ray models: {exc}")
     return problems
+
+
+def _listdir(path):
+    try:
+        return os.listdir(path)
+    except OSError:
+        return []
 
 
 def _restart_hotspot_with_label_credentials():
@@ -3331,9 +3428,13 @@ def api_factory_reset():
          downloads, database copies. Every paired device must pair again.
       3. Re-write the snapshot to the radio.
       4. Reset short_name to the firmware default (last 4 hex of node ID).
+    Also erased: Atlas's logs and caches and the system journal, and Ray's
+    in-memory conversation state (models unloaded).
     Kept: the installed software, offline maps/routing and built-in
-    reference, and Atlas's identity (name, key, label setup code and Wi-Fi
-    password — the hotspot returns to the label's credentials).
+    reference, and Atlas's identity — the hardware identity printed on its
+    label: name, .local hostname, key, setup code and Wi-Fi password (the
+    hotspot returns to the label's credentials). See docs/PAIRING.md, "Factory
+    reset and resale".
     """
     if not _confirmed("RESET"):
         return _needs_confirmation("reset Atlas (type RESET)")
@@ -3624,6 +3725,8 @@ def _scheduler_loop():
     """Background thread: wakes every 30 s, fires any due jobs."""
     while True:
         time.sleep(30)
+        if local_device.clock_info()["state"] == "unset" and local_device.clock_info()["managed"]:
+            continue    # schedules are wall-clock times: wait until the clock means something
         try:
             for job in db.get_due_jobs():
                 now = int(time.time())
@@ -3874,7 +3977,7 @@ def _preferred_local_urls(lan=None):
         ip = _normalize_ip_value(lan["ip"])
         if ip:
             urls.append(f"https://{ip}")
-    urls.append(f"https://{device_identity.device().get('hostname') or 'atlas'}.local")
+    urls.append(local_device_state.snapshot()["local_url"])
     return urls
 
 
@@ -3964,12 +4067,12 @@ def _set_connection_autoconnect(name, enabled):
 def _defer_auto_hotspot(seconds):
     global _AUTO_HOTSPOT_GRACE_UNTIL
     with _AUTO_HOTSPOT_LOCK:
-        _AUTO_HOTSPOT_GRACE_UNTIL = max(_AUTO_HOTSPOT_GRACE_UNTIL, time.time() + max(0, seconds))
+        _AUTO_HOTSPOT_GRACE_UNTIL = max(_AUTO_HOTSPOT_GRACE_UNTIL, time.monotonic() + max(0, seconds))
 
 
 def _auto_hotspot_allowed():
     with _AUTO_HOTSPOT_LOCK:
-        return time.time() >= _AUTO_HOTSPOT_GRACE_UNTIL
+        return time.monotonic() >= _AUTO_HOTSPOT_GRACE_UNTIL
 
 
 def _stop_hotspot(grace_seconds=120, timeout=10):
@@ -4023,10 +4126,10 @@ def _restore_hotspot_access(reason=""):
 
 
 def _wait_for_wifi_online(expected_ssid, timeout=20, interval=2):
-    deadline = time.time() + max(2, timeout)
+    deadline = time.monotonic() + max(2, timeout)
     last_lan = None
     last_connectivity = _network_connectivity_state()
-    while time.time() < deadline:
+    while time.monotonic() < deadline:
         lan = _current_lan_wifi_state()
         connectivity = _network_connectivity_state()
         if lan:
@@ -4039,8 +4142,8 @@ def _wait_for_wifi_online(expected_ssid, timeout=20, interval=2):
 
 
 def _wait_for_hotspot_release(iface=None, timeout=10, interval=1):
-    deadline = time.time() + max(2, timeout)
-    while time.time() < deadline:
+    deadline = time.monotonic() + max(2, timeout)
+    while time.monotonic() < deadline:
         hotspot = _current_hotspot_state()
         device = _wifi_device_state(iface) if iface else None
         connection = ((device or {}).get("connection") or "").lower()
@@ -4186,63 +4289,6 @@ def _avahi_reload_quiet():
     threading.Thread(target=_run, daemon=True, name="avahi-reload").start()
 
 
-# Wait between attempts to win back the mDNS name: 30 s, 2 min, 10 min, then hourly.
-_MDNS_RECLAIM_BACKOFF = (30, 120, 600, 3600)
-_MDNS_CHECK_INTERVAL = 30
-
-
-def _mdns_reclaim_decision(advertised, expected, attempts):
-    """(restart avahi now?, seconds until the next check) for the mDNS name guard.
-
-    After a name conflict avahi renames itself (atlas -> atlas-2) and never
-    tries the real name again, so atlas.local silently stops resolving even
-    once the conflict is long gone.  A restart makes it probe again.  Back off
-    between attempts: if another unit really holds the name, avahi just loses
-    the probe again, and probing does not disturb that unit.
-    """
-    if not advertised or not expected or advertised == expected:
-        return False, _MDNS_CHECK_INTERVAL
-    return True, _MDNS_RECLAIM_BACKOFF[min(attempts, len(_MDNS_RECLAIM_BACKOFF) - 1)]
-
-
-def _avahi_host_name():
-    """The host name avahi is advertising right now, or "" if it can't be read."""
-    try:
-        r = subprocess.run(
-            ["busctl", "--system", "call", "org.freedesktop.Avahi", "/",
-             "org.freedesktop.Avahi.Server", "GetHostName"],
-            capture_output=True, text=True, timeout=5,
-        )
-    except Exception:
-        return ""
-    m = re.fullmatch(r's "(.*)"', r.stdout.strip()) if r.returncode == 0 else None
-    return m.group(1) if m else ""
-
-
-def _mdns_name_guard_loop():
-    """Keep avahi advertising this unit's own hostname (see _mdns_reclaim_decision)."""
-    attempts = 0
-    while True:
-        expected = os.uname().nodename.split(".")[0]
-        advertised = _avahi_host_name()
-        reclaim, delay = _mdns_reclaim_decision(advertised, expected, attempts)
-        if reclaim:
-            logger.warning(
-                "mDNS: avahi is advertising %s.local instead of %s.local after a name "
-                "conflict; restarting it to reclaim the name (attempt %d)",
-                advertised, expected, attempts + 1,
-            )
-            out, rc = atlas_helper.run("avahi.reclaim", timeout=30)
-            if rc != 0:
-                logger.warning("avahi reclaim failed: %s", out[:120])
-            attempts += 1
-        elif advertised == expected:
-            if attempts:
-                logger.info("mDNS: %s.local reclaimed", expected)
-            attempts = 0
-        time.sleep(delay)
-
-
 def _candidate_mobile_hosts():
     """HTTPS URLs this Atlas answers on, numeric addresses first.
 
@@ -4260,10 +4306,8 @@ def _candidate_mobile_hosts():
             ip_hosts.append(f"https://[{a}]" if ":" in a else f"https://{a}")
     except Exception:
         pass
-    hostname = device_identity.device().get("hostname") or "atlas"
-    names = [f"https://{hostname}.local"]
-    if hostname != "atlas":
-        names.append("https://atlas.local")
+    names = [local_device_state.snapshot()["local_url"]]
+    names += [f"https://{fqdn}" for fqdn in local_device_state.active_aliases()]
     return ip_hosts + names
 
 
@@ -4281,6 +4325,8 @@ def _mobile_bootstrap_manifest():
             "id": dev.get("device_id"),
             "name": dev.get("name") or "Atlas",
             "shortName": dev.get("short") or "ATLS",
+            "hostname": local_device_state.snapshot()["fqdn"].removesuffix(".local"),
+            "fqdn": local_device_state.snapshot()["fqdn"],
         },
         "api": {
             "version": 2,
@@ -4663,7 +4709,7 @@ def _wifi_failover_loop():
             hotspot = _current_hotspot_state()
             lan = _current_lan_link_state()
             connectivity = _network_connectivity_state()
-            now = time.time()
+            now = time.monotonic()   # intervals only: immune to clock corrections
             state = {
                 "lan": bool(lan),
                 "lan_name": (lan or {}).get("ssid", ""),
@@ -4908,6 +4954,13 @@ def main():
         # reclaims space, then repeat every 24 h.
         _time.sleep(60)
         while True:
+            if not local_device.clock_retention_safe():
+                # Ages are wall-clock: a clock set from a phone could be ahead
+                # and purge history that is not due yet. Wait for GPS, internet
+                # time, or the next boot's restored clock.
+                logger.info("Data prune deferred: the clock is %s", local_device.clock_info()["label"].lower())
+                _time.sleep(3600)
+                continue
             try:
                 db.prune_old_data()
                 removed = retention.apply()
@@ -4927,7 +4980,7 @@ def main():
         gevent.spawn(_update_background_loop)
         gevent.spawn(_stats_push_loop)
         threading.Thread(target=_wifi_failover_loop, daemon=True, name="wifi-failover").start()
-        threading.Thread(target=_mdns_name_guard_loop, daemon=True, name="mdns-guard").start()
+        local_device_state.start()   # mDNS guard and alias, clock watch, network changes
 
     logger.info(f"Dashboard at http://{args.host}:{web_port}")
     socketio.run(app, host=args.host, port=web_port, debug=False, allow_unsafe_werkzeug=True)

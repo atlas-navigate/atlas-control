@@ -153,6 +153,24 @@ def v_net_forget_all(args):
     return netctl.forget_all_wifi()
 
 
+def v_logs_vacuum(args):
+    # Factory reset: the system journal can name the owner's networks,
+    # devices and places. Archive the active files, then delete every archive.
+    _run(["journalctl", "--rotate"], timeout=60)
+    return _run(["journalctl", "--vacuum-time=1s"], timeout=120)
+
+
+def v_clock_set(args):
+    """A GPS fix or a paired phone's clock, while NTP is not available. The
+    rules (GPS either way, phone only forward, NTP always wins) are in clock.py."""
+    from . import clock
+    try:
+        result = clock.set_time(args.get("epoch"), args.get("source"))
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    return dict(result, ok=True)
+
+
 VERBS = {
     "ping": v_ping,
     "net.wifi_list": v_net_wifi_list,
@@ -170,6 +188,8 @@ VERBS = {
     "update.apply": v_update_apply,
     "update.cancel": v_update_cancel,
     "update.status": v_update_status,
+    "clock.set": v_clock_set,
+    "logs.vacuum": v_logs_vacuum,
 }
 
 
