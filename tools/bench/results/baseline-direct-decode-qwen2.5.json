@@ -1,0 +1,202 @@
+{
+ "meta": {
+  "at": "2026-10-08 22:14:00",
+  "mode": "direct-decode",
+  "model": "qwen2.5:3b",
+  "options": {
+   "num_ctx": 4096,
+   "num_batch": 512,
+   "num_thread": 6,
+   "num_gpu": -1,
+   "num_predict": 256,
+   "temperature": 0.7,
+   "top_p": 0.8,
+   "top_k": 20,
+   "repeat_penalty": 1.05,
+   "seed": 11
+  },
+  "label": "baseline",
+  "start_temp_c": 48.75
+ },
+ "rows": [
+  {
+   "wall_s": 16.82,
+   "load_s": 0.486,
+   "prompt_tokens": 2213,
+   "cached_tokens": 3,
+   "prefill_tokens": 2213,
+   "prefill_s": 2.832,
+   "prefill_tps": 781.4,
+   "gen_tokens": 256,
+   "gen_tps": 19.3,
+   "run": 0,
+   "hw": {
+    "samples": 84,
+    "cpu_pct_avg": 7.3,
+    "gpu_load_pct_avg": 84.5,
+    "gpu_mhz_avg": 962.9,
+    "gpu_mhz_max": 1020,
+    "emc_mhz_avg": 3110.2,
+    "emc_mhz_max": 3199,
+    "mem_avail_mb_min": 2294,
+    "llama_rss_mb_max": 3649,
+    "app_rss_mb_max": 76,
+    "tj_c_max": 56.062,
+    "vdd_in_mw_avg": 16589.8
+   }
+  },
+  {
+   "wall_s": 16.542,
+   "load_s": 0.543,
+   "prompt_tokens": 2316,
+   "cached_tokens": 3,
+   "prefill_tokens": 2316,
+   "prefill_s": 2.81,
+   "prefill_tps": 824.2,
+   "gen_tokens": 256,
+   "gen_tps": 19.6,
+   "run": 1,
+   "hw": {
+    "samples": 83,
+    "cpu_pct_avg": 6.9,
+    "gpu_load_pct_avg": 87.5,
+    "gpu_mhz_avg": 975.8,
+    "gpu_mhz_max": 1020,
+    "emc_mhz_avg": 3147.6,
+    "emc_mhz_max": 3199,
+    "mem_avail_mb_min": 2247,
+    "llama_rss_mb_max": 3710,
+    "app_rss_mb_max": 76,
+    "tj_c_max": 58.562,
+    "vdd_in_mw_avg": 16929.9
+   }
+  },
+  {
+   "wall_s": 17.751,
+   "load_s": 0.473,
+   "prompt_tokens": 3112,
+   "cached_tokens": 4,
+   "prefill_tokens": 3112,
+   "prefill_s": 3.768,
+   "prefill_tps": 825.9,
+   "gen_tokens": 256,
+   "gen_tps": 19.1,
+   "run": 2,
+   "hw": {
+    "samples": 89,
+    "cpu_pct_avg": 6.4,
+    "gpu_load_pct_avg": 86.9,
+    "gpu_mhz_avg": 975.3,
+    "gpu_mhz_max": 1020,
+    "emc_mhz_avg": 3163.1,
+    "emc_mhz_max": 3199,
+    "mem_avail_mb_min": 2189,
+    "llama_rss_mb_max": 3767,
+    "app_rss_mb_max": 76,
+    "tj_c_max": 60.937,
+    "vdd_in_mw_avg": 17060.4
+   }
+  },
+  {
+   "wall_s": 16.316,
+   "load_s": 0.448,
+   "prompt_tokens": 2245,
+   "cached_tokens": 4,
+   "prefill_tokens": 2245,
+   "prefill_s": 2.712,
+   "prefill_tps": 827.9,
+   "gen_tokens": 256,
+   "gen_tps": 19.7,
+   "run": 3,
+   "hw": {
+    "samples": 81,
+    "cpu_pct_avg": 6.3,
+    "gpu_load_pct_avg": 88.7,
+    "gpu_mhz_avg": 977.2,
+    "gpu_mhz_max": 1020,
+    "emc_mhz_avg": 3159.5,
+    "emc_mhz_max": 3199,
+    "mem_avail_mb_min": 2143,
+    "llama_rss_mb_max": 3836,
+    "app_rss_mb_max": 76,
+    "tj_c_max": 62.562,
+    "vdd_in_mw_avg": 17190.8
+   }
+  },
+  {
+   "wall_s": 16.68,
+   "load_s": 0.508,
+   "prompt_tokens": 2439,
+   "cached_tokens": 3,
+   "prefill_tokens": 2439,
+   "prefill_s": 2.978,
+   "prefill_tps": 819.1,
+   "gen_tokens": 256,
+   "gen_tps": 19.6,
+   "run": 4,
+   "hw": {
+    "samples": 84,
+    "cpu_pct_avg": 6.6,
+    "gpu_load_pct_avg": 87.4,
+    "gpu_mhz_avg": 969.0,
+    "gpu_mhz_max": 1020,
+    "emc_mhz_avg": 3148.2,
+    "emc_mhz_max": 3199,
+    "mem_avail_mb_min": 2040,
+    "llama_rss_mb_max": 3893,
+    "app_rss_mb_max": 76,
+    "tj_c_max": 63.968,
+    "vdd_in_mw_avg": 17090.4
+   }
+  },
+  {
+   "wall_s": 16.531,
+   "load_s": 0.559,
+   "prompt_tokens": 2330,
+   "cached_tokens": 3,
+   "prefill_tokens": 2330,
+   "prefill_s": 2.809,
+   "prefill_tps": 829.6,
+   "gen_tokens": 256,
+   "gen_tps": 19.7,
+   "run": 5,
+   "hw": {
+    "samples": 83,
+    "cpu_pct_avg": 6.5,
+    "gpu_load_pct_avg": 86.3,
+    "gpu_mhz_avg": 968.4,
+    "gpu_mhz_max": 1020,
+    "emc_mhz_avg": 3160.5,
+    "emc_mhz_max": 3199,
+    "mem_avail_mb_min": 2038,
+    "llama_rss_mb_max": 3951,
+    "app_rss_mb_max": 76,
+    "tj_c_max": 64.781,
+    "vdd_in_mw_avg": 17100.1
+   }
+  }
+ ],
+ "summary": {
+  "prefill_tps": {
+   "n": 6,
+   "median": 825.05,
+   "p90": 829.6,
+   "min": 781.4,
+   "max": 829.6
+  },
+  "gen_tps": {
+   "n": 6,
+   "median": 19.6,
+   "p90": 19.7,
+   "min": 19.1,
+   "max": 19.7
+  },
+  "prefill_s": {
+   "n": 6,
+   "median": 2.821,
+   "p90": 3.768,
+   "min": 2.712,
+   "max": 3.768
+  }
+ }
+}
