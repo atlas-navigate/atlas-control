@@ -5910,6 +5910,23 @@ function AIPage() {
       const decoder = new TextDecoder();
       let buffer = '';
       let streamingContent = '';
+      let errored = false;
+      // Re-render the growing answer at most once per frame: each render
+      // re-parses the whole message as markdown, which per token made long
+      // answers stutter on phones.
+      let flushPending = false;
+      const flush = () => {
+        flushPending = false;
+        if (errored) return;
+        const content = streamingContent;
+        setMessages(prev => prev.map(m => m.id === tempAssistantId ? { ...m, content } : m));
+      };
+      const scheduleFlush = () => {
+        if (flushPending) return;
+        flushPending = true;
+        if (document.hidden || !window.requestAnimationFrame) setTimeout(flush, 50);
+        else window.requestAnimationFrame(flush);
+      };
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -5923,15 +5940,12 @@ function AIPage() {
             if (data.replace !== undefined) {
               // Full content replacement after server-side calc-tag processing
               streamingContent = data.replace;
-              setMessages(prev => prev.map(m => m.id === tempAssistantId
-                ? { ...m, content: streamingContent }
-                : m));
+              scheduleFlush();
             } else if (data.token !== undefined) {
               streamingContent += data.token;
-              setMessages(prev => prev.map(m => m.id === tempAssistantId
-                ? { ...m, content: streamingContent }
-                : m));
+              scheduleFlush();
             } else if (data.error) {
+              errored = true;
               setMessages(prev => prev.map(m => m.id === tempAssistantId
                 ? { ...m, content: `Error: ${data.error}`, streaming: false }
                 : m));
@@ -5939,6 +5953,7 @@ function AIPage() {
           } catch(e) {}
         }
       }
+      if (flushPending && !errored) flush();
       setMessages(prev => prev.map(m => m.id === tempAssistantId ? { ...m, streaming: false } : m));
       loadMessages(activeChatId);
       loadChats();
@@ -6461,8 +6476,11 @@ function AIPage() {
                     <span style={{ fontSize: 13, color: 'var(--text-primary)' }}>Warmup model on startup</span>
                   </label>
                   <div>
-                    <label style={labelStyle}>Keep-Alive Hours (1–24)</label>
-                    <input type="number" min="1" max="24" style={{ ...inputStyle, width: 80 }} value={settings.keep_alive_hours || '10'} onChange={e => setSettings(p => ({...p, keep_alive_hours: e.target.value}))} />
+                    <label style={labelStyle}>Keep Ray loaded</label>
+                    <select style={{ ...inputStyle, width: 220 }} value={settings.keep_alive_hours || 'always'} onChange={e => setSettings(p => ({...p, keep_alive_hours: e.target.value}))}>
+                      <option value="always">Always (answers start fastest)</option>
+                      {['1', '2', '4', '8', '10', '12', '24'].map(h => <option key={h} value={h}>{h} {h === '1' ? 'hour' : 'hours'} after the last question</option>)}
+                    </select>
                   </div>
                 </div>
               </div>

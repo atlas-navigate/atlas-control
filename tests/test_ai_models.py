@@ -94,6 +94,13 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(model_profiles.resolve({"keep_alive_hours": "99"}, hw=ORIN_NANO)["keep_alive"], "24h")
         self.assertEqual(model_profiles.resolve({"keep_alive_hours": "x"}, hw=ORIN_NANO)["keep_alive"], "10h")
 
+    def test_ray_stays_loaded_by_default(self):
+        # Negative = no idle timeout in Ollama; navigation still unloads Ray when it needs the memory.
+        for value in (None, "always", "ALWAYS"):
+            prof = model_profiles.resolve({"keep_alive_hours": value} if value else {}, hw=ORIN_NANO)
+            self.assertEqual((prof["keep_alive"], prof["keep_alive_hours"]), ("-1m", "always"))
+        self.assertEqual(model_profiles.resolve({"keep_alive_hours": "4"}, hw=ORIN_NANO)["keep_alive_hours"], "4")
+
 
 class SettingsMigrationTests(unittest.TestCase):
     def setUp(self):

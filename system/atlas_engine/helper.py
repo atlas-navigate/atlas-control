@@ -160,6 +160,17 @@ def v_logs_vacuum(args):
     return _run(["journalctl", "--vacuum-time=1s"], timeout=120)
 
 
+def v_perf_boost(args):
+    """GPU and memory clocks to maximum while Ray answers (lease; see perf.py)."""
+    from . import perf
+    return dict(perf.boost(run=lambda cmd: _run(cmd, timeout=15)), ok=True)
+
+
+def v_perf_release(args):
+    from . import perf
+    return dict(perf.release(run=lambda cmd: _run(cmd, timeout=15)), ok=True)
+
+
 def v_clock_set(args):
     """A GPS fix or a paired phone's clock, while NTP is not available. The
     rules (GPS either way, phone only forward, NTP always wins) are in clock.py."""
@@ -190,6 +201,8 @@ VERBS = {
     "update.status": v_update_status,
     "clock.set": v_clock_set,
     "logs.vacuum": v_logs_vacuum,
+    "perf.boost": v_perf_boost,
+    "perf.release": v_perf_release,
 }
 
 

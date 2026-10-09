@@ -1,0 +1,8 @@
+# Managed by the Atlas updater. Puts the GPU and memory-controller clock
+# floors back after Ray's boost lease (see atlas_engine/perf.py).
+[Unit]
+Description=Atlas: release Ray's clock boost
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/atlas/bin/atlas-engine perf release

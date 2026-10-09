@@ -1147,7 +1147,7 @@ def ai_get_messages(chat_id):
 def ai_get_recent_messages(chat_id, limit):
     """The last `limit` user/assistant messages, oldest first (prompt history)."""
     rows = get_db().execute(
-        "SELECT role, content FROM ai_messages WHERE chat_id=? AND role IN ('user', 'assistant') "
+        "SELECT id, role, content FROM ai_messages WHERE chat_id=? AND role IN ('user', 'assistant') "
         "ORDER BY created_at DESC, id DESC LIMIT ?",
         (chat_id, int(limit))
     ).fetchall()
@@ -1410,7 +1410,7 @@ AI_DEFAULTS = {
         + AI_FORMATTING_GUIDE
     ),
     "warmup_on_start": "true",
-    "keep_alive_hours": "10",
+    "keep_alive_hours": "always",
     "rag_enabled": "true",
     "rag_top_k": "5",
     "inject_mesh_context": "true",

@@ -54,6 +54,11 @@ TIMESYNC_SYNCED = p("run/systemd/timesync/synchronized")
 CLOCK_RUN = p("run/atlas-clock")
 CLOCK_STATE = p("run/atlas-clock/state.json")
 
+# Clock floors for Ray's boost (perf.py).
+DEVFREQ = p("sys/class/devfreq")
+THERMAL = p("sys/class/thermal")
+PERF_RUN = p("run/atlas-perf")
+
 # The app's state directory; downloads are handed over from here.
 APP_STATE = os.path.abspath(os.environ.get("ATLAS_STATE_DIR") or p("atlas_data/atlas-control"))
 HANDOFF = os.path.join(APP_STATE, "updates", "ready")

@@ -1394,8 +1394,14 @@ class MeshManager:
             pass
         return result
 
+    def on_mains(self):
+        """Is Atlas running on mains power? True without a UPS; False only
+        while the UPS reports it is discharging (running on battery)."""
+        data = self._get_host_power_cached()
+        return not data or data.get("battery_phase") != "discharging"
+
     def _get_host_power_cached(self, ttl=5.0):
-        now = time.time()
+        now = time.monotonic()   # an interval: immune to clock corrections
         cached = self._host_power_cache
         if now - cached.get("ts", 0.0) < ttl and cached.get("data"):
             return dict(cached["data"])

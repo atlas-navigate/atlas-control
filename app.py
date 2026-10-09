@@ -1507,10 +1507,15 @@ def api_ai_settings_get():
 _AI_BEHAVIOUR_SETTINGS = {
     "system_prompt": lambda v: str(v)[:20000],
     "warmup_on_start": lambda v: "true" if str(v).lower() == "true" else "false",
-    "keep_alive_hours": lambda v: str(min(24, max(1, int(float(v))))),
+    "keep_alive_hours": lambda v: "always" if str(v).strip().lower() == "always"
+                        else str(min(24, max(1, int(float(v))))),
     "rag_enabled": lambda v: "true" if str(v).lower() == "true" else "false",
     "rag_top_k": lambda v: str(min(10, max(1, int(float(v))))),
     "inject_mesh_context": lambda v: "true" if str(v).lower() == "true" else "false",
+    # Performance switches, kept for A/B measurement and rollback (no UI):
+    # the prompt layout (ray_prompt.py) and the clock boost (perf_boost.py).
+    "ray_prompt_layout": lambda v: str(v) if str(v) in ("turn", "legacy") else "turn",
+    "ray_clock_boost": lambda v: "off" if str(v).lower() == "off" else "on",
 }
 
 

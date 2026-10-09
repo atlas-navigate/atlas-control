@@ -12,8 +12,10 @@ import logging
 import urllib.request
 import atlas_blocking
 import model_profiles
+import perf_boost
 import perf_metrics
 import safe_math as _safe_math
+import ray_prompt
 import token_budget
 import vector_store
 import untrusted as _untrusted
@@ -203,15 +205,21 @@ def _reverse_geocode(lat: float, lon: float) -> str | None:
     invent a city to fill the gap.
 
     Results are cached per ~110 m cell, so a parked device resolves once.
+    A miss scans tens of thousands of places (and the first call parses the
+    15 MB tables): that runs in a worker thread, never on the gevent hub,
+    where it would stall every other request and Ray's token stream.
     """
-    _ensure_loaded()
-
     key = (round(lat, 3), round(lon, 3))
     if key in _GEO_CACHE:
         return _GEO_CACHE[key]
-    result = _reverse_geocode_uncached(lat, lon)
+    result = atlas_blocking.call(_reverse_geocode_slow, lat, lon)
     _GEO_CACHE[key] = result
     return result
+
+
+def _reverse_geocode_slow(lat, lon):
+    _ensure_loaded()
+    return _reverse_geocode_uncached(lat, lon)
 
 
 def _us_zip_lookup(lat: float, lon: float, cos_lat: float) -> str | None:
@@ -4935,6 +4943,10 @@ _RAG_CONTEXT_CHAR_BUDGET = 7000
 
 # Earlier turns offered to the model (token_budget.fit_history may keep fewer).
 _HISTORY_TURNS = 8
+# With a prefix-caching model the window may grow past _HISTORY_TURNS (never
+# shrink below it) so its start stays put between turns: see
+# ray_prompt.sticky_history.
+_HISTORY_WINDOW_MAX = 12
 
 
 def _record_prompt_size(budget, prompt_eval_count):
@@ -5218,6 +5230,8 @@ class AIManager:
         # longer waits behind someone else's whole streamed answer. Acquire
         # order when both are needed: generation, then embedding.
         self._ollama_lock = threading.Lock()
+        self._history_start = {}      # chat_id -> first message id of its history window
+        self.perf = perf_boost.PerfBoost(enabled=self._clock_boost_enabled, on_mains=self._on_mains)
         self._embed_lock = threading.Lock()
         self._model_names = (0.0, frozenset())   # cached /api/tags (monotonic ts, names)
         self._startup_warmup_done = threading.Event()
@@ -5274,7 +5288,7 @@ class AIManager:
         prof = model_profiles.resolve(settings)
         settings.update({k: str(v) for k, v in prof["options"].items()})
         settings["model"] = prof["tag"]
-        settings["keep_alive_hours"] = prof["keep_alive"][:-1]
+        settings["keep_alive_hours"] = prof["keep_alive_hours"]
         settings["_profile"] = prof
         return settings
 
@@ -5300,6 +5314,9 @@ class AIManager:
         db.ai_seed_documents(ATLAS_DOCS)
         # Run embedding in background so startup is not blocked by Ollama
         threading.Thread(target=self._embed_unembedded_docs, daemon=True).start()
+        # Ray grounds nearly every answer in the GPS position: load the offline
+        # geocoder's tables now, not inside the first question.
+        threading.Thread(target=_ensure_loaded, daemon=True, name="geocoder-load").start()
         if settings.get("warmup_on_start", "true").lower() == "true":
             self._set_startup_state("warming_up", ready=False, error="")
             threading.Thread(target=self._warmup, daemon=True).start()
@@ -5314,6 +5331,19 @@ class AIManager:
         raw = db.ai_get_settings()
         settings = self.runtime_settings(raw)
         embed_model = settings.get("embed_model", DEFAULT_SETTINGS["embed_model"])
+        # Already loaded (e.g. navigation was cancelled without needing the
+        # memory, or the app restarted): stay ready and only refresh the
+        # processed system prompt — no reload, no "Ray is starting" for users.
+        if self._models_resident(settings):
+            try:
+                with self._ollama_slot(timeout=120):
+                    self._warmup_chat_model(settings, timeout=120)
+                self._set_startup_state("ready", ready=True, error="", finished=True)
+                return
+            except Exception as e:
+                logger.info(f"AI warmup: resident models did not answer ({e}); reloading")
+            finally:
+                self._startup_warmup_done.set()
         try:
             self._set_startup_state("warming_up", ready=False, error="")
             # Pulling a missing model can take many minutes: do it before
@@ -5408,10 +5438,12 @@ class AIManager:
         # num_ctx must match get_embed() exactly: Ollama keys a loaded runner by
         # model *and* options, so warming at a different context would make the
         # first real embed evict and reload the model — the opposite of a warmup.
+        settings = settings if settings is not None and "_profile" in settings else self.runtime_settings(settings)
         payload = json.dumps({
             "model": embed_model,
             "input": "warmup",
             "options": self._embed_options(settings),
+            "keep_alive": settings["_profile"]["keep_alive"],
         }).encode()
         req = urllib.request.Request(
             f"{self.ollama_base}/api/embed",
@@ -5439,6 +5471,35 @@ class AIManager:
         logger.warning(self._notice)
         return settings
 
+    def _warmup_messages(self, settings):
+        """A first request whose system message is byte-identical to a real
+        turn's (ray_prompt "turn" layout), so loading the model also processes
+        Ray's instructions and the first question only pays for itself."""
+        if ray_prompt.layout(settings) != "turn":
+            return [{"role": "user", "content": "hi"}]
+        try:
+            import database as db
+            units = db.get_app_settings().get("units", "metric")
+        except Exception:
+            units = "metric"
+        date_block, _ = self._date_block()
+        system = ray_prompt.system_message(self._base_system(settings, units), date_block)
+        return [{"role": "system", "content": system},
+                {"role": "user", "content": ray_prompt.user_message("", "hi")}]
+
+    def _models_resident(self, settings):
+        """Are the chat model (at its context) and the embedder loaded now?"""
+        try:
+            with urllib.request.urlopen(f"{self.ollama_base}/api/ps", timeout=3) as r:
+                loaded = {m.get("name"): m for m in json.loads(r.read() or b"{}").get("models", [])}
+        except Exception:
+            return False
+        chat = loaded.get(settings["model"])
+        embed_model = settings.get("embed_model", DEFAULT_SETTINGS["embed_model"])
+        want_ctx = int(self._chat_options(settings).get("num_ctx") or 0)
+        return bool(chat) and (not embed_model or embed_model in loaded) and \
+            (not want_ctx or int(chat.get("context_length") or want_ctx) == want_ctx)
+
     def _warmup_chat_model(self, settings, timeout=60):
         """Load the chat model with its tuned profile. Returns Ollama's reply."""
         model = settings["model"]
@@ -5449,7 +5510,7 @@ class AIManager:
         logger.info(f"AI warmup: loading model {model} with keep_alive={keep_alive}")
         payload = json.dumps(self._finalize_payload({
             "model": model,
-            "messages": [{"role": "user", "content": "hi"}],
+            "messages": self._warmup_messages(settings),
             "keep_alive": keep_alive,
             "stream": False,
             "options": dict(self._chat_options(settings), num_predict=1),
@@ -6081,7 +6142,7 @@ class AIManager:
             return f"Instruct: {self._EMBED_QUERY_INSTRUCT}\nQuery: {text}"
         return text
 
-    def get_embed(self, text, embed_model=None, is_query=False):
+    def get_embed(self, text, embed_model=None, is_query=False, settings=None):
         """Return embedding list[float] from the configured embed model.
 
         is_query=True applies the Qwen3-Embedding query instruction prefix;
@@ -6121,12 +6182,16 @@ class AIManager:
                     f"num_ctx={_EMBED_NUM_CTX} tokens and be truncated by Ollama; "
                     f"the resulting vector may not match previously stored ones."
                 )
+            if settings is None or "_profile" not in settings:
+                settings = self.runtime_settings(settings)
             payload = json.dumps({
                 "model": embed_model,
                 "input": text,
                 # Same options as the warmup (context, GPU or CPU per the chat
                 # model's profile): a different set would reload the embedder.
-                "options": self._embed_options(),
+                "options": self._embed_options(settings),
+                # Same lifetime as the chat model, so neither outlives the other.
+                "keep_alive": settings["_profile"]["keep_alive"],
             }).encode()
             req = urllib.request.Request(
                 f"{self.ollama_base}/api/embed",
@@ -6790,7 +6855,7 @@ class AIManager:
             return ""
 
     # ------------------------------------------------------------------
-    def rag_search(self, query, top_k=5, embed_model=None, location_hint=None):
+    def rag_search(self, query, top_k=5, embed_model=None, location_hint=None, settings=None):
         """Return (docs, top_score) using passage-level BM25-boosted cosine similarity.
 
         docs      — list of matching doc dicts (up to top_k, hybrid score >= _RAG_MIN_SCORE).
@@ -6825,7 +6890,7 @@ class AIManager:
         if location_hint and _is_location_scoped_query(query):
             embed_query = f"{query} (location: {location_hint})"
         try:
-            query_emb = self.get_embed(embed_query, embed_model=embed_model, is_query=True)
+            query_emb = self.get_embed(embed_query, embed_model=embed_model, is_query=True, settings=settings)
         except Exception as e:
             logger.warning(f"RAG embed failed: {e}")
             return [], 0.0
@@ -6977,6 +7042,36 @@ class AIManager:
         return out, top_score
 
     # ------------------------------------------------------------------
+    @staticmethod
+    def _date_block():
+        """Ray's CURRENT DATE block and the season, or None when the date is
+        unknown. Day-stable: it sits in the cached system message."""
+        import datetime as _dt
+        _now = _dt.datetime.now()
+        # After power loss with no internet, GPS or paired phone yet, the clock
+        # is only a lower bound (restored) or meaningless (unset, e.g. 1970):
+        # say so rather than give confidently wrong seasonal advice.
+        try:
+            import local_device
+            _qual = local_device.date_qualifier()
+        except Exception:
+            _qual = ""
+        if _qual is None:
+            return ("=== CURRENT DATE ===\n"
+                    "Unknown — Atlas's clock has not been set since it lost power. If a date or "
+                    "season matters to the answer, ask the user for it.\n"
+                    "=== END DATE ==="), None
+        _season = _season_for(_now.month)
+        _date = _now.strftime('%A, %B %d, %Y') if not _qual else \
+            f"approximately {_now.strftime('%B %d, %Y')} or a little later (clock restored after power loss)"
+        return ("=== CURRENT DATE ===\n"
+                f"{_date} — season: {_season} (Northern Hemisphere).\n"
+                f"IMPORTANT: Tailor every season-dependent answer to {_season}. Lead with the "
+                f"method that fits {_season}. Do NOT recommend or lead with cold/winter-only "
+                "techniques (snow shelters, quinzhee, ice fishing) unless the user explicitly "
+                "asks about winter or snow.\n"
+                "=== END DATE ==="), _season
+
     def build_context(self, user_message, settings=None):
         """Build system context string + metadata.
 
@@ -7020,38 +7115,10 @@ class AIManager:
         # type, clothing, planting, foraging, hunting seasons, expected weather) is
         # grounded in the real date. Without it the model had no sense of time and
         # suggested a QUINZHEE snow shelter in June.
-        import datetime as _dt
-        _now = _dt.datetime.now()
-        # After power loss with no internet, GPS or paired phone yet, the clock
-        # is only a lower bound (restored) or meaningless (unset, e.g. 1970):
-        # say so rather than give confidently wrong seasonal advice.
-        try:
-            import local_device
-            _qual = local_device.date_qualifier()
-        except Exception:
-            _qual = ""
-        if _qual is None:
-            parts.append(
-                "=== CURRENT DATE ===\n"
-                "Unknown — Atlas's clock has not been set since it lost power. If a date or "
-                "season matters to the answer, ask the user for it.\n"
-                "=== END DATE ==="
-            )
-            meta["season"] = None
-        else:
-            _season = _season_for(_now.month)
-            _date = _now.strftime('%A, %B %d, %Y') if not _qual else \
-                f"approximately {_now.strftime('%B %d, %Y')} or a little later (clock restored after power loss)"
-            parts.append(
-                "=== CURRENT DATE ===\n"
-                f"{_date} — season: {_season} (Northern Hemisphere).\n"
-                f"IMPORTANT: Tailor every season-dependent answer to {_season}. Lead with the "
-                f"method that fits {_season}. Do NOT recommend or lead with cold/winter-only "
-                "techniques (snow shelters, quinzhee, ice fishing) unless the user explicitly "
-                "asks about winter or snow.\n"
-                "=== END DATE ==="
-            )
-            meta["season"] = _season
+        _date_text, _season = self._date_block()
+        parts.append(_date_text)
+        meta["season"] = _season
+        _date_idx = len(parts) - 1
 
         # Live "senses" are retrieved on demand, not always-on.  An unrelated
         # survival/ballistics/general question is no longer flooded with host
@@ -7554,7 +7621,8 @@ class AIManager:
                         location_hint = f"{st}, {region} US" if region else st
                 with perf_metrics.timer("ray.retrieve"):
                     relevant_docs, rag_top_score = self.rag_search(
-                        user_message, top_k=top_k, embed_model=embed_model, location_hint=location_hint
+                        user_message, top_k=top_k, embed_model=embed_model, location_hint=location_hint,
+                        settings=settings,
                     )
                 # Passages get what the context window has left after the
                 # system prompt, the live data above and a floor for history.
@@ -7636,6 +7704,10 @@ class AIManager:
         if self._is_math_query(user_message):
             parts.append(_CALC_INSTRUCTION)
 
+        # For the "turn" layout (ray_prompt.py): the day-stable date block goes
+        # in the system message, everything else in this turn's user message.
+        meta["date_block"] = parts[_date_idx]
+        meta["turn_parts"] = parts[:_date_idx] + parts[_date_idx + 1:]
         return "\n\n".join(parts), meta
 
     # ------------------------------------------------------------------
@@ -7931,6 +8003,98 @@ class AIManager:
         return self._format_explain_trace(trace)
 
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    _CALC_RESULTS_INSTRUCTION = (
+        "\n\n=== INSTRUCTION FOR THIS RESPONSE ===\n"
+        "The CALCULATOR AGENT RESULTS above contain pre-verified drop, correction, spin drift, and time-of-flight values. "
+        "Use those exact numbers as-is — do NOT recalculate the values listed. "
+        "Present them directly to the user without deliberation. "
+        "For any quantity not listed above, answer from your knowledge."
+    )
+
+    def _calc_extra(self, user_message, settings):
+        """The calculator agent's pre-verified numbers for a physics question:
+        (text to add to this turn's context, block for /explain)."""
+        if not self._is_physics_query(user_message):
+            return "", None
+        with perf_metrics.timer("ray.calc_agent"), self.perf.generating():
+            calc_block, had_results = self._calc_agent_pass(user_message, settings)
+        if not had_results:
+            return "", None
+        return calc_block + self._CALC_RESULTS_INSTRUCTION, calc_block
+
+    @staticmethod
+    def _base_system(settings, units):
+        """Ray's instructions, the unit directive and the data rule: the part of
+        the system message that only changes when the owner changes settings."""
+        base = settings.get("system_prompt", DEFAULT_SETTINGS["system_prompt"])
+        # A single sentence: small models follow one-line system directives
+        # silently; annotated context blocks get narrated.
+        if units == "imperial":
+            base += "\nAlways express real-world measurements in imperial units (feet, miles, lb, °F, gallons). Show metric only in parentheses."
+        else:
+            base += "\nAlways express real-world measurements in metric units (meters, km, kg, °C, liters). Show imperial only in parentheses."
+        return base + "\n" + _untrusted.DATA_RULE
+
+    def _compose_messages(self, chat_id, user_message, settings, context, ctx_meta, calc_extra=""):
+        """The message list for one answer, and its token budget.
+
+        "turn" layout (default, ray_prompt.py): a stable system message, the
+        history as stored, and this turn's reference material in the final
+        user message, so the model server reuses the processed history.
+        "legacy": everything in the system message, as before.
+        """
+        import database as db
+        base = self._base_system(settings, ctx_meta.get("units", "metric"))
+        loc_prefix = _build_location_prefix(ctx_meta)
+        layout = ray_prompt.layout(settings)
+        if layout == "legacy" or "turn_parts" not in ctx_meta:
+            full = (context + ("\n\n" + calc_extra if calc_extra else "")).strip()
+            system = base + ("\n\n" + full if full else "")
+            user = loc_prefix + user_message
+            render = lambda m: m["content"]
+        else:
+            turn = "\n\n".join(p for p in ctx_meta["turn_parts"] if p)
+            if calc_extra:
+                turn = (turn + "\n\n" + calc_extra).strip()
+            system = ray_prompt.system_message(base, ctx_meta.get("date_block"))
+            user = ray_prompt.user_message(turn, loc_prefix + user_message)
+            render = lambda m: ray_prompt.history_text(m["content"])
+        rows = db.ai_get_recent_messages(chat_id, _HISTORY_WINDOW_MAX)
+        kept, budget = token_budget.fit_history(system, user, rows[-_HISTORY_TURNS:], settings, DEFAULT_SETTINGS)
+        prof = settings.get("_profile") or {}
+        if layout == "turn" and prof.get("prefix_cache", "any") == "any":
+            def fits(candidate):
+                return token_budget.fit_history(system, user, candidate, settings,
+                                                DEFAULT_SETTINGS)[1]["history_dropped"] == 0
+            chosen, start = ray_prompt.sticky_history(rows, kept, self._history_start.get(chat_id), fits,
+                                                      _HISTORY_WINDOW_MAX)
+            if chosen is not kept:
+                kept, budget = token_budget.fit_history(system, user, chosen, settings, DEFAULT_SETTINGS)
+            self._remember_history_start(chat_id, start)
+        messages = [{"role": "system", "content": system}]
+        messages += [{"role": m["role"], "content": render(m)} for m in kept]
+        messages.append({"role": "user", "content": user})
+        budget["layout"] = layout
+        return messages, budget
+
+    @staticmethod
+    def _clock_boost_enabled():
+        import database as db
+        return str(db.ai_get_settings().get("ray_clock_boost", "on")).lower() != "off"
+
+    def _on_mains(self):
+        mesh = self.mesh_manager
+        return mesh.on_mains() if mesh is not None and hasattr(mesh, "on_mains") else True
+
+    def _remember_history_start(self, chat_id, start):
+        starts = self._history_start
+        starts.pop(chat_id, None)
+        if start is not None:
+            starts[chat_id] = start
+            while len(starts) > 256:
+                starts.pop(next(iter(starts)))
+
     def chat(self, chat_id, user_message):
         """Full pipeline: build context, call Ollama, store messages, return dict."""
         import database as db
@@ -7988,54 +8152,18 @@ class AIManager:
                     "duration_ms": 0, "tok_per_sec": None,
                 }
 
-        # Build augmented system prompt (settings already loaded — no extra DB call)
-        context, ctx_meta = self.build_context(user_message, settings=settings)
-
-        # Agent loop: for physics/ballistics queries, run the two-pass calculator agent
-        # before the final answer so the model is given pre-verified numbers.
-        explain_calc_block = None
-        if self._is_physics_query(user_message):
-            calc_block, had_results = self._calc_agent_pass(user_message, settings)
-            if had_results:
-                explain_calc_block = calc_block
-                context = (context + "\n\n" + calc_block).strip()
-                # Override instruction: tell model the numbers are already computed
-                context += (
-                    "\n\n=== INSTRUCTION FOR THIS RESPONSE ===\n"
-                    "The CALCULATOR AGENT RESULTS above contain pre-verified drop, correction, spin drift, and time-of-flight values. "
-                    "Use those exact numbers as-is — do NOT recalculate the values listed. "
-                    "Present them directly to the user without deliberation. "
-                    "For any quantity not listed above, answer from your knowledge."
-                )
-
-        # Append unit directive to system prompt as a single sentence — small models
-        # follow one-line system directives silently; annotated context blocks get narrated.
-        _units = ctx_meta.get("units", "metric")
-        if _units == "imperial":
-            base_system += "\nAlways express real-world measurements in imperial units (feet, miles, lb, °F, gallons). Show metric only in parentheses."
-        else:
-            base_system += "\nAlways express real-world measurements in metric units (meters, km, kg, °C, liters). Show imperial only in parentheses."
-        base_system += "\n" + _untrusted.DATA_RULE
-
-        system_content = base_system
-        if context:
-            system_content = base_system + "\n\n" + context
-
-        # History: up to the last 8 turns, newest first while they fit the window.
-        loc_prefix = _build_location_prefix(ctx_meta)
-        recent_history, budget = token_budget.fit_history(
-            system_content, loc_prefix + user_message, db.ai_get_recent_messages(chat_id, _HISTORY_TURNS),
-            settings, DEFAULT_SETTINGS)
-        messages = [{"role": "system", "content": system_content}]
-        for msg in recent_history:
-            messages.append({"role": msg["role"], "content": msg["content"]})
-        messages.append({"role": "user", "content": loc_prefix + user_message})
+        # Context for this question (settings already loaded — no extra DB call),
+        # then the calculator agent's pre-verified numbers for physics questions.
+        with perf_metrics.timer("ray.context"):
+            context, ctx_meta = self.build_context(user_message, settings=settings)
+        calc_extra, explain_calc_block = self._calc_extra(user_message, settings)
+        messages, budget = self._compose_messages(chat_id, user_message, settings, context, ctx_meta, calc_extra)
 
         # Save user message (without the injected location prefix)
         db.ai_add_message(chat_id, "user", user_message)
 
         # Call Ollama
-        t0 = time.time()
+        t0 = time.perf_counter()
         payload = json.dumps(self._finalize_payload({
             "model": model,
             "messages": messages,
@@ -8049,10 +8177,10 @@ class AIManager:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with self._ollama_slot():
+        with self._ollama_slot(), self.perf.generating():
             resp = urllib.request.urlopen(req, timeout=180)
             result = json.loads(resp.read())
-        duration_ms = int((time.time() - t0) * 1000)
+        duration_ms = int((time.perf_counter() - t0) * 1000)
         perf_metrics.record("ray.answer", duration_ms / 1000)
         _record_prompt_size(budget, result.get("prompt_eval_count"))
 
@@ -8103,6 +8231,7 @@ class AIManager:
     def chat_stream(self, chat_id, user_message):
         """Streaming pipeline: yields str tokens, then a final metadata dict."""
         import database as db
+        t_request = time.perf_counter()
         self._wait_for_startup_warmup()
         settings = self.runtime_settings()  # fetch once (with the model's profile); passed downstream
         model = settings["model"]
@@ -8150,43 +8279,14 @@ class AIManager:
                        "eval_duration": None, "duration_ms": 0, "tok_per_sec": None}
                 return
 
-        context, ctx_meta = self.build_context(user_message, settings=settings)
-
+        t_context = time.perf_counter()
+        with perf_metrics.timer("ray.context"):
+            context, ctx_meta = self.build_context(user_message, settings=settings)
+        t_calc = time.perf_counter()
         # Agent loop: run calculator agent pass before streaming so numbers are pre-verified
-        explain_calc_block = None
-        if self._is_physics_query(user_message):
-            calc_block, had_results = self._calc_agent_pass(user_message, settings)
-            if had_results:
-                explain_calc_block = calc_block
-                context = (context + "\n\n" + calc_block).strip()
-                context += (
-                    "\n\n=== INSTRUCTION FOR THIS RESPONSE ===\n"
-                    "The CALCULATOR AGENT RESULTS above contain pre-verified drop, correction, spin drift, and time-of-flight values. "
-                    "Use those exact numbers as-is — do NOT recalculate the values listed. "
-                    "Present them directly to the user without deliberation. "
-                    "For any quantity not listed above, answer from your knowledge."
-                )
-
-        _units = ctx_meta.get("units", "metric")
-        if _units == "imperial":
-            base_system += "\nAlways express real-world measurements in imperial units (feet, miles, lb, °F, gallons). Show metric only in parentheses."
-        else:
-            base_system += "\nAlways express real-world measurements in metric units (meters, km, kg, °C, liters). Show imperial only in parentheses."
-        base_system += "\n" + _untrusted.DATA_RULE
-
-        system_content = base_system
-        if context:
-            system_content = base_system + "\n\n" + context
-
-        # History: up to the last 8 turns, newest first while they fit the window.
-        loc_prefix = _build_location_prefix(ctx_meta)
-        recent_history, budget = token_budget.fit_history(
-            system_content, loc_prefix + user_message, db.ai_get_recent_messages(chat_id, _HISTORY_TURNS),
-            settings, DEFAULT_SETTINGS)
-        messages = [{"role": "system", "content": system_content}]
-        for msg in recent_history:
-            messages.append({"role": msg["role"], "content": msg["content"]})
-        messages.append({"role": "user", "content": loc_prefix + user_message})
+        calc_extra, explain_calc_block = self._calc_extra(user_message, settings)
+        t_compose = time.perf_counter()
+        messages, budget = self._compose_messages(chat_id, user_message, settings, context, ctx_meta, calc_extra)
 
         db.ai_add_message(chat_id, "user", user_message)
 
@@ -8204,12 +8304,15 @@ class AIManager:
             method="POST",
         )
 
-        t0 = time.time()
+        t0 = time.perf_counter()
         full_content = ""
         eval_count = None
         eval_duration = None
+        timings = {"context_s": round(t_calc - t_context, 3), "calc_s": round(t_compose - t_calc, 3),
+                   "layout": budget.get("layout")}
 
-        with self._ollama_slot():
+        with self._ollama_slot(), self.perf.generating():
+            t_slot = time.perf_counter()
             resp = urllib.request.urlopen(req, timeout=300)
             try:
                 for raw_line in resp:
@@ -8223,14 +8326,23 @@ class AIManager:
                     token = chunk.get("message", {}).get("content", "")
                     if token:
                         if not full_content:
-                            perf_metrics.record("ray.first_token", time.time() - t0)
+                            now = time.perf_counter()
+                            perf_metrics.record("ray.first_token", now - t0)
+                            perf_metrics.record("ray.ttft_total", now - t_request)
+                            timings["ttft_s"] = round(now - t_request, 3)
+                            timings["queue_s"] = round(t_slot - t0, 3)
                         full_content += token
+                        self.perf.renew()
                         yield token
                     if chunk.get("done"):
                         eval_count = chunk.get("eval_count")
                         eval_duration = chunk.get("eval_duration")
-                        perf_metrics.record("ray.answer", time.time() - t0)
+                        perf_metrics.record("ray.answer", time.perf_counter() - t0)
                         _record_prompt_size(budget, chunk.get("prompt_eval_count"))
+                        timings.update(
+                            prompt_tokens=chunk.get("prompt_eval_count"),
+                            prefill_s=round((chunk.get("prompt_eval_duration") or 0) / 1e9, 3),
+                            load_s=round((chunk.get("load_duration") or 0) / 1e9, 3))
                         break
             finally:
                 resp.close()
@@ -8253,7 +8365,7 @@ class AIManager:
         yield confidence_suffix
         full_content += confidence_suffix
 
-        duration_ms = int((time.time() - t0) * 1000)
+        duration_ms = int((time.perf_counter() - t0) * 1000)
         tok_per_sec = None
         if eval_count and eval_duration and eval_duration > 0:
             tok_per_sec = round(eval_count / (eval_duration / 1e9), 1)
@@ -8271,4 +8383,5 @@ class AIManager:
             db.ai_update_chat_title(chat_id, short_title)
 
         yield {"done": True, "model": model, "eval_count": eval_count,
-               "eval_duration": eval_duration, "duration_ms": duration_ms, "tok_per_sec": tok_per_sec}
+               "eval_duration": eval_duration, "duration_ms": duration_ms, "tok_per_sec": tok_per_sec,
+               "timings": timings}

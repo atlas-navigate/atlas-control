@@ -211,10 +211,7 @@ def resolve(settings, model_id=None, hw=None):
     base = dict(opts)
     kept, clamped = clean_overrides(model, overrides_from_settings(settings, model["id"]), hw)
     opts.update(kept)
-    try:
-        hours = float(settings.get("keep_alive_hours") or 10)
-    except (TypeError, ValueError):
-        hours = 10
+    keep_alive, keep_alive_hours = keep_alive_for(settings.get("keep_alive_hours"))
     return {
         "id": model["id"],
         "label": model["label"],
@@ -226,13 +223,34 @@ def resolve(settings, model_id=None, hw=None):
         "overrides": kept,
         "clamped": clamped,
         "think": bool(model.get("think", False)),
-        "keep_alive": f"{max(1, min(24, hours)):g}h",
+        # How llama-server can reuse an earlier prompt: "any" common prefix
+        # (transformers), or only at its saved checkpoints ("checkpoint",
+        # hybrid models such as Qwen3.5), which Ray's history can't use.
+        "prefix_cache": model.get("prefix_cache", "any"),
+        "keep_alive": keep_alive,
+        "keep_alive_hours": keep_alive_hours,
         "chars_per_token": model.get("chars_per_token", 3.3),
         "memory_mb": estimate_mb(model, opts["num_ctx"], variant),
         "embedder": embedder_plan(model, hw),
         "measured": dict(model.get("measured") or {}),
         "fallback_from": fallback_from,
     }
+
+
+def keep_alive_for(value):
+    """(Ollama keep_alive, the setting as shown) for the owner's choice.
+
+    "always" (the default) keeps Ray's models loaded until something needs
+    the memory (navigation unloads them; see app.py) — a model reloads in
+    15-25 s, which is what an idle timeout made every first question after a
+    quiet night wait for. A number is hours, 1-24."""
+    if str(value or "always").strip().lower() in ("always", "-1", "0"):
+        return "-1m", "always"            # negative: no idle timeout
+    try:
+        hours = max(1.0, min(24.0, float(value)))
+    except (TypeError, ValueError):
+        hours = 10.0
+    return f"{hours:g}h", f"{hours:g}"
 
 
 def estimate_mb(model, ctx, variant=None):

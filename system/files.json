@@ -60,6 +60,18 @@
       "kind": "systemd"
     },
     {
+      "src": "systemd/atlas-perf-release.service",
+      "dst": "/etc/systemd/system/atlas-perf-release.service",
+      "mode": "0644",
+      "kind": "systemd"
+    },
+    {
+      "src": "systemd/atlas-perf-release.timer",
+      "dst": "/etc/systemd/system/atlas-perf-release.timer",
+      "mode": "0644",
+      "kind": "systemd"
+    },
+    {
       "src": "nginx/atlas-proxy.conf",
       "dst": "/etc/nginx/snippets/atlas-proxy.conf",
       "mode": "0644",
@@ -120,6 +132,12 @@
       "dst": "/usr/local/lib/atlas/bin/atlas-identity",
       "mode": "0755",
       "kind": "plain"
+    },
+    {
+      "src": "ollama/atlas.conf",
+      "dst": "/etc/systemd/system/ollama.service.d/atlas.conf",
+      "mode": "0644",
+      "kind": "ollama"
     },
     {
       "src": "avahi/atlas.service",

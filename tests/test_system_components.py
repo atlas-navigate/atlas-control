@@ -484,6 +484,30 @@ class DiscoveryFilesTests(unittest.TestCase):
         self.assertEqual(sysfiles.rerender_installed(), [])          # unchanged: nothing written
 
 
+class OllamaDropInTests(unittest.TestCase):
+    def test_runner_settings_ship_as_a_drop_in_and_restart_ollama_once(self):
+        sb = Sandbox()
+        self.addCleanup(sb.cleanup)
+        from atlas_engine import sysfiles
+        unit = sb.paths.p("/etc/systemd/system/ollama.service")
+        os.makedirs(os.path.dirname(unit), exist_ok=True)
+        open(unit, "w").write("[Service]\nExecStart=/usr/local/bin/ollama serve\n")
+        release = os.path.join(sb.root, "rel")
+        shutil.copytree(os.path.join(REPO, "system"), os.path.join(release, "system"))
+        with mock.patch("atlas_engine.firewall.check", return_value=mock.Mock(returncode=0)):
+            changed = sysfiles.install(release, os.path.join(sb.root, "bk"), sb.runner)
+        dropin = open(sb.paths.p("/etc/systemd/system/ollama.service.d/atlas.conf")).read()
+        self.assertIn('Environment="LLAMA_ARG_CACHE_RAM=', dropin)
+        self.assertIn("ollama", changed)
+        self.assertTrue(sb.runner.ran("systemd-analyze", "verify", "--man=no", "ollama.service"))
+        sysfiles.reload_changed(changed, None, sb.runner)
+        self.assertTrue(sb.runner.ran("systemctl", "try-restart", "ollama.service"))
+        # Unchanged on the next update: no restart of Ollama (and Ray) for nothing.
+        with mock.patch("atlas_engine.firewall.check", return_value=mock.Mock(returncode=0)):
+            again = sysfiles.install(release, os.path.join(sb.root, "bk2"), sb.runner)
+        self.assertNotIn("ollama", again)
+
+
 class NginxDefaultSiteTests(unittest.TestCase):
     def test_default_site_is_disabled_and_rollback_restores_the_link(self):
         sb = Sandbox()

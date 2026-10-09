@@ -26,6 +26,9 @@ def engine_main(argv):
     elif cmd == "clock":
         from . import clock
         return clock.main(argv[1:])
+    elif cmd == "perf":
+        from . import perf
+        return perf.main(argv[1:])
     elif cmd == "verify" and len(argv) == 2:
         return verify_release_dir(argv[1])
     else:

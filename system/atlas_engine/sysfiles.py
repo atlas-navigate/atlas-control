@@ -26,6 +26,10 @@ KINDS_RELOAD = {
     "udev": [["udevadm", "control", "--reload"], ["udevadm", "trigger", "--subsystem-match=tty"]],
     "firewall": [["systemctl", "try-restart", "atlas-firewall.service"]],
     "avahi": [["systemctl", "try-reload-or-restart", "avahi-daemon"]],
+    # A drop-in for the Ollama service (installed by install.sh): reload
+    # systemd and restart Ollama so its runners pick the settings up. Runs
+    # before the app restarts, which then loads Ray's models again.
+    "ollama": [["systemctl", "daemon-reload"], ["systemctl", "try-restart", "ollama.service"]],
 }
 
 
@@ -172,6 +176,12 @@ def validate(spec, changed, runner):
             r = runner.run(["udevadm", "verify", dst], timeout=60)
             if r.returncode != 0:
                 raise SystemFilesError("udev rules invalid: " + (r.stderr or r.stdout).strip()[-400:])
+        elif kind == "ollama":
+            if os.path.exists(paths.p("/etc/systemd/system/ollama.service")) or \
+                    os.path.exists(paths.p("/usr/lib/systemd/system/ollama.service")):
+                r = runner.run(["systemd-analyze", "verify", "--man=no", "ollama.service"], timeout=60)
+                if r.returncode != 0:
+                    raise SystemFilesError("Ollama settings invalid: " + (r.stderr or r.stdout).strip()[-400:])
         elif kind == "avahi":
             try:
                 ET.parse(dst)

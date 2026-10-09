@@ -1,0 +1,10 @@
+# Managed by the Atlas updater. Restarted by every boost (helper verb
+# perf.boost): if the app stops renewing its lease, the clocks go back 90 s
+# after the last boost.
+[Unit]
+Description=Atlas: Ray's clock boost lease
+
+[Timer]
+OnActiveSec=90s
+AccuracySec=1s
+Unit=atlas-perf-release.service
