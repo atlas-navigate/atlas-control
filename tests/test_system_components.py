@@ -90,6 +90,13 @@ class HelperValidationTests(unittest.TestCase):
         req = json.load(open(self.sb.paths.REQUEST))
         self.assertEqual(req["handoff_dir"], self.sb.paths.HANDOFF)
 
+    def test_avahi_reclaim_restarts_rather_than_reloads(self):
+        # A reload never probes the host name again, so it cannot undo atlas-2.local.
+        with mock.patch.object(self.helper, "_run", return_value={"rc": 0, "out": "", "err": ""}) as run:
+            out = self.helper.handle({"verb": "avahi.reclaim", "args": {}})
+        self.assertTrue(out["ok"])
+        run.assert_called_once_with(["systemctl", "restart", "avahi-daemon"], timeout=20)
+
 
 class IdentityTests(unittest.TestCase):
     def setUp(self):

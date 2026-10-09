@@ -356,18 +356,28 @@ log "Required system commands verified"
 # unreachable address and the connection silently fails. Deny that bridge
 # rather than pinning one Wi-Fi interface name (a unit whose module enumerates
 # differently would silently stop being discoverable), and use IPv4 so clients
-# don't latch onto a rotating privacy address. The DNS-SD advert itself
+# don't latch onto a rotating privacy address. use-ipv6=no alone still
+# publishes AAAA records over IPv4; publish-aaaa-on-ipv4=no stops that, and
+# with it the re-registration on every address rotation that can push avahi
+# into a name conflict (atlas-2.local). The DNS-SD advert itself
 # (_atlas._tcp with this unit's id and key pin) comes with the release.
 AVAHI_CONF="/etc/avahi/avahi-daemon.conf"
 sed -i 's/^[#[:space:]]*use-ipv6=.*/use-ipv6=no/' "$AVAHI_CONF"
+if grep -q '^[#[:space:]]*publish-aaaa-on-ipv4=' "$AVAHI_CONF"; then
+    sed -i -E 's/^[#[:space:]]*publish-aaaa-on-ipv4=.*/publish-aaaa-on-ipv4=no/' "$AVAHI_CONF"
+else
+    sed -i '/^\[publish\]/a publish-aaaa-on-ipv4=no' "$AVAHI_CONF"
+fi
 sed -i -E 's/^[#[:space:]]*allow-interfaces=.*/#allow-interfaces=/' "$AVAHI_CONF"
 if grep -q '^[#[:space:]]*deny-interfaces=' "$AVAHI_CONF"; then
     sed -i -E 's/^[#[:space:]]*deny-interfaces=.*/deny-interfaces=docker0/' "$AVAHI_CONF"
 else
     sed -i '/^\[server\]/a deny-interfaces=docker0' "$AVAHI_CONF"
 fi
-systemctl enable --now avahi-daemon
-systemctl reload-or-restart avahi-daemon || true
+systemctl enable avahi-daemon
+# A restart, not a reload: avahi only re-reads its service files on reload,
+# so the settings above would otherwise wait for the next boot.
+systemctl restart avahi-daemon || true
 log "avahi-daemon enabled (IPv4, every interface but docker0)"
 
 systemctl enable --now bluetooth

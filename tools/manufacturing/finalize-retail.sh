@@ -69,14 +69,19 @@ if [[ -f "$AVAHI_CONF" ]]; then
         cp -n "$AVAHI_CONF" "$AVAHI_CONF.atlas-orig" || true
         # Pinning allow-interfaces to one Wi-Fi name silently stops discovery
         # on a unit whose module enumerates differently; deny the container
-        # bridge instead, and publish no workstation/host details.
+        # bridge instead, and publish no workstation/host details. No AAAA
+        # records either: clients should not latch onto a rotating privacy
+        # address, and each rotation re-registers the host records, which can
+        # push avahi into a name conflict (atlas-xxxx-2.local).
         sed -i -E 's/^[#[:space:]]*allow-interfaces=.*/#allow-interfaces=/' "$AVAHI_CONF"
         sed -i -E 's/^[#[:space:]]*deny-interfaces=.*/deny-interfaces=docker0/' "$AVAHI_CONF"
         grep -q '^deny-interfaces=' "$AVAHI_CONF" || sed -i '/^\[server\]/a deny-interfaces=docker0' "$AVAHI_CONF"
         sed -i -E 's/^[#[:space:]]*publish-workstation=.*/publish-workstation=no/; s/^[#[:space:]]*publish-hinfo=.*/publish-hinfo=no/' "$AVAHI_CONF"
+        sed -i -E 's/^[#[:space:]]*publish-aaaa-on-ipv4=.*/publish-aaaa-on-ipv4=no/' "$AVAHI_CONF"
+        grep -q '^publish-aaaa-on-ipv4=' "$AVAHI_CONF" || sed -i '/^\[publish\]/a publish-aaaa-on-ipv4=no' "$AVAHI_CONF"
         systemctl try-restart avahi-daemon.service || true
     fi
-    log "mDNS: every interface but docker0, no host details published"
+    log "mDNS: every interface but docker0, IPv4 addresses only, no host details published"
 fi
 
 # ── Checks ───────────────────────────────────────────────────────────────────

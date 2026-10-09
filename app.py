@@ -4185,6 +4185,64 @@ def _avahi_reload_quiet():
             logging.info("avahi reload skipped: %s", out[:120])
     threading.Thread(target=_run, daemon=True, name="avahi-reload").start()
 
+
+# Wait between attempts to win back the mDNS name: 30 s, 2 min, 10 min, then hourly.
+_MDNS_RECLAIM_BACKOFF = (30, 120, 600, 3600)
+_MDNS_CHECK_INTERVAL = 30
+
+
+def _mdns_reclaim_decision(advertised, expected, attempts):
+    """(restart avahi now?, seconds until the next check) for the mDNS name guard.
+
+    After a name conflict avahi renames itself (atlas -> atlas-2) and never
+    tries the real name again, so atlas.local silently stops resolving even
+    once the conflict is long gone.  A restart makes it probe again.  Back off
+    between attempts: if another unit really holds the name, avahi just loses
+    the probe again, and probing does not disturb that unit.
+    """
+    if not advertised or not expected or advertised == expected:
+        return False, _MDNS_CHECK_INTERVAL
+    return True, _MDNS_RECLAIM_BACKOFF[min(attempts, len(_MDNS_RECLAIM_BACKOFF) - 1)]
+
+
+def _avahi_host_name():
+    """The host name avahi is advertising right now, or "" if it can't be read."""
+    try:
+        r = subprocess.run(
+            ["busctl", "--system", "call", "org.freedesktop.Avahi", "/",
+             "org.freedesktop.Avahi.Server", "GetHostName"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except Exception:
+        return ""
+    m = re.fullmatch(r's "(.*)"', r.stdout.strip()) if r.returncode == 0 else None
+    return m.group(1) if m else ""
+
+
+def _mdns_name_guard_loop():
+    """Keep avahi advertising this unit's own hostname (see _mdns_reclaim_decision)."""
+    attempts = 0
+    while True:
+        expected = os.uname().nodename.split(".")[0]
+        advertised = _avahi_host_name()
+        reclaim, delay = _mdns_reclaim_decision(advertised, expected, attempts)
+        if reclaim:
+            logger.warning(
+                "mDNS: avahi is advertising %s.local instead of %s.local after a name "
+                "conflict; restarting it to reclaim the name (attempt %d)",
+                advertised, expected, attempts + 1,
+            )
+            out, rc = atlas_helper.run("avahi.reclaim", timeout=30)
+            if rc != 0:
+                logger.warning("avahi reclaim failed: %s", out[:120])
+            attempts += 1
+        elif advertised == expected:
+            if attempts:
+                logger.info("mDNS: %s.local reclaimed", expected)
+            attempts = 0
+        time.sleep(delay)
+
+
 def _candidate_mobile_hosts():
     """HTTPS URLs this Atlas answers on, numeric addresses first.
 
@@ -4869,6 +4927,7 @@ def main():
         gevent.spawn(_update_background_loop)
         gevent.spawn(_stats_push_loop)
         threading.Thread(target=_wifi_failover_loop, daemon=True, name="wifi-failover").start()
+        threading.Thread(target=_mdns_name_guard_loop, daemon=True, name="mdns-guard").start()
 
     logger.info(f"Dashboard at http://{args.host}:{web_port}")
     socketio.run(app, host=args.host, port=web_port, debug=False, allow_unsafe_werkzeug=True)

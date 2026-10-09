@@ -93,6 +93,12 @@ def v_avahi_reload(args):
     return _run(["systemctl", "reload-or-restart", "avahi-daemon"], timeout=20)
 
 
+def v_avahi_reclaim(args):
+    # A reload only re-reads service files. Once a name conflict has renamed
+    # the host (atlas-2.local) only a restart probes for the real name again.
+    return _run(["systemctl", "restart", "avahi-daemon"], timeout=20)
+
+
 def v_smart_read(args):
     # One fixed device, read-only attributes. rc 4 = warnings, data still valid.
     return _run(["smartctl", "-A", "-H", "--json", "/dev/nvme0n1"], timeout=10)
@@ -157,6 +163,7 @@ VERBS = {
     "net.hotspot_down": v_net_hotspot_down,
     "net.forget_all": v_net_forget_all,
     "avahi.reload": v_avahi_reload,
+    "avahi.reclaim": v_avahi_reclaim,
     "smart.read": v_smart_read,
     "power.reboot": v_power_reboot,
     "power.shutdown": v_power_shutdown,

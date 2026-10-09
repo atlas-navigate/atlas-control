@@ -192,7 +192,8 @@ def apply_hostname(host):
         fsutil.atomic_write_bytes("/etc/hosts", ("\n".join(lines) + "\n").encode(), mode=0o644)
     except OSError:
         pass
-    subprocess.run(["systemctl", "try-reload-or-restart", "avahi-daemon"], capture_output=True)
+    # Restart, not reload: avahi reads the host name only at startup.
+    subprocess.run(["systemctl", "try-restart", "avahi-daemon"], capture_output=True)
     return True
 
 
