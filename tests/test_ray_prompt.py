@@ -130,7 +130,7 @@ class StickyHistoryTests(unittest.TestCase):
             self.assertTrue({m["id"] for m in default} <= {m["id"] for m in chosen})
             self.assertLessEqual(len(chosen), max(12, len(default)))
 
-    def test_turn_layout_on_a_checkpoint_model_uses_the_plain_window(self):
+    def test_a_checkpoint_model_keeps_the_original_layout(self):
         db._local.conn = None
         db.init_db()
         chat = db.ai_create_chat()["id"]
@@ -139,8 +139,10 @@ class StickyHistoryTests(unittest.TestCase):
             db.ai_add_message(chat, "user", f"q{i}")
             db.ai_add_message(chat, "assistant", f"a{i}")
         context, meta = _ctx("X")
-        msgs, _ = m._compose_messages(chat, "q?", _settings("turn", "checkpoint"), context, meta)
+        msgs, budget = m._compose_messages(chat, "q?", _settings("turn", "checkpoint"), context, meta)
+        self.assertEqual(budget["layout"], "legacy")
         self.assertEqual(len(msgs), 1 + 8 + 1)
+        self.assertEqual(msgs[-1]["content"], "q?")
         self.assertEqual(m._history_start, {})
 
 

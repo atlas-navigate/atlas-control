@@ -24,7 +24,9 @@ everything up to the previous question. Nothing is left out: the same blocks
 reach the model, in a different message.
 
 "legacy" is the old layout, kept for A/B measurements and as a rollback
-(ai_settings ray_prompt_layout).
+(ai_settings ray_prompt_layout). Models whose server can only reuse a prompt
+at its own checkpoints (hybrid models such as Qwen3.5: ai_models.json
+prefix_cache "checkpoint") gain nothing from "turn" and keep "legacy".
 """
 import re
 

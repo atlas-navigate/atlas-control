@@ -5475,7 +5475,7 @@ class AIManager:
         """A first request whose system message is byte-identical to a real
         turn's (ray_prompt "turn" layout), so loading the model also processes
         Ray's instructions and the first question only pays for itself."""
-        if ray_prompt.layout(settings) != "turn":
+        if self._prompt_layout(settings) != "turn":
             return [{"role": "user", "content": "hi"}]
         try:
             import database as db
@@ -8053,7 +8053,7 @@ class AIManager:
         import database as db
         base = self._base_system(settings, ctx_meta.get("units", "metric"))
         loc_prefix = _build_location_prefix(ctx_meta)
-        layout = ray_prompt.layout(settings)
+        layout = self._prompt_layout(settings)
         if layout == "turn" and (ctx_meta.get("system_parts") or calc_extra):
             # Math questions keep the original arrangement, calculator
             # instruction last before the question: measured, qwen2.5:3b
@@ -8072,8 +8072,7 @@ class AIManager:
             render = lambda m: ray_prompt.history_text(m["content"])
         rows = db.ai_get_recent_messages(chat_id, _HISTORY_WINDOW_MAX)
         kept, budget = token_budget.fit_history(system, user, rows[-_HISTORY_TURNS:], settings, DEFAULT_SETTINGS)
-        prof = settings.get("_profile") or {}
-        if layout == "turn" and prof.get("prefix_cache", "any") == "any":
+        if layout == "turn":
             def fits(candidate):
                 return token_budget.fit_history(system, user, candidate, settings,
                                                 DEFAULT_SETTINGS)[1]["history_dropped"] == 0
@@ -8096,6 +8095,16 @@ class AIManager:
     def _on_mains(self):
         mesh = self.mesh_manager
         return mesh.on_mains() if mesh is not None and hasattr(mesh, "on_mains") else True
+
+    @staticmethod
+    def _prompt_layout(settings):
+        """The owner-independent layout for this model: "turn" only helps a
+        model whose server can reuse any common prefix; a hybrid model
+        (Qwen3.5: reuse only at its own checkpoints) keeps the original."""
+        prof = settings.get("_profile") or {}
+        if prof.get("prefix_cache", "any") != "any":
+            return "legacy"
+        return ray_prompt.layout(settings)
 
     def _remember_history_start(self, chat_id, start):
         starts = self._history_start
