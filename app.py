@@ -4408,8 +4408,17 @@ def _nmcli(*args, timeout=20):
         err = r.stderr.strip()
         return (out + ("\n" + err if err else "")).strip(), r.returncode
     except Exception as e:
+        global _NMCLI_FAILURES
+        _NMCLI_FAILURES += 1
         logging.warning("_nmcli exception (%s): %s", args[:3], e)
         return str(e), -1
+
+
+# nmcli calls that failed outright (timed out, could not run). A failed query
+# says nothing about the network: the Wi-Fi failover must not read it as "no
+# LAN" (seen while the unit was swapping: 20 s nmcli timeouts started the
+# hotspot fallback timer on a working Wi-Fi link).
+_NMCLI_FAILURES = 0
 
 def _wifi_iface():
     """Return the first active WiFi interface name."""
@@ -4711,10 +4720,16 @@ def _wifi_failover_loop():
     while True:
         time.sleep(8)
         try:
+            failures_before = _NMCLI_FAILURES
             hotspot = _current_hotspot_state()
             lan = _current_lan_link_state()
             connectivity = _network_connectivity_state()
             now = time.monotonic()   # intervals only: immune to clock corrections
+            if _NMCLI_FAILURES != failures_before:
+                # NetworkManager didn't answer: the state is unknown, not "no
+                # LAN". Decide nothing on this tick (the timer keeps its start).
+                logger.info("Wi-Fi failover: NetworkManager did not answer; skipping this check")
+                continue
             state = {
                 "lan": bool(lan),
                 "lan_name": (lan or {}).get("ssid", ""),
