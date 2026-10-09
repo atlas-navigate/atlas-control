@@ -568,12 +568,30 @@ def _ray_profile():
 
 
 def _restore_ray():
-    """Hand the runners back to the app: unload ours, let Ray warm up its own pair."""
+    """Hand the runners back to the app: unload ours, then load Ray's pair the
+    way its profile does (the app's own warmup when we have a token)."""
     unload_all_models()
     try:
         Atlas(load_token()).req("POST", "/api/ai/warmup", {}, timeout=300)
+        return
     except SystemExit:
-        print("no bench token: Ray reloads on its next question", file=sys.stderr)
+        pass
+    sys.path.insert(0, REPO)
+    import model_profiles
+    settings = _ray_settings()
+    prof = model_profiles.resolve(settings)
+    embed = settings.get("embed_model") or "qwen3-embedding:0.6b"
+    keep = prof.get("keep_alive", "10h")
+
+    def embedder():
+        obench.call("/api/embed", {"model": embed, "input": "warmup", "keep_alive": keep,
+                                   "options": prof["embedder"]["options"]})
+
+    def chat():
+        obench.chat(prof["tag"], [{"role": "user", "content": "hi"}],
+                    dict(prof["options"], num_predict=1), keep_alive=keep)
+    for step in ((embedder, chat) if prof["embedder"]["load_first"] else (chat, embedder)):
+        step()
 
 
 def _chat_direct(model, messages, options, keep_alive="30m"):

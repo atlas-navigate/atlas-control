@@ -25,6 +25,7 @@ import subprocess
 import threading
 import time
 
+import atlas_blocking
 import atlas_helper
 import device_identity
 
@@ -332,7 +333,9 @@ class LocalDevice:
         with self._lock:
             snap = self._snapshot
         if snap is None:
-            snap = self.refresh()
+            # Before the background thread's first pass: `ip` and busctl must
+            # not run on the gevent hub (subprocess is deliberately unpatched).
+            snap = atlas_blocking.call(self.refresh)
         return dict(snap, clock=clock_info(), updated=self._now())
 
     def advertised_hostname(self):
