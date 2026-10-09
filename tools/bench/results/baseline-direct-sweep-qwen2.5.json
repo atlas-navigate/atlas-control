@@ -1,0 +1,194 @@
+{
+ "meta": {
+  "at": "2026-10-08 22:56:56",
+  "mode": "direct-sweep",
+  "model": "qwen2.5:3b",
+  "base_options": {
+   "num_ctx": 4096,
+   "num_batch": 512,
+   "num_thread": 6,
+   "num_gpu": -1,
+   "num_predict": 1024,
+   "temperature": 0.7,
+   "top_p": 0.8,
+   "top_k": 20,
+   "repeat_penalty": 1.05
+  }
+ },
+ "rows": [
+  {
+   "num_batch": 512,
+   "num_thread": 6,
+   "load_s": 22.116,
+   "resident_mb": 1992,
+   "gpu_pct": 100,
+   "mem_avail_mb": 2199,
+   "prefill_tps": {
+    "n": 3,
+    "median": 825.3,
+    "p90": 830.3,
+    "min": 688.6,
+    "max": 830.3
+   },
+   "gen_tps": {
+    "n": 3,
+    "median": 19.6,
+    "p90": 19.7,
+    "min": 19.3,
+    "max": 19.7
+   },
+   "cpu_pct": {
+    "n": 3,
+    "median": 9.1,
+    "p90": 9.9,
+    "min": 8.1,
+    "max": 9.9
+   }
+  },
+  {
+   "num_batch": 512,
+   "num_thread": 4,
+   "load_s": 4.551,
+   "resident_mb": 1992,
+   "gpu_pct": 100,
+   "mem_avail_mb": 2169,
+   "prefill_tps": {
+    "n": 3,
+    "median": 823.8,
+    "p90": 828.8,
+    "min": 823.8,
+    "max": 828.8
+   },
+   "gen_tps": {
+    "n": 3,
+    "median": 19.7,
+    "p90": 19.7,
+    "min": 19.1,
+    "max": 19.7
+   },
+   "cpu_pct": {
+    "n": 3,
+    "median": 4.5,
+    "p90": 4.9,
+    "min": 4.4,
+    "max": 4.9
+   }
+  },
+  {
+   "num_batch": 512,
+   "num_thread": 2,
+   "load_s": 3.806,
+   "resident_mb": 1992,
+   "gpu_pct": 100,
+   "mem_avail_mb": 2219,
+   "prefill_tps": {
+    "n": 3,
+    "median": 827.5,
+    "p90": 828.3,
+    "min": 822.8,
+    "max": 828.3
+   },
+   "gen_tps": {
+    "n": 3,
+    "median": 19.7,
+    "p90": 19.7,
+    "min": 19.2,
+    "max": 19.7
+   },
+   "cpu_pct": {
+    "n": 3,
+    "median": 4.4,
+    "p90": 4.5,
+    "min": 4.3,
+    "max": 4.5
+   }
+  },
+  {
+   "num_batch": 1024,
+   "num_thread": 6,
+   "load_s": 3.39,
+   "resident_mb": 2072,
+   "gpu_pct": 100,
+   "mem_avail_mb": 2152,
+   "prefill_tps": {
+    "n": 3,
+    "median": 829.3,
+    "p90": 829.7,
+    "min": 820.7,
+    "max": 829.7
+   },
+   "gen_tps": {
+    "n": 3,
+    "median": 19.3,
+    "p90": 19.7,
+    "min": 19.2,
+    "max": 19.7
+   },
+   "cpu_pct": {
+    "n": 3,
+    "median": 4.7,
+    "p90": 4.9,
+    "min": 4.5,
+    "max": 4.9
+   }
+  },
+  {
+   "num_batch": 1024,
+   "num_thread": 4,
+   "load_s": 3.73,
+   "resident_mb": 2072,
+   "gpu_pct": 100,
+   "mem_avail_mb": 2121,
+   "prefill_tps": {
+    "n": 3,
+    "median": 838.6,
+    "p90": 840.4,
+    "min": 833.3,
+    "max": 840.4
+   },
+   "gen_tps": {
+    "n": 3,
+    "median": 19.7,
+    "p90": 19.7,
+    "min": 19.2,
+    "max": 19.7
+   },
+   "cpu_pct": {
+    "n": 3,
+    "median": 4.6,
+    "p90": 4.6,
+    "min": 4.5,
+    "max": 4.6
+   }
+  },
+  {
+   "num_batch": 1024,
+   "num_thread": 2,
+   "load_s": 10.861,
+   "resident_mb": 2072,
+   "gpu_pct": 100,
+   "mem_avail_mb": 2091,
+   "prefill_tps": {
+    "n": 3,
+    "median": 838.8,
+    "p90": 842.4,
+    "min": 838.2,
+    "max": 842.4
+   },
+   "gen_tps": {
+    "n": 3,
+    "median": 19.7,
+    "p90": 19.7,
+    "min": 19.2,
+    "max": 19.7
+   },
+   "cpu_pct": {
+    "n": 3,
+    "median": 4.9,
+    "p90": 5.4,
+    "min": 4.5,
+    "max": 5.4
+   }
+  }
+ ]
+}

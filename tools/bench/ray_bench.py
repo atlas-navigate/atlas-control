@@ -306,11 +306,11 @@ def run_turn(a, sampler, chat_id, text):
     return row
 
 
-def explain_sources(chat_id):
+def explain_sources(chat_id, db_path=None):
     """Titles of the passages Ray used for the newest answer in a chat (read-only DB)."""
     import sqlite3
     try:
-        con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=5)
+        con = sqlite3.connect(f"file:{db_path or DB_PATH}?mode=ro", uri=True, timeout=5)
         row = con.execute("SELECT explain FROM ai_messages WHERE chat_id=? AND role='assistant' "
                           "ORDER BY id DESC LIMIT 1", (chat_id,)).fetchone()
         con.close()
@@ -324,6 +324,129 @@ def explain_sources(chat_id):
         return []
     return [d.get("title") if isinstance(d, dict) else str(d) for d in docs]
 
+
+
+# ── targets: the app over HTTPS, or Ray's pipeline in this process ───────────
+class AppTarget:
+    """The running app, as a paired phone sees it."""
+    name = "app"
+
+    def __init__(self):
+        self.a = Atlas(load_token())
+
+    def describe(self):
+        status = ai_status(self.a)
+        return {"target": "app", "model": status.get("model"), "status": status,
+                "version": self.a.req("GET", "/api/health")[1].get("version")}
+
+    def new_chat(self):
+        return new_chat(self.a)
+
+    def turn(self, sampler, chat_id, text):
+        return run_turn(self.a, sampler, chat_id, text)
+
+    def sources(self, chat_id):
+        return explain_sources(chat_id)
+
+    def background(self):
+        return Background(self.a)
+
+
+class InprocTarget:
+    """Ray's own pipeline (this checkout's ai_manager), in this process, on a
+    copy of the live database, against the live Ollama. No app, no pairing:
+    for comparing prompt layouts and models on identical code paths. The
+    "legacy" layout is the pipeline the deployed release runs."""
+    name = "inproc"
+
+    def __init__(self, layout="turn", model=None):
+        import shutil
+        import sqlite3
+        import tempfile
+        self.state = tempfile.mkdtemp(prefix="ray-inproc-")
+        os.makedirs(os.path.join(self.state, "data"))
+        os.makedirs(os.path.join(self.state, "logs"))
+        os.symlink("/atlas_data/atlas-control/static", os.path.join(self.state, "static"))
+        self.db_path = os.path.join(self.state, "data", "meshtastic.db")
+        src = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=10)
+        dst = sqlite3.connect(self.db_path)
+        src.backup(dst)
+        src.close()
+        dst.close()
+        os.environ.update(ATLAS_STATE_DIR=self.state,
+                          ATLAS_IDENTITY_DIR=os.path.join(self.state, "no-identity"),
+                          ATLAS_HELPER_SOCKET=os.path.join(self.state, "no-helper.sock"),
+                          ATLAS_CLOCK_STATE=os.path.join(self.state, "no-clock.json"))
+        sys.path.insert(0, REPO)
+        import database
+        import ai_manager
+        self.db = database
+        self.db.ai_set_settings({"ray_prompt_layout": layout, "ray_clock_boost": "off",
+                                 **({"model": model} if model else {})})
+        self.layout = layout
+        self.m = ai_manager.AIManager()
+        self.m._startup_warmup_done.set()
+        import atexit
+        atexit.register(shutil.rmtree, self.state, ignore_errors=True)
+
+    def load(self):
+        """Load the model pair the way Ray does (order per profile)."""
+        settings = self.m.runtime_settings()
+        with self.m._ollama_slot(timeout=600), self.m._embed_slot(timeout=600):
+            self.m._load_pair(settings)
+
+    def describe(self):
+        sha = subprocess.run(["git", "-C", REPO, "rev-parse", "--short", "HEAD"], capture_output=True,
+                             text=True).stdout.strip()
+        return {"target": "inproc", "model": self.m.runtime_settings()["model"], "layout": self.layout,
+                "version": f"worktree {sha}"}
+
+    def new_chat(self):
+        return self.db.ai_create_chat()["id"]
+
+    def turn(self, sampler, chat_id, text):
+        wall0 = time.time()
+        t0 = time.monotonic()
+        first, content, meta, err = None, "", {}, None
+        try:
+            for chunk in self.m.chat_stream(chat_id, text):
+                if isinstance(chunk, dict):
+                    meta = chunk
+                elif chunk.startswith("\x00REPLACE\x00"):
+                    content = chunk[len("\x00REPLACE\x00"):]
+                else:
+                    if first is None:
+                        first = time.monotonic()
+                    content += chunk
+        except Exception as exc:
+            err = f"{type(exc).__name__}: {exc}"
+        t1 = time.monotonic()
+        time.sleep(0.6)
+        tasks = journal_tasks(wall0 - 0.5)
+        answer = tasks[-1] if tasks else {}
+        return {
+            "text": text, "chat_id": chat_id, "error": err,
+            "ttft_s": round(first - t0, 3) if first else None,
+            "e2e_s": round(t1 - t0, 3),
+            "gen_tokens": meta.get("eval_count"), "gen_tps": meta.get("tok_per_sec"),
+            "prompt_tokens": answer.get("prompt_tokens"), "cached_tokens": answer.get("cached_tokens"),
+            "prefill_tokens": answer.get("prefill_tokens"),
+            "prefill_s": round(answer["prefill_ms"] / 1000, 3) if answer.get("prefill_ms") else None,
+            "prefill_tps": answer.get("prefill_tps"), "llm_calls": len(tasks), "pre_calls": tasks[:-1],
+            "timings": meta.get("timings"), "hw": sampler.window(t0, t1), "answer": content,
+        }
+
+    def sources(self, chat_id):
+        return explain_sources(chat_id, self.db_path)
+
+    def background(self):
+        return None
+
+
+def make_target(args):
+    if getattr(args, "inproc", False):
+        return InprocTarget(layout=args.layout, model=args.model)
+    return AppTarget()
 
 def unload_all_models():
     for name in list(obench.loaded()):
@@ -393,11 +516,10 @@ class Background:
 
 
 def cmd_e2e(args):
-    a = Atlas(load_token())
-    status = ai_status(a)
-    meta = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "mode": "e2e", "model": status.get("model"),
-            "version": a.req("GET", "/api/health")[1].get("version"), "status": status,
-            "start_temp_c": wait_cool()}
+    target = make_target(args)
+    if isinstance(target, InprocTarget):
+        target.load()
+    meta = dict(target.describe(), at=time.strftime("%Y-%m-%d %H:%M:%S"), mode="e2e", start_temp_c=wait_cool())
     sampler = Sampler().start()
     rows = []
     scenarios = [s for s in args.scenarios.split(",") if s]
@@ -406,24 +528,27 @@ def cmd_e2e(args):
         for i in range(args.cold):
             unload_all_models()
             time.sleep(2)
-            r = run_turn(a, sampler, new_chat(a), POOLS["rag"][i % len(POOLS["rag"])])
+            if isinstance(target, InprocTarget) and target.m.runtime_settings()["_profile"]["embedder"]["load_first"] is False:
+                target.load()         # Qwen3.5 must load before the embedder (as Ray's warmup does)
+            r = target.turn(sampler, target.new_chat(), POOLS["rag"][i % len(POOLS["rag"])])
             r.update(scenario="cold", rep=i)
             rows.append(r)
             print(_brief(r), flush=True)
-        bg = Background(a).start() if args.background else None
+        bg = target.background() if args.background else None
+        bg = bg.start() if bg else None
         for rep in range(args.reps):
             for sc in scenarios:
                 if sc == "conversation":
                     conv = CONVERSATIONS[rep % len(CONVERSATIONS)]
-                    cid = new_chat(a)
+                    cid = target.new_chat()
                     for turn, text in enumerate(conv):
-                        r = run_turn(a, sampler, cid, text)
+                        r = target.turn(sampler, cid, text)
                         r.update(scenario="conversation", rep=rep, turn=turn)
                         rows.append(r)
                         print(_brief(r), flush=True)
                     continue
                 pool = POOLS[sc]
-                r = run_turn(a, sampler, new_chat(a), pool[rep % len(pool)])
+                r = target.turn(sampler, target.new_chat(), pool[rep % len(pool)])
                 r.update(scenario=sc, rep=rep)
                 rows.append(r)
                 print(_brief(r), flush=True)
@@ -432,12 +557,12 @@ def cmd_e2e(args):
         if args.soak_min:
             end = time.monotonic() + args.soak_min * 60
             i = 0
-            cid = new_chat(a)
+            cid = target.new_chat()
             while time.monotonic() < end:
                 if i % 6 == 0:
-                    cid = new_chat(a)
+                    cid = target.new_chat()
                 text = (POOLS["rag"] + POOLS["tool"])[i % (len(POOLS["rag"]) + len(POOLS["tool"]))]
-                r = run_turn(a, sampler, cid, text)
+                r = target.turn(sampler, cid, text)
                 r.update(scenario="soak", rep=i)
                 rows.append(r)
                 if i % 10 == 0:
@@ -500,7 +625,9 @@ def _check(answer, spec):
 
 
 def cmd_eval(args):
-    a = Atlas(load_token())
+    target = make_target(args)
+    if isinstance(target, InprocTarget):
+        target.load()
     with open(EVAL_FILE) as f:
         items = json.load(f)["items"]
     if args.only:
@@ -511,17 +638,17 @@ def cmd_eval(args):
     try:
         for run in range(args.runs):
             for it in items:
-                cid = new_chat(a)
+                cid = target.new_chat()
                 turns = []
                 for text in it["turns"]:
-                    turns.append(run_turn(a, sampler, cid, text))
+                    turns.append(target.turn(sampler, cid, text))
                 checks = it.get("checks") or [{"turn": len(turns) - 1, **{k: it[k] for k in
                                                                           ("facts", "any", "banned") if k in it}}]
                 fails = []
                 for c in checks:
                     ans = turns[c["turn"]]["answer"] if c["turn"] < len(turns) else ""
                     fails += [f"t{c['turn']} {x}" for x in _check(ans, c)]
-                sources = explain_sources(cid)
+                sources = target.sources(cid)
                 src_ok = None
                 if it.get("source") and sources is not None:
                     src_ok = any(it["source"].lower() in (s or "").lower() for s in sources)
@@ -544,9 +671,7 @@ def cmd_eval(args):
             k["source_hit"] += r["source_hit"]
     summary = {"pass": sum(r["pass"] for r in results), "total": len(results), "by_kind": by_kind}
     print(json.dumps(summary))
-    _write(args.out, {"meta": {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "mode": "eval",
-                               "model": ai_status(a).get("model"),
-                               "version": a.req("GET", "/api/health")[1].get("version")},
+    _write(args.out, {"meta": dict(target.describe(), at=time.strftime("%Y-%m-%d %H:%M:%S"), mode="eval"),
                       "results": results, "summary": summary})
 
 
@@ -803,10 +928,16 @@ def main():
     e.add_argument("--cold", type=int, default=2)
     e.add_argument("--background", action="store_true")
     e.add_argument("--soak-min", type=float, default=0)
+    e.add_argument("--inproc", action="store_true", help="Ray's pipeline in this process (no app, no pairing)")
+    e.add_argument("--layout", default="turn", choices=("turn", "legacy"))
+    e.add_argument("--model")
     v = sub.add_parser("eval")
     v.add_argument("--out")
     v.add_argument("--runs", type=int, default=1)
     v.add_argument("--only")
+    v.add_argument("--inproc", action="store_true")
+    v.add_argument("--layout", default="turn", choices=("turn", "legacy"))
+    v.add_argument("--model")
     d = sub.add_parser("direct")
     d.add_argument("what", choices=("layout", "sweep", "decode"))
     d.add_argument("--out")
