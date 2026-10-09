@@ -12,10 +12,12 @@ processed again on every turn.
 The "turn" layout keeps the system message stable (Ray's instructions, the
 unit and data rules, and the date, which changes once a day) and puts each
 turn's reference material in that turn's user message, before the question.
-Math questions are the exception: the calculator instruction and the
-calculator agent's verified numbers stay in the system message, where the
-model follows them (measured: 9/12 calculator answers right there, 4/12 when
-they rode in the user message).
+Math questions are the exception and keep the original arrangement (the
+calculator instruction and the calculator agent's verified numbers at the end
+of the system message, the question alone after them): measured on
+tools/bench/ray_eval.json, qwen2.5:3b follows them reliably only there
+(calculator answers 9/12 there, 4/12 with them in the user message, 7/12 at
+the start of the system message).
 
 History is replayed exactly as stored, so consecutive prompts share
 everything up to the previous question. Nothing is left out: the same blocks
@@ -47,17 +49,11 @@ def layout(settings):
     return value if value in LAYOUTS else DEFAULT_LAYOUT
 
 
-def system_message(base, date_block, extra=()):
-    """The system message for the turn layout: stable, except that a math
-    question appends the calculator instruction and the calculator agent's
-    verified results (`extra`) — a small model follows those reliably only
-    as system instructions. That turn then reuses less, nothing else changes."""
+def system_message(base, date_block):
+    """The stable system message for the turn layout."""
     text = base + "\n" + LAYOUT_NOTE
     if date_block:
         text += "\n\n" + date_block
-    for part in extra:
-        if part:
-            text += "\n\n" + part
     return text
 
 

@@ -8054,6 +8054,12 @@ class AIManager:
         base = self._base_system(settings, ctx_meta.get("units", "metric"))
         loc_prefix = _build_location_prefix(ctx_meta)
         layout = ray_prompt.layout(settings)
+        if layout == "turn" and (ctx_meta.get("system_parts") or calc_extra):
+            # Math questions keep the original arrangement, calculator
+            # instruction last before the question: measured, qwen2.5:3b
+            # follows it (and shows its working) only there. Such a turn
+            # changes the system message anyway, so this costs no extra reuse.
+            layout = "legacy"
         if layout == "legacy" or "turn_parts" not in ctx_meta:
             full = (context + ("\n\n" + calc_extra if calc_extra else "")).strip()
             system = base + ("\n\n" + full if full else "")
@@ -8061,10 +8067,7 @@ class AIManager:
             render = lambda m: m["content"]
         else:
             turn = "\n\n".join(p for p in ctx_meta["turn_parts"] if p)
-            # Calculator instruction and the agent's verified numbers: system
-            # message, this turn only (see build_context).
-            extra = list(ctx_meta.get("system_parts") or []) + ([calc_extra] if calc_extra else [])
-            system = ray_prompt.system_message(base, ctx_meta.get("date_block"), extra)
+            system = ray_prompt.system_message(base, ctx_meta.get("date_block"))
             user = ray_prompt.user_message(turn, loc_prefix + user_message)
             render = lambda m: ray_prompt.history_text(m["content"])
         rows = db.ai_get_recent_messages(chat_id, _HISTORY_WINDOW_MAX)
