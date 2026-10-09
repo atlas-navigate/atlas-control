@@ -359,7 +359,7 @@ class InprocTarget:
     "legacy" layout is the pipeline the deployed release runs."""
     name = "inproc"
 
-    def __init__(self, layout="turn", model=None):
+    def __init__(self, layout="turn", model=None, num_ctx=None):
         import shutil
         import sqlite3
         import tempfile
@@ -383,6 +383,10 @@ class InprocTarget:
         self.db = database
         self.db.ai_set_settings({"ray_prompt_layout": layout, "ray_clock_boost": "off",
                                  **({"model": model} if model else {})})
+        if num_ctx:
+            import model_profiles
+            mid = model_profiles.resolve(self.db.ai_get_settings())["id"]
+            self.db.ai_set_settings({model_profiles.OVERRIDE_PREFIX + mid: json.dumps({"num_ctx": int(num_ctx)})})
         self.layout = layout
         self.m = ai_manager.AIManager()
         self.m._startup_warmup_done.set()
@@ -398,8 +402,9 @@ class InprocTarget:
     def describe(self):
         sha = subprocess.run(["git", "-C", REPO, "rev-parse", "--short", "HEAD"], capture_output=True,
                              text=True).stdout.strip()
-        return {"target": "inproc", "model": self.m.runtime_settings()["model"], "layout": self.layout,
-                "version": f"worktree {sha}"}
+        rs = self.m.runtime_settings()
+        return {"target": "inproc", "model": rs["model"], "layout": self.layout,
+                "num_ctx": rs["_profile"]["options"].get("num_ctx"), "version": f"worktree {sha}"}
 
     def new_chat(self):
         return self.db.ai_create_chat()["id"]
@@ -445,7 +450,7 @@ class InprocTarget:
 
 def make_target(args):
     if getattr(args, "inproc", False):
-        return InprocTarget(layout=args.layout, model=args.model)
+        return InprocTarget(layout=args.layout, model=args.model, num_ctx=getattr(args, "ctx", None))
     return AppTarget()
 
 def unload_all_models():
@@ -931,6 +936,7 @@ def main():
     e.add_argument("--inproc", action="store_true", help="Ray's pipeline in this process (no app, no pairing)")
     e.add_argument("--layout", default="turn", choices=("turn", "legacy"))
     e.add_argument("--model")
+    e.add_argument("--ctx", type=int, help="inproc: context window override (expert override)")
     v = sub.add_parser("eval")
     v.add_argument("--out")
     v.add_argument("--runs", type=int, default=1)

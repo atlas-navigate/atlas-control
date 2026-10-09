@@ -8023,7 +8023,7 @@ class AIManager:
         (text to add to this turn's context, block for /explain)."""
         if not self._is_physics_query(user_message):
             return "", None
-        with perf_metrics.timer("ray.calc_agent"), self.perf.generating():
+        with perf_metrics.timer("ray.calc_agent"):
             calc_block, had_results = self._calc_agent_pass(user_message, settings)
         if not had_results:
             return "", None
@@ -8116,6 +8116,10 @@ class AIManager:
 
     def chat(self, chat_id, user_message):
         """Full pipeline: build context, call Ollama, store messages, return dict."""
+        with self.perf.generating():
+            return self._chat(chat_id, user_message)
+
+    def _chat(self, chat_id, user_message):
         import database as db
         self._wait_for_startup_warmup()
         settings = self.runtime_settings()  # fetch once (with the model's profile); passed downstream
@@ -8196,7 +8200,7 @@ class AIManager:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with self._ollama_slot(), self.perf.generating():
+        with self._ollama_slot():
             resp = urllib.request.urlopen(req, timeout=180)
             result = json.loads(resp.read())
         duration_ms = int((time.perf_counter() - t0) * 1000)
@@ -8248,7 +8252,13 @@ class AIManager:
 
     # ------------------------------------------------------------------
     def chat_stream(self, chat_id, user_message):
-        """Streaming pipeline: yields str tokens, then a final metadata dict."""
+        """Streaming pipeline: yields str tokens, then a final metadata dict.
+        The clock boost (perf_boost.py) covers the whole answer: retrieval and
+        Ollama's per-request work are CPU-bound, generation is GPU-bound."""
+        with self.perf.generating():
+            yield from self._chat_stream(chat_id, user_message)
+
+    def _chat_stream(self, chat_id, user_message):
         import database as db
         t_request = time.perf_counter()
         self._wait_for_startup_warmup()
@@ -8330,7 +8340,7 @@ class AIManager:
         timings = {"context_s": round(t_calc - t_context, 3), "calc_s": round(t_compose - t_calc, 3),
                    "layout": budget.get("layout")}
 
-        with self._ollama_slot(), self.perf.generating():
+        with self._ollama_slot():
             t_slot = time.perf_counter()
             resp = urllib.request.urlopen(req, timeout=300)
             try:

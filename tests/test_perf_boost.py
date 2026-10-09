@@ -100,6 +100,11 @@ class RootSideTests(unittest.TestCase):
             os.makedirs(d)
             open(os.path.join(d, "min_freq"), "w").write(f"{lo}\n")
             open(os.path.join(d, "max_freq"), "w").write(f"{hi}\n")
+        for policy in ("policy0", "policy4"):
+            d = os.path.join(self.sb.paths.CPUFREQ, policy)
+            os.makedirs(d)
+            open(os.path.join(d, "scaling_min_freq"), "w").write("729600\n")
+            open(os.path.join(d, "scaling_max_freq"), "w").write("1728000\n")
         self.zone = os.path.join(self.sb.paths.THERMAL, "thermal_zone0")
         os.makedirs(self.zone)
         self.temp(50)
@@ -107,6 +112,9 @@ class RootSideTests(unittest.TestCase):
 
     def temp(self, c):
         open(os.path.join(self.zone, "temp"), "w").write(f"{int(c * 1000)}\n")
+
+    def cpu_min(self, policy):
+        return open(os.path.join(self.sb.paths.CPUFREQ, policy, "scaling_min_freq")).read().strip()
 
     def min_freq(self, node):
         return open(os.path.join(self.sb.paths.DEVFREQ, node, "min_freq")).read().strip()
@@ -116,11 +124,14 @@ class RootSideTests(unittest.TestCase):
         self.assertTrue(r["boosted"])
         self.assertEqual(self.min_freq("17000000.gpu"), "1020000000")
         self.assertEqual(self.min_freq("bwmgr"), "3199000000")
+        self.assertEqual(self.cpu_min("policy0"), "1728000")
+        self.assertEqual(self.cpu_min("policy4"), "1728000")
         self.assertIn(["systemctl", "restart", "atlas-perf-release.timer"], self.cmds)
         self.perf.boost(run=self.cmds.append)                  # renewal keeps the original floors saved
         self.perf.release(run=self.cmds.append)
         self.assertEqual(self.min_freq("17000000.gpu"), "306000000")
         self.assertEqual(self.min_freq("bwmgr"), "204000000")
+        self.assertEqual(self.cpu_min("policy0"), "729600")
         self.assertIsNone(self.perf.state())
 
     def test_hot_unit_is_not_boosted(self):

@@ -18,6 +18,9 @@ class LiveQueryRoutingTests(unittest.TestCase):
     def setUp(self):
         db._local.conn = None
         db.init_db()
+        # Defaults only: other tests change Ray's settings (e.g. rag_top_k) in the shared test DB.
+        db.get_db().execute("DELETE FROM ai_settings")
+        db.get_db().commit()
 
     def test_whole_words_only(self):
         for text in ("build a frame shelter", "which state am i in", "recover a program",

@@ -1,12 +1,14 @@
 """
-Raise the GPU and memory-controller clocks while Ray is answering.
+Raise the CPU, GPU and memory-controller clocks while Ray is answering.
 
-Both idle low and ramp with load, so the first part of every answer — the
-prompt's processing and the first tokens — used to run on ramping clocks.
-While at least one answer is being generated, and only on mains power, the
-root helper raises their floors (perf.boost, a 90 s lease enforced by the
-system as well); they drop back 30 s after the last answer. Owners can turn
-it off (Ray setting ray_clock_boost = off).
+All idle low and ramp with load. Ollama's own work on each request (~0.4-0.5
+s per call, two calls per answer) and Ray's retrieval are CPU-bound and ran
+at idle clocks; the prompt's processing ran while the GPU ramped. While at
+least one answer is in progress — from the question's arrival, through
+retrieval and generation — and only on mains power, the root helper raises
+their floors (perf.boost, a 90 s lease enforced by the system as well); they
+drop back 30 s after the last answer. Owners can turn it off (Ray setting
+ray_clock_boost = off).
 
 Helper calls run on a worker thread: boosting never delays an answer.
 """

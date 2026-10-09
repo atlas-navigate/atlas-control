@@ -1,0 +1,997 @@
+{
+ "meta": {
+  "target": "inproc",
+  "model": "qwen2.5:3b",
+  "layout": "turn",
+  "num_ctx": 8192,
+  "version": "worktree b865458",
+  "at": "2026-10-09 03:48:14",
+  "mode": "e2e",
+  "start_temp_c": 54.906,
+  "end_temp_c": 66.968
+ },
+ "rows": [
+  {
+   "text": "I'm planning a 3-day hike in the desert in summer.",
+   "chat_id": 57,
+   "error": null,
+   "ttft_s": 1.933,
+   "e2e_s": 7.309,
+   "gen_tokens": 109,
+   "gen_tps": 20.3,
+   "prompt_tokens": 1379,
+   "cached_tokens": 811,
+   "prefill_tokens": 568,
+   "prefill_s": 0.764,
+   "prefill_tps": 743.2,
+   "llm_calls": 1,
+   "pre_calls": [],
+   "timings": {
+    "context_s": 0.793,
+    "calc_s": 0.0,
+    "layout": "turn",
+    "ttft_s": 1.933,
+    "queue_s": 0.0,
+    "prompt_tokens": 1379,
+    "prefill_s": 0.764,
+    "load_s": 0.338
+   },
+   "hw": {
+    "samples": 35,
+    "cpu_pct_avg": 9.9,
+    "gpu_load_pct_avg": 78.4,
+    "gpu_mhz_avg": 932.6,
+    "gpu_mhz_max": 1020,
+    "emc_mhz_avg": 2985.8,
+    "emc_mhz_max": 3199,
+    "mem_avail_mb_min": 2231,
+    "llama_rss_mb_max": 4268,
+    "app_rss_mb_max": 13,
+    "tj_c_max": 59.343,
+    "vdd_in_mw_avg": 14962.0
+   },
+   "answer": "For your 3-day hike in the desert during summer, prioritize hydration and avoid dehydration by drinking plenty of water from available sources. Since direct sunlight can quickly lead to heat exhaustion and dehydration, plan your activities for shaded areas or early mornings when temperatures are lower. Use a solar still if you find a good spot with dew-laden grass, or collect rainwater by funneling it into containers. Avoid drinking untreated rainwater if it could have run over dirty surfaces. Always keep a supply of water with you and drink regularly to prevent dehydration.\n\n---\nConfidence: LOW | Source: Knowledge Base + GPS Fix",
+   "scenario": "conversation",
+   "rep": 0,
+   "turn": 0
+  },
+  {
+   "text": "How much water should I carry per day?",
+   "chat_id": 57,
+   "error": null,
+   "ttft_s": 3.834,
+   "e2e_s": 8.371,
+   "gen_tokens": 88,
+   "gen_tps": 19.4,
+   "prompt_tokens": 2988,
+   "cached_tokens": 676,
+   "prefill_tokens": 2312,
+   "prefill_s": 2.849,
+   "prefill_tps": 811.6,
+   "llm_calls": 1,
+   "pre_calls": [],
+   "timings": {
+    "context_s": 0.576,
+    "calc_s": 0.0,
+    "layout": "legacy",
+    "ttft_s": 3.834,
+    "queue_s": 0.0,
+    "prompt_tokens": 2988,
+    "prefill_s": 2.849,
+    "load_s": 0.323
+   },
+   "hw": {
+    "samples": 40,
+    "cpu_pct_avg": 9.4,
+    "gpu_load_pct_avg": 87.7,
+    "gpu_mhz_avg": 946.0,
+    "gpu_mhz_max": 1020,
+    "emc_mhz_avg": 3065.8,
+    "emc_mhz_max": 3199,
+    "mem_avail_mb_min": 2229,
+    "llama_rss_mb_max": 4297,
+    "app_rss_mb_max": 13,
+    "tj_c_max": 60.75,
+    "vdd_in_mw_avg": 15706.1
+   },
+   "answer": "For your 3-day hike in the desert during summer, you should carry at least 2-3 liters of water per person per day. This is based on the planning figure from the Human Water & Hydration Requirements and the Dehydration Timeline, which suggests storing a minimum of 3 days' worth of water to stay alive.\n\n---\nConfidence: MEDIUM | Source: Human Water & Hydration Requirements and the Dehydration Timeline\n\n---\nConfidence: HIGH | Source: Knowledge Base + GPS Fix",
+   "scenario": "conversation",
+   "rep": 0,
+   "turn": 1
+  },
+  {
+   "text": "How would I treat water I find along the way?",
+   "chat_id": 57,
+   "error": null,
+   "ttft_s": 3.759,
+   "e2e_s": 17.822,
+   "gen_tokens": 270,
+   "gen_tps": 19.2,
+   "prompt_tokens": 3017,
+   "cached_tokens": 810,
+   "prefill_tokens": 2207,
+   "prefill_s": 2.726,
+   "prefill_tps": 809.6,
+   "llm_calls": 1,
+   "pre_calls": [],
+   "timings": {
+    "context_s": 0.466,
+    "calc_s": 0.0,
+    "layout": "turn",
+    "ttft_s": 3.759,
+    "queue_s": 0.0,
+    "prompt_tokens": 3017,
+    "prefill_s": 2.726,
+    "load_s": 0.364
+   },
+   "hw": {
+    "samples": 86,
+    "cpu_pct_avg": 7.9,
+    "gpu_load_pct_avg": 88.6,
+    "gpu_mhz_avg": 985.6,
+    "gpu_mhz_max": 1020,
+    "emc_mhz_avg": 3137.0,
+    "emc_mhz_max": 3199,
+    "mem_avail_mb_min": 2151,
+    "llama_rss_mb_max": 4325,
+    "app_rss_mb_max": 13,
+    "tj_c_max": 63.25,
+    "vdd_in_mw_avg": 17013.4
+   },
+   "answer": "To treat water you find along the way, follow these steps:\n\n1. **Boiling**: Bring the water to a rolling boil for at least 1 minute. For higher altitudes (above 6,500 feet or 2,000 meters), increase the boiling time to 3 minutes. This method is highly reliable for killing bacteria, viruses, and protozoa.\n\n2. **Iodine Tablets**: Dissolve 1 tablet in 1 liter of water. Wait at least 30 minutes before drinking. For colder or turbid water, double the amount of tablets.\n\n3. **Chemical Treatment with Bleach**: Add 6.5% bleach at a dose of 8 drops per gallon (2 drops per liter) or 8.25% bleach at a dose of 6 drops per gallon. Let it stand for 30 minutes; the water should have a faint chlorine odor. If not, repeat the process once.\n\n4. **Improvised Filter**: Use layers in your container: gravel, sand, and crushed charcoal. This method is less reliable but can be used as a pre-treatment before boiling or chemical treatment.\n\n---\n\nConfidence: MEDIUM | Source: Water Purification in the Field and Grid-Down Survival Priorities and the Rule of 3s\n\n---\nConfidence: HIGH | Source: Knowledge Base + GPS Fix",
+   "scenario": "conversation",
+   "rep": 0,
+   "turn": 2
+  },
+  {
+   "text": "What are the signs of heat stroke?",
+   "chat_id": 57,
+   "error": null,
+   "ttft_s": 3.217,
+   "e2e_s": 10.696,
+   "gen_tokens": 145,
+   "gen_tps": 19.4,
+   "prompt_tokens": 2837,
+   "cached_tokens": 1048,
+   "prefill_tokens": 1789,
+   "prefill_s": 2.208,
+   "prefill_tps": 810.4,
+   "llm_calls": 1,
+   "pre_calls": [],
+   "timings": {
+    "context_s": 0.471,
+    "calc_s": 0.0,
+    "layout": "turn",
+    "ttft_s": 3.217,
+    "queue_s": 0.0,
+    "prompt_tokens": 2837,
+    "prefill_s": 2.208,
+    "load_s": 0.371
+   },
+   "hw": {
+    "samples": 52,
+    "cpu_pct_avg": 8.2,
+    "gpu_load_pct_avg": 86.8,
+    "gpu_mhz_avg": 951.3,
+    "gpu_mhz_max": 1020,
+    "emc_mhz_avg": 3096.5,
+    "emc_mhz_max": 3199,
+    "mem_avail_mb_min": 2163,
+    "llama_rss_mb_max": 4386,
+    "app_rss_mb_max": 13,
+    "tj_c_max": 64.093,
+    "vdd_in_mw_avg": 16335.3
+   },
+   "answer": "The signs of heat stroke include:\n\n- **Hot, dry skin** (often sweaty, as profuse sweating can be a sign of early-stage heat exhaustion, not heat stroke)\n- **Red, hot, and dry to the touch**\n- **High fever** (temperature typically 104\u00b0F or 40\u00b0C or higher)\n- **Confusion**\n- **Slurred speech**\n- **Seizures**\n- **Loss of consciousness**\n- **Fainting** (may appear as if the person is 'paradoxically' undressing themselves, removing their clothes)\n\nHeat stroke is a medical emergency and can be life-threatening. Immediate cooling measures are necessary to reduce body temperature and prevent further complications.\n\n---\nConfidence: HIGH | Source: Knowledge Base + GPS Fix",
+   "scenario": "conversation",
+   "rep": 0,
+   "turn": 3
+  },
+  {
+   "text": "What should I do if my partner shows them?",
+   "chat_id": 57,
+   "error": null,
+   "ttft_s": 2.492,
+   "e2e_s": 14.698,
+   "gen_tokens": 239,
+   "gen_tps": 19.6,
+   "prompt_tokens": 2453,
+   "cached_tokens": 1338,
+   "prefill_tokens": 1115,
+   "prefill_s": 1.411,
+   "prefill_tps": 790.2,
+   "llm_calls": 1,
+   "pre_calls": [],
+   "timings": {
+    "context_s": 0.571,
+    "calc_s": 0.0,
+    "layout": "turn",
+    "ttft_s": 2.492,
+    "queue_s": 0.0,
+    "prompt_tokens": 2453,
+    "prefill_s": 1.411,
+    "load_s": 0.352
+   },
+   "hw": {
+    "samples": 71,
+    "cpu_pct_avg": 7.7,
+    "gpu_load_pct_avg": 85.8,
+    "gpu_mhz_avg": 969.7,
+    "gpu_mhz_max": 1020,
+    "emc_mhz_avg": 3123.9,
+    "emc_mhz_max": 3199,
+    "mem_avail_mb_min": 2052,
+    "llama_rss_mb_max": 4434,
+    "app_rss_mb_max": 13,
+    "tj_c_max": 65.343,
+    "vdd_in_mw_avg": 16954.7
+   },
+   "answer": "If your partner is showing signs of heat stroke, it's important to act quickly:\n\n- **Ensure they are in a cool environment**: Move them to a shaded or air-conditioned area.\n- **Cool their body**: Use whatever you have available, such as cold water or ice packs on the skin, especially the armpits, neck, and groin areas, which have large blood supplies close to the surface.\n- **Loosen clothing**: Remove any unnecessary clothing to allow for better heat dissipation.\n- **Monitor their temperature**: Continue cooling efforts until their body temperature drops to 102-103\u00b0F (38.9-39.4\u00b0C).\n- **Drink water if conscious**: Encourage them to drink small amounts of cool water if they are able to swallow and are conscious.\n- **Seek medical attention immediately**: Heat stroke can be life-threatening, and professional medical help should be called as soon as possible.\n\nIf you have any additional equipment like a wet cloth or fan, use it to further aid in cooling. Always prioritize keeping them hydrated and cool until professional medical assistance arrives.\n\n---\n\nConfidence: MEDIUM | Source: Heat Stroke Symptoms and Treatment\n\n---\nConfidence: MEDIUM | Source: Knowledge Base + GPS Fix",
+   "scenario": "conversation",
+   "rep": 0,
+   "turn": 4
+  },
+  {
+   "text": "Summarise the three most important points.",
+   "chat_id": 57,
+   "error": null,
+   "ttft_s": 3.162,
+   "e2e_s": 11.223,
+   "gen_tokens": 154,
+   "gen_tps": 19.1,
+   "prompt_tokens": 3252,
+   "cached_tokens": 1500,
+   "prefill_tokens": 1752,
+   "prefill_s": 2.189,
+   "prefill_tps": 800.5,
+   "llm_calls": 1,
+   "pre_calls": [],
+   "timings": {
+    "context_s": 0.522,
+    "calc_s": 0.0,
+    "layout": "turn",
+    "ttft_s": 3.162,
+    "queue_s": 0.0,
+    "prompt_tokens": 3252,
+    "prefill_s": 2.189,
+    "load_s": 0.344
+   },
+   "hw": {
+    "samples": 54,
+    "cpu_pct_avg": 8.3,
+    "gpu_load_pct_avg": 86.6,
+    "gpu_mhz_avg": 967.1,
+    "gpu_mhz_max": 1020,
+    "emc_mhz_avg": 3100.3,
+    "emc_mhz_max": 3199,
+    "mem_avail_mb_min": 2051,
+    "llama_rss_mb_max": 4434,
+    "app_rss_mb_max": 13,
+    "tj_c_max": 65.75,
+    "vdd_in_mw_avg": 16469.4
+   },
+   "answer": "The three most important points for your survival situation are:\n\n1. **Fix What Kills You Soonest First**: The Rule of 3s prioritizes addressing the top threats first\u20143 minutes without air, 3 hours without shelter in harsh weather, and 3 days without water.\n2. **Stay Calm and Plan Actively**: Use the S.T.O.P. method (STOP, THINK, OBSERVE, PLAN) to assess and manage immediate threats and then make a plan to stay safe and find resources.\n3. **Use Basic Survival Tools Effectively**: Master essential knots like the Bowline, which is crucial for creating fixed loops and securing lines. Practice basic first aid and navigation techniques.\n\nThese points provide a structured approach to managing survival situations effectively.\n\n---\nConfidence: HIGH | Source: Knowledge Base + GPS Fix",
+   "scenario": "conversation",
+   "rep": 0,
+   "turn": 5
+  },
+  {
+   "text": "How long should I boil water to make it safe?",
+   "chat_id": 58,
+   "error": null,
+   "ttft_s": 2.997,
+   "e2e_s": 5.191,
+   "gen_tokens": 44,
+   "gen_tps": 20.1,
+   "prompt_tokens": 2360,
+   "cached_tokens": 810,
+   "prefill_tokens": 1550,
+   "prefill_s": 1.914,
+   "prefill_tps": 809.9,
+   "llm_calls": 1,
+   "pre_calls": [],
+   "timings": {
+    "context_s": 0.539,
+    "calc_s": 0.0,
+    "layout": "turn",
+    "ttft_s": 2.997,
+    "queue_s": 0.0,
+    "prompt_tokens": 2360,
+    "prefill_s": 1.914,
+    "load_s": 0.383
+   },
+   "hw": {
+    "samples": 25,
+    "cpu_pct_avg": 11.4,
+    "gpu_load_pct_avg": 71.4,
+    "gpu_mhz_avg": 852.7,
+    "gpu_mhz_max": 1020,
+    "emc_mhz_avg": 2943.2,
+    "emc_mhz_max": 3199,
+    "mem_avail_mb_min": 2015,
+    "llama_rss_mb_max": 4497,
+    "app_rss_mb_max": 13,
+    "tj_c_max": 66.0,
+    "vdd_in_mw_avg": 13973.1
+   },
+   "answer": "Bring the water to a rolling boil for at least 1 minute. Adjust the time to 3 minutes if you are at an elevation above 6,500 feet (2,000 meters).\n\n---\nConfidence: HIGH | Source: Knowledge Base + GPS Fix",
+   "scenario": "rag",
+   "rep": 0
+  },
+  {
+   "text": "I'm building an emergency kit for my car.",
+   "chat_id": 59,
+   "error": null,
+   "ttft_s": 2.717,
+   "e2e_s": 21.569,
+   "gen_tokens": 370,
+   "gen_tps": 19.6,
+   "prompt_tokens": 2254,
+   "cached_tokens": 941,
+   "prefill_tokens": 1313,
+   "prefill_s": 1.657,
+   "prefill_tps": 792.4,
+   "llm_calls": 1,
+   "pre_calls": [],
+   "timings": {
+    "context_s": 0.502,
+    "calc_s": 0.0,
+    "layout": "turn",
+    "ttft_s": 2.717,
+    "queue_s": 0.0,
+    "prompt_tokens": 2254,
+    "prefill_s": 1.657,
+    "load_s": 0.426
+   },
+   "hw": {
+    "samples": 104,
+    "cpu_pct_avg": 7.0,
+    "gpu_load_pct_avg": 87.3,
+    "gpu_mhz_avg": 985.7,
+    "gpu_mhz_max": 1020,
+    "emc_mhz_avg": 3137.5,
+    "emc_mhz_max": 3199,
+    "mem_avail_mb_min": 1917,
+    "llama_rss_mb_max": 4542,
+    "app_rss_mb_max": 13,
+    "tj_c_max": 67.0,
+    "vdd_in_mw_avg": 17431.8
+   },
+   "answer": "For your Get-Home Bag (GHB), which is sized to walk home for about 1-2 days, you should prioritize items that can be accessed quickly and efficiently. Here\u2019s a summary of what you need:\n\n### EDC (Everyday Carry)\n- Folding knife/multitool\n- Lighter or ferro rod\n- Small flashlight\n- Phone + battery bank\n- Cash in small bills\n- ID\n- Pen\n- Mini first-aid kit with tourniquet if trained\n- Water bottle\n- Few feet of cordage\n- Whistle\n\n### GHB (Get-Home Bag)\n- Sturdy shoes/socks\n- Water and filter\n- Calorie-dense snacks\n- Weather/rain layer\n- Headlamp\n- Compact first aid kit\n- Paper map\n- Multitool\n- Fire starting materials\n- Dust mask\n- Gloves\n- Charged handheld radio\n\n### EDC (Everyday Carry)\n- Additional items such as a few feet of cordage, whistle, hand sanitizer, wipes, trowel, toilet paper, and any personal items.\n\nEnsure you have critical spare parts for your vehicle, including:\n- Serpentine belt\n- Radiator hoses (upper+lower)\n- Engine oil\n- Coolant\n- Tire plug kit and 12V compressor\n- Full-size spare tire\n\nMake sure to include essential tools like a fixed-blade knife, multitool, paracord, duct tape, work gloves, and personal hygiene items. Also, consider storing critical gear in a Faraday cage for protection against EMP events or solar storms.\n\nLastly, prepare for severe weather by knowing your safe room and evacuation routes. Always have a plan for securing windows at night and ensuring all members of your group are accounted for.\n\n---\nConfidence: HIGH | Source: Knowledge Base + GPS Fix",
+   "scenario": "conversation",
+   "rep": 1,
+   "turn": 0
+  },
+  {
+   "text": "What should go in it for winter?",
+   "chat_id": 59,
+   "error": null,
+   "ttft_s": 2.324,
+   "e2e_s": 37.928,
+   "gen_tokens": 703,
+   "gen_tps": 19.7,
+   "prompt_tokens": 1881,
+   "cached_tokens": 810,
+   "prefill_tokens": 1071,
+   "prefill_s": 1.342,
+   "prefill_tps": 797.8,
+   "llm_calls": 1,
+   "pre_calls": [],
+   "timings": {
+    "context_s": 0.534,
+    "calc_s": 0.0,
+    "layout": "turn",
+    "ttft_s": 2.323,
+    "queue_s": 0.0,
+    "prompt_tokens": 1881,
+    "prefill_s": 1.342,
+    "load_s": 0.345
+   },
+   "hw": {
+    "samples": 183,
+    "cpu_pct_avg": 6.5,
+    "gpu_load_pct_avg": 90.6,
+    "gpu_mhz_avg": 1003.8,
+    "gpu_mhz_max": 1020,
+    "emc_mhz_avg": 3169.9,
+    "emc_mhz_max": 3199,
+    "mem_avail_mb_min": 1849,
+    "llama_rss_mb_max": 4591,
+    "app_rss_mb_max": 13,
+    "tj_c_max": 68.593,
+    "vdd_in_mw_avg": 17961.4
+   },
+   "answer": "For a winter survival kit, you should prioritize items that provide warmth, protection from harsh conditions, and essential survival functions. Given your current setup and the knowledge base provided, here are the key components:\n\n### Winter Survival Kit (BUG-OUT BAG CONTENTS)\n\n#### Shelter/Warmth\n- **Tarp or bivy**: Provides a waterproof layer to protect from wind and rain.\n- **Emergency space blanket**: Reflects body heat and can double as a makeshift shelter.\n- **Dry insulating layers**: Multiple layers of clothing to trap warm air.\n- **Hat + gloves**: Essential for keeping extremities warm.\n- **Rain shell**: Protects from precipitation.\n- **Sleeping/ground pad**: Insulates the body from cold ground.\n\n#### Water\n- **2-3 L carry capacity water container**: Keeps water fresh and accessible.\n- **Water filter (Sawyer/LifeStraw)**: Ensures access to clean water.\n- **Chemical tablets (redundancy)**: For purification of water sources.\n\n#### Fire\n- **Two lighters + ferro rod**: Provides multiple ways to start a fire.\n- **Dry tinder**: Dried materials that ignite easily and quickly.\n\n#### First Aid / Medications\n- **IFAK (tourniquet, hemostatic gauze, pressure bandage)**: Basic trauma kit for serious injuries.\n- **Minor-injury kit**: For treating minor cuts, scrapes, and bruises.\n- **Personal prescriptions**: Any necessary medications for ongoing health conditions.\n- **OTCs (pain, antihistamine, anti-diarrheal)**: Over-the-counter medications for common ailments.\n\n#### Food\n- **72 hours of calorie-dense no-cook food**: Energy bars, jerky, nut butter, etc.\n- **Metal cup/stove if weight allows**: Allows cooking and boiling water.\n\n#### Light / Communications / Navigation\n- **Headlamp + spare batteries**: Provides light during the night.\n- **Handheld radio**: For communication with outside sources.\n- **Signal mirror**: Reflects sunlight to signal for help.\n- **Map + compass**: Essential navigation tools.\n- **Charged power bank**: To charge electronic devices.\n\n#### Tools\n- **Fixed-blade knife, multitool**: Versatile tools for survival tasks.\n- **Paracord, duct tape, work gloves**: Multi-purpose materials for repairs and emergency tasks.\n\n#### Documentation / Cash\n- **Copies of ID and key documents**: For legal identification and contact information.\n- **Cash in small bills**: Essential for emergencies.\n\n#### Hygiene\n- **Hand sanitizer, wipes**: Hygienic supplies for personal cleanliness.\n- **Trowel**: Useful for digging snow or clearing debris.\n- **Toilet paper**: Necessity for privacy.\n- **Any personal items**: Items specific to your needs, such as medications or devices.\n\n### Additional Winter-Specific Considerations\n- **Debris hut construction (if applicable)**: Follow the guidelines provided in the knowledge base for constructing a makeshift shelter.\n- **Emergency blanket or bivy sack**: Provides additional warmth and insulation.\n- **Snow goggles**: Protects eyes from glare and frostbite.\n- **Snow boots**: Insulated footwear to protect feet from cold ground.\n\nBy including these items, you should be well-prepared for winter survival conditions. Ensure all components are lightweight and easily transportable, especially if you are preparing for a bug-out scenario.\n\n---\nConfidence: LOW | Source: Knowledge Base + GPS Fix",
+   "scenario": "conversation",
+   "rep": 1,
+   "turn": 1
+  },
+  {
+   "text": "How do I avoid carbon monoxide if I'm stuck in snow with the engine running?",
+   "chat_id": 59,
+   "error": null,
+   "ttft_s": 2.915,
+   "e2e_s": 27.963,
+   "gen_tokens": 483,
+   "gen_tps": 19.3,
+   "prompt_tokens": 2713,
+   "cached_tokens": 1199,
+   "prefill_tokens": 1514,
+   "prefill_s": 1.884,
+   "prefill_tps": 803.4,
+   "llm_calls": 1,
+   "pre_calls": [],
+   "timings": {
+    "context_s": 0.547,
+    "calc_s": 0.0,
+    "layout": "turn",
+    "ttft_s": 2.915,
+    "queue_s": 0.0,
+    "prompt_tokens": 2713,
+    "prefill_s": 1.884,
+    "load_s": 0.352
+   },
+   "hw": {
+    "samples": 135,
+    "cpu_pct_avg": 6.6,
+    "gpu_load_pct_avg": 89.1,
+    "gpu_mhz_avg": 993.6,
+    "gpu_mhz_max": 1020,
+    "emc_mhz_avg": 3159.5,
+    "emc_mhz_max": 3199,
+    "mem_avail_mb_min": 1862,
+    "llama_rss_mb_max": 4640,
+    "app_rss_mb_max": 13,
+    "tj_c_max": 69.406,
+    "vdd_in_mw_avg": 17681.5
+   },
+   "answer": "If you are stuck in snow and need to use the vehicle's engine, it is crucial to ensure proper ventilation to avoid carbon monoxide (CO) poisoning. Here\u2019s how to safely operate the vehicle while maintaining a ventilation strategy:\n\n### Safe Vehicle Ventilation Strategy\n\n1. **Ventilation:**\n   - **Maintain an open vent or window**: Keep a small window or vent slightly open to allow fresh air in and exhaust fumes out.\n   - **Use a CO detector if available**: Install a carbon monoxide alarm in the vehicle, especially if you are planning to use the engine for extended periods.\n\n2. **Operating the Engine:**\n   - **Run the engine in short bursts**: Start the engine and run it for a short period to warm up, then shut off the engine. Repeat this process, ensuring the exhaust is vented properly.\n   - **Keep the vehicle moving**: Ensure that the vehicle is not stationary for extended periods to minimize the accumulation of CO inside the vehicle.\n\n3. **Ventilation Techniques:**\n   - **Open the door and windows**: If possible, open one or two doors and windows slightly to allow fresh air circulation.\n   - **Use a hand pump or compressed air canister**: If available, use a hand pump or compressed air canister to blow air into the vehicle.\n\n4. **Additional Safety Measures:**\n   - **Stay alert for symptoms**: Be aware of any symptoms such as headache, dizziness, nausea, weakness, confusion, blurred vision, and fatigue.\n   - **Have a buddy system**: If possible, have someone outside the vehicle monitor the situation and ensure proper ventilation.\n\n### Ventilation Tips\n- **Ventilation holes or slits**: Create ventilation holes by cutting small notches in the vehicle\u2019s door or window panels. This can help increase airflow without completely opening the doors.\n- **Ventilation strips**: Use ventilation strips that can be attached to the vehicle\u2019s exterior to create a continuous airflow path.\n\n### Additional Resources\nFor off-grid power and battery management, follow these guidelines to ensure safety:\n- **Use generators outdoors**: Run generators away from buildings and tents to avoid CO buildup.\n- **Ventilate tents and shelters**: Keep vents open in shelters to allow for fresh air circulation.\n\nBy following these ventilation strategies, you can minimize the risk of carbon monoxide poisoning when using the vehicle\u2019s engine in a snow environment.\n\n---\nConfidence: HIGH | Source: Knowledge Base + GPS Fix",
+   "scenario": "conversation",
+   "rep": 1,
+   "turn": 2
+  },
+  {
+   "text": "How long can I run the engine safely each hour?",
+   "chat_id": 59,
+   "error": null,
+   "ttft_s": 2.681,
+   "e2e_s": 17.644,
+   "gen_tokens": 284,
+   "gen_tps": 19.0,
+   "prompt_tokens": 3309,
+   "cached_tokens": 1919,
+   "prefill_tokens": 1390,
+   "prefill_s": 1.761,
+   "prefill_tps": 789.2,
+   "llm_calls": 1,
+   "pre_calls": [],
+   "timings": {
+    "context_s": 0.484,
+    "calc_s": 0.0,
+    "layout": "turn",
+    "ttft_s": 2.681,
+    "queue_s": 0.0,
+    "prompt_tokens": 3309,
+    "prefill_s": 1.761,
+    "load_s": 0.327
+   },
+   "hw": {
+    "samples": 86,
+    "cpu_pct_avg": 7.8,
+    "gpu_load_pct_avg": 88.2,
+    "gpu_mhz_avg": 978.5,
+    "gpu_mhz_max": 1020,
+    "emc_mhz_avg": 3137.0,
+    "emc_mhz_max": 3199,
+    "mem_avail_mb_min": 1863,
+    "llama_rss_mb_max": 4640,
+    "app_rss_mb_max": 13,
+    "tj_c_max": 69.625,
+    "vdd_in_mw_avg": 17378.4
+   },
+   "answer": "Given the context of your current situation, it's important to ensure proper ventilation to avoid carbon monoxide (CO) poisoning when running the vehicle\u2019s engine. The exact runtime per hour depends on several factors including the type and load of the engine.\n\nFor a diesel generator at full load, you can expect approximately 0.6 to 0.7 gallons per hour from a 5 kW generator. For a propane heater, it consumes about 1.5 pounds per hour.\n\nHere are some general guidelines:\n- **Diesel Generator (5 kW at full load)**: Approximately 0.6 to 0.7 gallons per hour.\n- **Propane Heater**: Approximately 1.5 pounds per hour.\n\nIf you are using a vehicle\u2019s engine for off-road recovery, the runtime will depend on the vehicle's fuel efficiency and the specific engine type. For example, if your vehicle has a fuel efficiency of 20 miles per gallon (mpg), running the engine would consume approximately 2.5 gallons per hour.\n\nTo ensure safety:\n- **Maintain ventilation**: Keep a small window or vent slightly open to allow fresh air in.\n- **Use CO detector**: Install a carbon monoxide alarm if available, especially if you are planning to use the engine for extended periods.\n\nIf you need more specific information about your vehicle or generator, please provide additional details such as fuel type and efficiency.\n\n---\nConfidence: LOW | Source: Knowledge Base + GPS Fix",
+   "scenario": "conversation",
+   "rep": 1,
+   "turn": 3
+  },
+  {
+   "text": "What signals help rescuers find me?",
+   "chat_id": 59,
+   "error": null,
+   "ttft_s": 2.901,
+   "e2e_s": 30.626,
+   "gen_tokens": 512,
+   "gen_tps": 18.5,
+   "prompt_tokens": 3902,
+   "cached_tokens": 2429,
+   "prefill_tokens": 1473,
+   "prefill_s": 1.93,
+   "prefill_tps": 763.1,
+   "llm_calls": 1,
+   "pre_calls": [],
+   "timings": {
+    "context_s": 0.555,
+    "calc_s": 0.0,
+    "layout": "turn",
+    "ttft_s": 2.9,
+    "queue_s": 0.0,
+    "prompt_tokens": 3902,
+    "prefill_s": 1.93,
+    "load_s": 0.289
+   },
+   "hw": {
+    "samples": 148,
+    "cpu_pct_avg": 6.6,
+    "gpu_load_pct_avg": 89.9,
+    "gpu_mhz_avg": 999.3,
+    "gpu_mhz_max": 1020,
+    "emc_mhz_avg": 3163.0,
+    "emc_mhz_max": 3199,
+    "mem_avail_mb_min": 1906,
+    "llama_rss_mb_max": 4645,
+    "app_rss_mb_max": 13,
+    "tj_c_max": 70.031,
+    "vdd_in_mw_avg": 17843.8
+   },
+   "answer": "When lost in the wilderness, using visual signals can significantly aid in attracting the attention of rescue teams. Here are some effective signals that help rescuers locate you:\n\n### Visual Signals\n1. **Signaling Mirror**:\n   - Hold a mirror near your eye.\n   - Extend your other hand toward the target making a 'V' or peace-sign with two fingers.\n   - Flash the bright spot of sunlight back and forth across that notch so it sweeps the aircraft/target.\n\n2. **Whistle**:\n   - Three sharp blasts: HELP.\n   - Whistling is more effective than shouting because it carries farther and uses less energy.\n\n3. **Fire**:\n   - Use three fires in a triangle or line to signal for help.\n   - For daytime signals, make white smoke with green vegetation, moss, or water on the fire.\n   - For nighttime signals, use a bright flame; build the fire on a height or in a clearing to be seen farthest.\n\n4. **Signal Mirror / Heliograph**:\n   - Hold the mirror near your eye.\n   - Extend your other hand toward the target making a 'V' or peace-sign with two fingers.\n   - Flash the bright spot of sunlight back and forth across that notch so it sweeps the aircraft/target.\n\n5. **Ground Signals**:\n   - Use ground markings like stamps in the snow, rocks, logs, or contrasting fabric to create big, visible signs.\n   - Make these signals BIG, 10+ feet in diameter with sharp, straight edges.\n   - Use ground markings for V, X, I (vertical bar), and arrow symbols.\n\n6. **Morse Code**:\n   - Send Morse code using the following sequence: ... --- ... = three short, three long, three short (dot=short, dash=long).\n   - This sequence is universal and can be used to indicate distress or a request for assistance.\n\n### Additional Tips\n- **Maintain Visibility**: Ensure that your signals are visible from the air. Use bright, contrasting colors and patterns.\n- **Use Reflection**: Reflecting sunlight with mirrors or using light sources like flashlights can be very effective in signaling.\n- **Stay Put**: Once you have sent a signal, stay put to increase the chances of being found. Rescue teams will likely look for you in the vicinity where you last signaled.\n\nBy combining these signals and staying put, you increase your chances of being rescued. Remember, clear communication and consistent effort are key to attracting the attention of rescuers.\n\n---\nConfidence: HIGH | Source: Knowledge Base + GPS Fix",
+   "scenario": "conversation",
+   "rep": 1,
+   "turn": 4
+  },
+  {
+   "text": "Give me a short checklist of all of that.",
+   "chat_id": 59,
+   "error": null,
+   "ttft_s": 3.186,
+   "e2e_s": 21.5,
+   "gen_tokens": 334,
+   "gen_tps": 18.2,
+   "prompt_tokens": 4371,
+   "cached_tokens": 2733,
+   "prefill_tokens": 1638,
+   "prefill_s": 2.132,
+   "prefill_tps": 768.2,
+   "llm_calls": 1,
+   "pre_calls": [],
+   "timings": {
+    "context_s": 0.492,
+    "calc_s": 0.0,
+    "layout": "turn",
+    "ttft_s": 3.186,
+    "queue_s": 0.0,
+    "prompt_tokens": 4371,
+    "prefill_s": 2.132,
+    "load_s": 0.413
+   },
+   "hw": {
+    "samples": 104,
+    "cpu_pct_avg": 7.0,
+    "gpu_load_pct_avg": 88.8,
+    "gpu_mhz_avg": 987.6,
+    "gpu_mhz_max": 1020,
+    "emc_mhz_avg": 3137.5,
+    "emc_mhz_max": 3199,
+    "mem_avail_mb_min": 1895,
+    "llama_rss_mb_max": 4645,
+    "app_rss_mb_max": 13,
+    "tj_c_max": 70.062,
+    "vdd_in_mw_avg": 17536.9
+   },
+   "answer": "Certainly! Here\u2019s a concise checklist of the key points covered:\n\n### Immediate Priorities (0-72 hours)\n1. **Water**: Fill all containers and bathtubs now. Use WaterBOB (100 gallons in a bathtub). Minimum 1 gallon per person per day.\n2. **Food**: Eat perishables first. Freezer: 48 hours without power; Refrigerator: 4-6 hours without power.\n3. **Information**: Battery NOAA radio, ham radio, Meshtastic for situation status.\n4. **Security**: Blackout windows at night. Account for all group members. Establish comms plan.\n\n### Survival Skills and Off-Grid Knowledge\n1. **Visual Signals**: Use a signaling mirror, whistle, fire, and ground markings.\n2. **Grid-Down Survival Guide**: Focus on immediate priorities (0-4 weeks).\n3. **Atlas Control Usage**: Familiarize yourself with navigation, metrics, settings, and app usage.\n4. **Mesh Network Status**: Monitor node count, battery levels, recent alerts, and other network state details when enabled.\n\n### General Off-Grid Tips\n1. **GPS**: Ensure GPS is connected for accurate positioning.\n2. **Node Fields and Roles**: Understand the different roles in the mesh network (CLIENT, ROUTER, REPEATER, etc.).\n3. **Settings Page**: Configure settings such as units, date format, theme, and alert thresholds.\n4. **Alerts Tab**: Manage system-generated alerts related to battery levels, offline nodes, connections, and messages.\n\nThis checklist should help you stay prepared and informed in various scenarios.\n\n---\nConfidence: HIGH | Source: Knowledge Base + GPS Fix",
+   "scenario": "conversation",
+   "rep": 1,
+   "turn": 5
+  },
+  {
+   "text": "Where do I put a tourniquet?",
+   "chat_id": 60,
+   "error": null,
+   "ttft_s": 2.141,
+   "e2e_s": 4.647,
+   "gen_tokens": 51,
+   "gen_tps": 20.4,
+   "prompt_tokens": 1753,
+   "cached_tokens": 941,
+   "prefill_tokens": 812,
+   "prefill_s": 1.052,
+   "prefill_tps": 771.7,
+   "llm_calls": 1,
+   "pre_calls": [],
+   "timings": {
+    "context_s": 0.553,
+    "calc_s": 0.0,
+    "layout": "turn",
+    "ttft_s": 2.14,
+    "queue_s": 0.0,
+    "prompt_tokens": 1753,
+    "prefill_s": 1.052,
+    "load_s": 0.358
+   },
+   "hw": {
+    "samples": 22,
+    "cpu_pct_avg": 12.1,
+    "gpu_load_pct_avg": 74.0,
+    "gpu_mhz_avg": 871.6,
+    "gpu_mhz_max": 1020,
+    "emc_mhz_avg": 2908.3,
+    "emc_mhz_max": 3199,
+    "mem_avail_mb_min": 1823,
+    "llama_rss_mb_max": 4688,
+    "app_rss_mb_max": 13,
+    "tj_c_max": 69.406,
+    "vdd_in_mw_avg": 14134.2
+   },
+   "answer": "A tourniquet should be applied above the wound, not over a joint. Tighten until bleeding stops, and write the application time on the tourniquet or the patient's skin. Safe for up to 2-4 hours.\n\n---\nConfidence: HIGH | Source: Knowledge Base + GPS Fix",
+   "scenario": "rag",
+   "rep": 1
+  }
+ ],
+ "summary": {
+  "conversation": {
+   "ttft_s": {
+    "n": 12,
+    "median": 2.908,
+    "p90": 3.759,
+    "min": 1.933,
+    "max": 3.834
+   },
+   "e2e_s": {
+    "n": 12,
+    "median": 17.733,
+    "p90": 30.626,
+    "min": 7.309,
+    "max": 37.928
+   },
+   "gen_tps": {
+    "n": 12,
+    "median": 19.35,
+    "p90": 19.7,
+    "min": 18.2,
+    "max": 20.3
+   },
+   "prefill_tps": {
+    "n": 12,
+    "median": 795.1,
+    "p90": 810.4,
+    "min": 743.2,
+    "max": 811.6
+   },
+   "prefill_s": {
+    "n": 12,
+    "median": 1.907,
+    "p90": 2.726,
+    "min": 0.764,
+    "max": 2.849
+   },
+   "prompt_tokens": {
+    "n": 12,
+    "median": 2912.5,
+    "p90": 3902,
+    "min": 1379,
+    "max": 4371
+   },
+   "cached_tokens": {
+    "n": 12,
+    "median": 1123.5,
+    "p90": 2429,
+    "min": 676,
+    "max": 2733
+   },
+   "prefill_tokens": {
+    "n": 12,
+    "median": 1493.5,
+    "p90": 2207,
+    "min": 568,
+    "max": 2312
+   },
+   "hw.cpu_pct_avg": {
+    "n": 12,
+    "median": 7.75,
+    "p90": 9.4,
+    "min": 6.5,
+    "max": 9.9
+   },
+   "hw.gpu_load_pct_avg": {
+    "n": 12,
+    "median": 87.95,
+    "p90": 89.9,
+    "min": 78.4,
+    "max": 90.6
+   },
+   "hw.gpu_mhz_avg": {
+    "n": 12,
+    "median": 982.05,
+    "p90": 999.3,
+    "min": 932.6,
+    "max": 1003.8
+   },
+   "hw.emc_mhz_avg": {
+    "n": 12,
+    "median": 3137.0,
+    "p90": 3163.0,
+    "min": 2985.8,
+    "max": 3169.9
+   },
+   "hw.mem_avail_mb_min": {
+    "n": 12,
+    "median": 1984.0,
+    "p90": 2229,
+    "min": 1849,
+    "max": 2231
+   },
+   "hw.llama_rss_mb_max": {
+    "n": 12,
+    "median": 4488.0,
+    "p90": 4645,
+    "min": 4268,
+    "max": 4645
+   },
+   "hw.app_rss_mb_max": {
+    "n": 12,
+    "median": 13.0,
+    "p90": 13,
+    "min": 13,
+    "max": 13
+   },
+   "hw.tj_c_max": {
+    "n": 12,
+    "median": 66.375,
+    "p90": 70.031,
+    "min": 59.343,
+    "max": 70.062
+   },
+   "hw.vdd_in_mw_avg": {
+    "n": 12,
+    "median": 17195.9,
+    "p90": 17843.8,
+    "min": 14962.0,
+    "max": 17961.4
+   },
+   "errors": 0
+  },
+  "conversation_late": {
+   "ttft_s": {
+    "n": 8,
+    "median": 3.038,
+    "p90": 3.759,
+    "min": 2.492,
+    "max": 3.759
+   },
+   "e2e_s": {
+    "n": 8,
+    "median": 17.733,
+    "p90": 30.626,
+    "min": 10.696,
+    "max": 30.626
+   },
+   "gen_tps": {
+    "n": 8,
+    "median": 19.15,
+    "p90": 19.6,
+    "min": 18.2,
+    "max": 19.6
+   },
+   "prefill_tps": {
+    "n": 8,
+    "median": 795.35,
+    "p90": 810.4,
+    "min": 763.1,
+    "max": 810.4
+   },
+   "prefill_s": {
+    "n": 8,
+    "median": 2.031,
+    "p90": 2.726,
+    "min": 1.411,
+    "max": 2.726
+   },
+   "prompt_tokens": {
+    "n": 8,
+    "median": 3134.5,
+    "p90": 4371,
+    "min": 2453,
+    "max": 4371
+   },
+   "cached_tokens": {
+    "n": 8,
+    "median": 1419.0,
+    "p90": 2733,
+    "min": 810,
+    "max": 2733
+   },
+   "prefill_tokens": {
+    "n": 8,
+    "median": 1576.0,
+    "p90": 2207,
+    "min": 1115,
+    "max": 2207
+   },
+   "hw.cpu_pct_avg": {
+    "n": 8,
+    "median": 7.75,
+    "p90": 8.3,
+    "min": 6.6,
+    "max": 8.3
+   },
+   "hw.gpu_load_pct_avg": {
+    "n": 8,
+    "median": 88.4,
+    "p90": 89.9,
+    "min": 85.8,
+    "max": 89.9
+   },
+   "hw.gpu_mhz_avg": {
+    "n": 8,
+    "median": 982.05,
+    "p90": 999.3,
+    "min": 951.3,
+    "max": 999.3
+   },
+   "hw.emc_mhz_avg": {
+    "n": 8,
+    "median": 3137.0,
+    "p90": 3163.0,
+    "min": 3096.5,
+    "max": 3163.0
+   },
+   "hw.mem_avail_mb_min": {
+    "n": 8,
+    "median": 1978.5,
+    "p90": 2163,
+    "min": 1862,
+    "max": 2163
+   },
+   "hw.llama_rss_mb_max": {
+    "n": 8,
+    "median": 4537.0,
+    "p90": 4645,
+    "min": 4325,
+    "max": 4645
+   },
+   "hw.app_rss_mb_max": {
+    "n": 8,
+    "median": 13.0,
+    "p90": 13,
+    "min": 13,
+    "max": 13
+   },
+   "hw.tj_c_max": {
+    "n": 8,
+    "median": 67.578,
+    "p90": 70.062,
+    "min": 63.25,
+    "max": 70.062
+   },
+   "hw.vdd_in_mw_avg": {
+    "n": 8,
+    "median": 17195.9,
+    "p90": 17843.8,
+    "min": 16335.3,
+    "max": 17843.8
+   },
+   "errors": 0
+  },
+  "rag": {
+   "ttft_s": {
+    "n": 2,
+    "median": 2.569,
+    "p90": 2.997,
+    "min": 2.141,
+    "max": 2.997
+   },
+   "e2e_s": {
+    "n": 2,
+    "median": 4.919,
+    "p90": 5.191,
+    "min": 4.647,
+    "max": 5.191
+   },
+   "gen_tps": {
+    "n": 2,
+    "median": 20.25,
+    "p90": 20.4,
+    "min": 20.1,
+    "max": 20.4
+   },
+   "prefill_tps": {
+    "n": 2,
+    "median": 790.8,
+    "p90": 809.9,
+    "min": 771.7,
+    "max": 809.9
+   },
+   "prefill_s": {
+    "n": 2,
+    "median": 1.483,
+    "p90": 1.914,
+    "min": 1.052,
+    "max": 1.914
+   },
+   "prompt_tokens": {
+    "n": 2,
+    "median": 2056.5,
+    "p90": 2360,
+    "min": 1753,
+    "max": 2360
+   },
+   "cached_tokens": {
+    "n": 2,
+    "median": 875.5,
+    "p90": 941,
+    "min": 810,
+    "max": 941
+   },
+   "prefill_tokens": {
+    "n": 2,
+    "median": 1181.0,
+    "p90": 1550,
+    "min": 812,
+    "max": 1550
+   },
+   "hw.cpu_pct_avg": {
+    "n": 2,
+    "median": 11.75,
+    "p90": 12.1,
+    "min": 11.4,
+    "max": 12.1
+   },
+   "hw.gpu_load_pct_avg": {
+    "n": 2,
+    "median": 72.7,
+    "p90": 74.0,
+    "min": 71.4,
+    "max": 74.0
+   },
+   "hw.gpu_mhz_avg": {
+    "n": 2,
+    "median": 862.15,
+    "p90": 871.6,
+    "min": 852.7,
+    "max": 871.6
+   },
+   "hw.emc_mhz_avg": {
+    "n": 2,
+    "median": 2925.75,
+    "p90": 2943.2,
+    "min": 2908.3,
+    "max": 2943.2
+   },
+   "hw.mem_avail_mb_min": {
+    "n": 2,
+    "median": 1919.0,
+    "p90": 2015,
+    "min": 1823,
+    "max": 2015
+   },
+   "hw.llama_rss_mb_max": {
+    "n": 2,
+    "median": 4592.5,
+    "p90": 4688,
+    "min": 4497,
+    "max": 4688
+   },
+   "hw.app_rss_mb_max": {
+    "n": 2,
+    "median": 13.0,
+    "p90": 13,
+    "min": 13,
+    "max": 13
+   },
+   "hw.tj_c_max": {
+    "n": 2,
+    "median": 67.703,
+    "p90": 69.406,
+    "min": 66.0,
+    "max": 69.406
+   },
+   "hw.vdd_in_mw_avg": {
+    "n": 2,
+    "median": 14053.65,
+    "p90": 14134.2,
+    "min": 13973.1,
+    "max": 14134.2
+   },
+   "errors": 0
+  }
+ }
+}

@@ -56,6 +56,7 @@ CLOCK_STATE = p("run/atlas-clock/state.json")
 
 # Clock floors for Ray's boost (perf.py).
 DEVFREQ = p("sys/class/devfreq")
+CPUFREQ = p("sys/devices/system/cpu/cpufreq")
 THERMAL = p("sys/class/thermal")
 PERF_RUN = p("run/atlas-perf")
 
