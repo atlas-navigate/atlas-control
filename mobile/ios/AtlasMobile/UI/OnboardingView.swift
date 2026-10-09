@@ -5,6 +5,7 @@ import SwiftUI
 ///   Open app → Atlas appears → tap Connect → (one more tap / scan) → Atlas opens.
 struct OnboardingView: View {
     @ObservedObject var model: ConnectionModel
+    @ObservedObject private var localNetwork = LocalNetworkAccess.shared
     @State private var scanning = false
     @State private var advanced = false
     @State private var address = ""
@@ -18,7 +19,9 @@ struct OnboardingView: View {
                 Text("You only do this once. No account or password is needed.")
                     .font(.subheadline).foregroundColor(AtlasTheme.muted)
 
-                if let label = model.joiningWifi {
+                if !localNetwork.primed && model.nearby.isEmpty && !model.searching && model.target == nil {
+                    LocalNetworkPrimer { model.startSearching() }
+                } else if let label = model.joiningWifi {
                     joinWifi(label)
                 } else if let match = model.matchCode {
                     approvalWait(match)
@@ -31,6 +34,7 @@ struct OnboardingView: View {
                     }
                     .buttonStyle(.borderedProminent)
 
+                    if localNetwork.denied { LocalNetworkDeniedCard() }
                     HStack {
                         Text("Atlas devices nearby").font(.headline).foregroundColor(AtlasTheme.onBackground)
                         Spacer()
@@ -46,7 +50,8 @@ struct OnboardingView: View {
                                 Image(systemName: "wifi.router").foregroundColor(AtlasTheme.primary)
                                 VStack(alignment: .leading) {
                                     Text(s.name).foregroundColor(AtlasTheme.onBackground).bold()
-                                    Text(String(s.deviceId.prefix(8))).font(.caption).foregroundColor(AtlasTheme.muted)
+                                    // Its own .local name (also on the label) tells two nearby Atlases apart.
+                                    Text(s.hostname ?? String(s.deviceId.prefix(8))).font(.caption).foregroundColor(AtlasTheme.muted)
                                 }
                                 Spacer()
                                 Text("Connect").bold().foregroundColor(AtlasTheme.primary)
@@ -57,14 +62,14 @@ struct OnboardingView: View {
                     }
                     Button(advanced ? "Hide advanced options" : "Advanced options") { advanced.toggle() }
                     if advanced {
-                        TextField("Atlas address (e.g. 192.168.1.20)", text: $address)
+                        TextField("atlas-7kq3pm.local or 192.168.1.20", text: $address)
                             .textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .keyboardType(.URL)
                             .textFieldStyle(.roundedBorder)
+                        Text("Its .local name is on the label and in Atlas's Settings.")
+                            .font(.caption).foregroundColor(AtlasTheme.muted)
                         Button("Connect to this address") {
-                            let a = address.replacingOccurrences(of: "https://", with: "")
-                                .replacingOccurrences(of: "http://", with: "")
-                                .trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
-                            if !a.isEmpty { model.choose("https://\(a)") }
+                            if !address.trimmingCharacters(in: .whitespaces).isEmpty { model.chooseTyped(address) }
                         }
                     }
                 }

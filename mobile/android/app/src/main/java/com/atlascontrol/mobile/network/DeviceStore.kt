@@ -17,6 +17,8 @@ data class PairedDevice(
     val pin: String,
     val token: String,
     val lastUrl: String?,
+    /** Its own .local name (atlas-7kq3pm.local): shown to the owner, and one more way to find it. */
+    val hostname: String? = null,
 )
 
 /**
@@ -34,7 +36,7 @@ class DeviceStore(context: Context) {
         val sealed = prefs.getString("token", null) ?: return null
         val token = runCatching { decrypt(sealed) }.getOrNull() ?: return null
         return PairedDevice(id, prefs.getString("name", "Atlas") ?: "Atlas", pin, token,
-            prefs.getString("last_url", null))
+            prefs.getString("last_url", null), prefs.getString("hostname", null))
     }
 
     fun save(device: PairedDevice) {
@@ -44,7 +46,12 @@ class DeviceStore(context: Context) {
             .putString("pin", device.pin)
             .putString("token", encrypt(device.token))
             .putString("last_url", device.lastUrl)
+            .putString("hostname", device.hostname)
             .apply()
+    }
+
+    fun rememberHostname(hostname: String) {
+        prefs.edit().putString("hostname", hostname).apply()
     }
 
     fun rememberUrl(url: String) {

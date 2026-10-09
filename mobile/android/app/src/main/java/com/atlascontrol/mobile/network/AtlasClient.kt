@@ -20,6 +20,8 @@ data class AtlasInfo(
     val pairingRequired: Boolean,
     /** Pairing protocol Atlas speaks (/api/device/info "pairing"); see AtlasClient.PAIRING_VERSION. */
     val pairingVersion: Int = 1,
+    /** Its own .local name, e.g. atlas-7kq3pm.local (null on older Atlas software). */
+    val hostname: String? = null,
 )
 
 class PairingException(message: String, val status: Int = 0) : Exception(message)
@@ -50,8 +52,24 @@ object AtlasClient {
                     version = o.optString("version").ifBlank { null },
                     pairingRequired = o.optBoolean("pairing_required", true),
                     pairingVersion = o.optInt("pairing", 1),
+                    hostname = AtlasAddress.fqdn(o.optString("fqdn").ifBlank { o.optString("hostname") }.ifBlank { null }),
                 )
             }
+        }.onFailure { LocalNetwork.noteFailure(it) }.getOrNull()
+    }
+
+    /** The paired Atlas's current .local name (it can change: a legacy unit's
+     *  first update, or a name conflict on the network). Null if unreachable. */
+    suspend fun hostname(baseUrl: String, device: PairedDevice): String? = withContext(Dispatchers.IO) {
+        runCatching {
+            AtlasTrust.pinnedClient(device.pin, device.token, 5)
+                .newCall(Request.Builder().url("${normalize(baseUrl)}/api/device/info").build())
+                .execute().use { r ->
+                    if (!r.isSuccessful) return@use null
+                    val o = JSONObject(r.body?.string() ?: "{}")
+                    if (o.optString("device_id") != device.deviceId) return@use null
+                    AtlasAddress.fqdn(o.optString("fqdn").ifBlank { o.optString("hostname") }.ifBlank { null })
+                }
         }.getOrNull()
     }
 
@@ -64,7 +82,7 @@ object AtlasClient {
                     .execute().use { r ->
                         r.isSuccessful && JSONObject(r.body?.string() ?: "{}").optString("device_id") == device.deviceId
                     }
-            }.getOrDefault(false)
+            }.onFailure { LocalNetwork.noteFailure(it) }.getOrDefault(false)
         }
 
     /**

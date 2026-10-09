@@ -8,6 +8,8 @@ enum Screen: Equatable {
     case onboarding
     case locating(String)
     case connected(String)
+    /// Just paired: show the owner this Atlas's own .local address once.
+    case paired(url: String, name: String, hostname: String)
     case restarting(String)
     case notFound
     case securityWarning
@@ -57,14 +59,26 @@ final class ConnectionModel: ObservableObject {
     let tracker = AtlasPhoneTracker()
 
     var deviceName: String { device?.name ?? "Atlas" }
+    /// The paired Atlas's own .local name, when known (atlas-7kq3pm.local).
+    var deviceHostname: String? { device?.hostname }
+    /// The last address it answered on, for the device panel.
+    var lastAddress: String? { AtlasAddress.host(of: device?.lastUrl) }
 
     init() {
         if device == nil {
             screen = .onboarding
-            searchNearby()
+            // iOS asks for Local Network access on the first search; the
+            // onboarding screen explains why first (see startSearching()).
+            if LocalNetworkAccess.shared.primed { searchNearby() }
         } else {
             relocate()
         }
+    }
+
+    /// After the Local Network explanation: let iOS ask, and start looking.
+    func startSearching() {
+        LocalNetworkAccess.shared.primed = true
+        searchNearby()
     }
 
     // ── connecting ───────────────────────────────────────────────────────
@@ -103,6 +117,8 @@ final class ConnectionModel: ObservableObject {
         DeviceStore.rememberUrl(url)
         device?.lastUrl = url
         pendingUrls = []
+        LocalNetworkAccess.shared.denied = false
+        refreshHostname(url)
         if updateInProgress {
             updateInProgress = false
             flash("Update complete.")
@@ -112,6 +128,18 @@ final class ConnectionModel: ObservableObject {
         if let dev = device { tracker.configure(baseUrl: url, device: dev) }
         if UserDefaults.standard.object(forKey: "atlas.share_location") == nil {
             askLocationSharing = true
+        }
+    }
+
+    /// Keep the stored .local name current (a first update can give a legacy Atlas its own name).
+    private func refreshHostname(_ url: String) {
+        guard let dev = device else { return }
+        Task { [weak self] in
+            guard let name = await AtlasClient.hostname(url, device: dev), let self else { return }
+            if name != self.device?.hostname {
+                DeviceStore.rememberHostname(name)
+                self.device?.hostname = name
+            }
         }
     }
 
@@ -237,6 +265,19 @@ final class ConnectionModel: ObservableObject {
         }
     }
 
+    /// An address typed under Advanced: an IP, a URL, or atlas-7kq3pm(.local).
+    func chooseTyped(_ input: String) {
+        guard let typed = AtlasAddress.parse(input) else {
+            pairingError = "That doesn't look like an Atlas address. Try its .local name (on the label) or its IP address."
+            return
+        }
+        if typed.isLocalName, let seen = nearby.first(where: { $0.hostname == typed.host }) {
+            choose(seen.baseUrl, expectedPin: seen.pin)
+        } else {
+            choose(typed.url)     // iOS resolves .local names itself
+        }
+    }
+
     func cancelPairing() { target = nil; matchCode = nil; pairingError = nil; joiningWifi = nil }
 
     func pairViaHotspot() {
@@ -336,11 +377,20 @@ final class ConnectionModel: ObservableObject {
 
     private func finishPairing(_ t: PairingTarget, token: String) {
         let dev = PairedDevice(deviceId: t.info.deviceId, name: t.info.name, pin: t.info.observedPin,
-                               token: token, lastUrl: t.info.baseUrl)
+                               token: token, lastUrl: t.info.baseUrl, hostname: t.info.hostname)
         DeviceStore.save(dev)
         device = dev
         cancelPairing()
-        connected(t.info.baseUrl)
+        if let name = t.info.hostname {
+            screen = .paired(url: t.info.baseUrl, name: t.info.name, hostname: name)
+        } else {
+            connected(t.info.baseUrl)
+        }
+    }
+
+    /// "Open Atlas" on the just-paired screen.
+    func continueAfterPairing() {
+        if case .paired(let url, _, _) = screen { connected(url) }
     }
 
     func forgetDevice() {

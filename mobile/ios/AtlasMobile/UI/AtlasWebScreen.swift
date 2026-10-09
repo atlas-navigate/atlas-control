@@ -23,7 +23,8 @@ struct AtlasWebScreen: UIViewRepresentable {
             lanSwitching: function() { post('lanSwitching'); },
             lanSwitchedTo: function(urlsJson, isPending, hintIp) {
               post('lanSwitchedTo', { urlsJson: String(urlsJson), hintIp: String(hintIp || '') });
-            }
+            },
+            copyText: function(text) { post('copyText', { text: String(text || '') }); }
           };
           window.AtlasAndroid = bridge;
           window.AtlasIOS = bridge;
@@ -119,6 +120,9 @@ struct AtlasWebScreen: UIViewRepresentable {
             Task { @MainActor in
                 switch op {
                 case "reconnect": self.model.relocate()
+                case "copyText":
+                    // Settings → Local Device Address "Copy".
+                    UIPasteboard.general.string = String((body["text"] as? String ?? "").prefix(256))
                 case "lanSwitching": self.model.atlasSwitchingNetworks()
                 case "lanSwitchedTo":
                     var urls = (try? JSONSerialization.jsonObject(with: Data((body["urlsJson"] as? String ?? "[]").utf8))) as? [String] ?? []

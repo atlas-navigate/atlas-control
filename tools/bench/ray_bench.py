@@ -585,15 +585,22 @@ def _chat_direct(model, messages, options, keep_alive="30m"):
     tasks = journal_tasks(wall0 - 0.3)
     task = tasks[-1] if tasks else {}
     ns = 1e9
+    # Ollama 0.32's prompt_eval_count is the whole prompt even when
+    # llama-server reused a cached prefix; llama-server's own line counts
+    # only the tokens it actually processed. Prefer it.
+    if task.get("prefill_tokens") and task.get("prefill_ms"):
+        prefill_tokens, prefill_s = task["prefill_tokens"], task["prefill_ms"] / 1000
+    else:
+        prefill_tokens, prefill_s = r.get("prompt_eval_count"), r.get("prompt_eval_duration", 0) / ns
     return {
         "wall_s": round(dt, 3),
         "load_s": round(r.get("load_duration", 0) / ns, 3),
-        "prompt_tokens": task.get("prompt_tokens"),
+        "prompt_tokens": task.get("prompt_tokens") or r.get("prompt_eval_count"),
         "cached_tokens": task.get("cached_tokens"),
-        "prefill_tokens": r.get("prompt_eval_count"),
-        "prefill_s": round(r.get("prompt_eval_duration", 0) / ns, 3),
-        "prefill_tps": round(r["prompt_eval_count"] / (r["prompt_eval_duration"] / ns), 1)
-        if r.get("prompt_eval_duration") else None,
+        "prefill_tokens": prefill_tokens,
+        "prefill_s": round(prefill_s, 3),
+        "prefill_tps": round(prefill_tokens / prefill_s, 1) if prefill_tokens and prefill_s else None,
+        "ollama_prompt_eval_count": r.get("prompt_eval_count"),
         "gen_tokens": r.get("eval_count"),
         "gen_tps": round(r["eval_count"] / (r["eval_duration"] / ns), 1) if r.get("eval_duration") else None,
         "answer": (r.get("message") or {}).get("content", ""),

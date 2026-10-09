@@ -9,6 +9,8 @@ struct Sighting: Identifiable, Equatable {
     var pin: String?
     var baseUrl: String
     var via: String
+    /// Its own .local name (atlas-7kq3pm.local), when Atlas advertises one.
+    var hostname: String? = nil
 }
 
 /// UDP discovery against Atlas's LAN beacon (port 5050).
@@ -86,7 +88,8 @@ enum AtlasBeacon {
             let ip = String(cString: ipBuf)
             found[id] = Sighting(deviceId: id, name: o["name"] as? String ?? "Atlas",
                                  pin: (o["fp"] as? String).flatMap { $0.isEmpty ? nil : $0 },
-                                 baseUrl: "https://\(ip)", via: "beacon")
+                                 baseUrl: "https://\(ip)", via: "beacon",
+                                 hostname: AtlasAddress.fqdn(o["host"] as? String))
         }
         return Array(found.values)
     }

@@ -47,6 +47,7 @@ fun OnboardingScreen(vm: ConnectionViewModel) {
     val error by vm.pairingError.collectAsState()
     val matchCode by vm.matchCode.collectAsState()
     val joinWifi by vm.joinWifi.collectAsState()
+    val networkBlocked by vm.localNetworkBlocked.collectAsState()
     var scanning by remember { mutableStateOf(false) }
     var advanced by remember { mutableStateOf(false) }
     var address by remember { mutableStateOf("") }
@@ -76,6 +77,10 @@ fun OnboardingScreen(vm: ConnectionViewModel) {
         Spacer(Modifier.height(6.dp))
         Text("You only do this once. No account or password is needed.", color = AtlasMuted, fontSize = 14.sp)
         Spacer(Modifier.height(20.dp))
+        if (networkBlocked) {
+            LocalNetworkPermissionCard(onRetry = vm::searchNearby)
+            Spacer(Modifier.height(16.dp))
+        }
 
         when {
             joinWifi != null -> JoinAtlasWifi(joinWifi!!.ssid ?: "Atlas", joinWifi!!.password, context, onCancel = vm::cancelPairing)
@@ -149,7 +154,8 @@ fun OnboardingScreen(vm: ConnectionViewModel) {
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(s.name, color = AtlasOnBg, fontWeight = FontWeight.SemiBold)
-                                Text(s.deviceId.take(8), color = AtlasMuted, fontSize = 12.sp)
+                                // Its own .local name (also on the label) tells two nearby Atlases apart.
+                                Text(s.hostname ?: s.deviceId.take(8), color = AtlasMuted, fontSize = 12.sp)
                             }
                             Text("Connect", color = AtlasPrimary, fontWeight = FontWeight.Bold)
                         }
@@ -160,11 +166,15 @@ fun OnboardingScreen(vm: ConnectionViewModel) {
                 if (advanced) {
                     TextButton(onClick = vm::scanNetwork) { Text("Scan this network for Atlas") }
                     OutlinedTextField(value = address, onValueChange = { address = it.trim() }, singleLine = true,
-                        label = { Text("Atlas address (e.g. 192.168.1.20)") }, modifier = Modifier.fillMaxWidth())
-                    TextButton(onClick = {
-                        val a = address.removePrefix("https://").removePrefix("http://").trimEnd('/')
-                        if (a.isNotBlank()) vm.choose("https://$a")
-                    }) { Text("Connect to this address") }
+                        label = { Text("Atlas address") },
+                        placeholder = { Text("atlas-7kq3pm.local or 192.168.1.20") },
+                        supportingText = { Text("Its .local name is on the label and in Atlas's Settings.") },
+                        keyboardOptions = KeyboardOptions(autoCorrectEnabled = false,
+                            keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri),
+                        modifier = Modifier.fillMaxWidth())
+                    TextButton(onClick = { if (address.isNotBlank()) vm.chooseTyped(address) }) {
+                        Text("Connect to this address")
+                    }
                 }
             }
         }

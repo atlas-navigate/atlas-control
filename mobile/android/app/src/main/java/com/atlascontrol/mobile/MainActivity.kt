@@ -32,7 +32,10 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.atlascontrol.mobile.notifications.AtlasNotificationManager
 import com.atlascontrol.mobile.ui.ConnectionViewModel
+import com.atlascontrol.mobile.ui.DeviceDetailsCard
+import com.atlascontrol.mobile.ui.LocalNetworkPermissionCard
 import com.atlascontrol.mobile.ui.OnboardingScreen
+import com.atlascontrol.mobile.ui.YourAtlasAddress
 import com.atlascontrol.mobile.ui.Screen
 import com.atlascontrol.mobile.ui.web.AtlasWebScreen
 
@@ -54,6 +57,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun AtlasApp(vm: ConnectionViewModel) {
     val screen by vm.screen.collectAsState()
+    val networkBlocked by vm.localNetworkBlocked.collectAsState()
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(Unit) { vm.events.collect { snackbar.showSnackbar(it) } }
 
@@ -66,6 +70,7 @@ private fun AtlasApp(vm: ConnectionViewModel) {
                     is Screen.Locating -> Waiting(s.message)
                     is Screen.Restarting -> Waiting(s.message, detail = "Atlas reconnects by itself — keep this app open.")
                     is Screen.Connected -> AtlasWebScreen(vm, s.baseUrl)
+                    is Screen.Paired -> YourAtlasAddress(s.name, s.hostname, onContinue = vm::continueAfterPairing)
                     Screen.NotFound -> Problem(
                         icon = Icons.Default.WifiOff,
                         title = "Can't find ${vm.deviceName}",
@@ -74,6 +79,13 @@ private fun AtlasApp(vm: ConnectionViewModel) {
                             "The app keeps looking and connects as soon as Atlas is reachable.",
                         primary = "Try again" to { vm.relocate() },
                         secondary = null,
+                        details = {
+                            if (networkBlocked) {
+                                LocalNetworkPermissionCard(onRetry = { vm.relocate() })
+                                Spacer(Modifier.height(12.dp))
+                            }
+                            DeviceDetailsCard(vm.deviceName, vm.deviceHostname, vm.lastAddress)
+                        },
                     )
                     Screen.SecurityWarning -> Problem(
                         icon = Icons.Default.GppMaybe,
@@ -115,7 +127,8 @@ private fun Waiting(message: String, detail: String? = null) {
 
 @Composable
 private fun Problem(icon: ImageVector, title: String, body: String,
-                    primary: Pair<String, () -> Unit>, secondary: Pair<String, () -> Unit>?) {
+                    primary: Pair<String, () -> Unit>, secondary: Pair<String, () -> Unit>?,
+                    details: (@Composable () -> Unit)? = null) {
     Column(Modifier.fillMaxSize().background(AtlasBackground).padding(32.dp),
         verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
         Icon(icon, null, tint = AtlasWarning, modifier = Modifier.size(52.dp))
@@ -129,6 +142,10 @@ private fun Problem(icon: ImageVector, title: String, body: String,
         }
         if (secondary != null) {
             TextButton(onClick = secondary.second) { Text(secondary.first) }
+        }
+        if (details != null) {
+            Spacer(Modifier.height(20.dp))
+            details()
         }
     }
 }

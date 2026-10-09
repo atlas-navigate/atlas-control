@@ -24,6 +24,11 @@ enum AtlasDiscovery {
     /// Where is the paired Atlas right now? Returns a confirmed base URL.
     static func locate(_ device: PairedDevice) async -> String? {
         if let last = device.lastUrl, await AtlasClient.confirm(last, device: device) { return last }
+        // Its .local name: iOS resolves it over Bonjour, so this survives an IP change.
+        if let name = device.hostname {
+            let url = "https://\(name)"
+            if url != device.lastUrl, await AtlasClient.confirm(url, device: device) { return url }
+        }
         for s in await discover(timeout: 5) where s.deviceId == device.deviceId {
             if await AtlasClient.confirm(s.baseUrl, device: device) { return s.baseUrl }
         }
@@ -37,6 +42,18 @@ enum AtlasDiscovery {
             let browser = NWBrowser(for: .bonjourWithTXTRecord(type: "_atlas._tcp", domain: nil), using: .tcp)
             var latest: Set<NWBrowser.Result> = []
             browser.browseResultsChangedHandler = { r, _ in latest = r }
+            // Local Network privacy: a refusal is Bonjour's PolicyDenied (-65570).
+            browser.stateUpdateHandler = { state in
+                switch state {
+                case .waiting(let error), .failed(let error):
+                    if case .dns(let code) = error, Int(code) == -65570 {
+                        DispatchQueue.main.async { LocalNetworkAccess.shared.denied = true }
+                    }
+                case .ready:
+                    DispatchQueue.main.async { LocalNetworkAccess.shared.denied = false }
+                default: break
+                }
+            }
             browser.start(queue: .global(qos: .utility))
             DispatchQueue.global().asyncAfter(deadline: .now() + timeout * 0.6) {
                 browser.cancel()
@@ -48,7 +65,8 @@ enum AtlasDiscovery {
             guard case let .bonjour(txt) = r.metadata, let id = txt["id"], !id.isEmpty,
                   case let .service(name, _, _, _) = r.endpoint,
                   let host = await resolveIPv4(r.endpoint) else { continue }
-            out.append(Sighting(deviceId: id, name: name, pin: txt["fp"], baseUrl: "https://\(host)", via: "bonjour"))
+            out.append(Sighting(deviceId: id, name: name, pin: txt["fp"], baseUrl: "https://\(host)", via: "bonjour",
+                                hostname: AtlasAddress.fqdn(txt["host"])))
         }
         return out
     }

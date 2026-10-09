@@ -19,6 +19,8 @@ data class Sighting(
     val pin: String?,
     val baseUrl: String,
     val via: String,
+    /** Its own .local name (atlas-7kq3pm.local), when Atlas advertises one. */
+    val hostname: String? = null,
 )
 
 /**
@@ -70,8 +72,11 @@ object AtlasBeacon {
                 if (id.isBlank()) continue
                 val host = pkt.address?.hostAddress ?: continue
                 val url = if (host.contains(':')) "https://[$host]" else "https://$host"
-                found[id] = Sighting(id, o.optString("name", "Atlas"), o.optString("fp").ifBlank { null }, url, "beacon")
+                found[id] = Sighting(id, o.optString("name", "Atlas"), o.optString("fp").ifBlank { null }, url, "beacon",
+                    AtlasAddress.fqdn(o.optString("host").ifBlank { null }))
             }
+        } catch (e: java.net.SocketException) {
+            LocalNetwork.noteFailure(e)
         } finally {
             socket.close()
             runCatching { lock?.release() }

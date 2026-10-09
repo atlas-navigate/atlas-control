@@ -46,6 +46,11 @@ object AtlasDiscovery {
     /** Where is the paired Atlas right now? Returns a confirmed base URL. */
     suspend fun locate(context: Context, device: PairedDevice, thorough: Boolean = false): String? {
         device.lastUrl?.let { if (AtlasClient.confirm(it, device)) return it }
+        // Its .local name, where this phone can resolve it: the address it
+        // resolves to is confirmed (and used) like any other.
+        for (url in resolveName(device.hostname)) {
+            if (AtlasClient.confirm(url, device)) return url
+        }
         for (s in discover(context, 5_000L).filter { it.deviceId == device.deviceId }) {
             if (AtlasClient.confirm(s.baseUrl, device)) return s.baseUrl
         }
@@ -56,6 +61,17 @@ object AtlasDiscovery {
             }
         }
         return null
+    }
+
+    /** https URLs for the IPv4 addresses a name resolves to here (empty if it doesn't). */
+    suspend fun resolveName(name: String?): List<String> = withContext(Dispatchers.IO) {
+        if (name.isNullOrBlank()) return@withContext emptyList()
+        withTimeoutOrNull(2_000L) {
+            runCatching {
+                java.net.InetAddress.getAllByName(name).filterIsInstance<java.net.Inet4Address>()
+                    .mapNotNull { it.hostAddress }.map { "https://$it" }
+            }.getOrDefault(emptyList())
+        } ?: emptyList()
     }
 
     /** The phone's DHCP gateway as an https URL (Atlas, when on its hotspot). */
@@ -97,6 +113,7 @@ object AtlasDiscovery {
         }
         try {
             runCatching { nsd.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, listener) }
+                .onFailure { LocalNetwork.noteFailure(it) }
             delay(timeoutMs * 2 / 3)
         } finally {
             runCatching { nsd.stopServiceDiscovery(listener) }
@@ -108,8 +125,9 @@ object AtlasDiscovery {
             val attrs = resolved.attributes ?: emptyMap()
             val id = attrs["id"]?.toString(Charsets.UTF_8) ?: continue
             val fp = attrs["fp"]?.toString(Charsets.UTF_8)
+            val name = AtlasAddress.fqdn(attrs["host"]?.toString(Charsets.UTF_8))
             val url = if (host.contains(':')) "https://[$host]" else "https://$host"
-            out += Sighting(id, resolved.serviceName ?: "Atlas", fp, url, "mdns")
+            out += Sighting(id, resolved.serviceName ?: "Atlas", fp, url, "mdns", name)
         }
         runCatching { lock?.release() }
         return out

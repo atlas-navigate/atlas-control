@@ -6,12 +6,14 @@ import android.os.Build
 import android.webkit.CookieManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.atlascontrol.mobile.network.AtlasAddress
 import com.atlascontrol.mobile.network.AtlasClient
 import com.atlascontrol.mobile.network.AtlasDiscovery
 import com.atlascontrol.mobile.network.AtlasInfo
 import com.atlascontrol.mobile.network.AtlasLabel
 import com.atlascontrol.mobile.network.AtlasTrust
 import com.atlascontrol.mobile.network.DeviceStore
+import com.atlascontrol.mobile.network.LocalNetwork
 import com.atlascontrol.mobile.network.PairedDevice
 import com.atlascontrol.mobile.network.PairingException
 import com.atlascontrol.mobile.network.Sighting
@@ -38,6 +40,8 @@ sealed interface Screen {
     /** Looking for the paired Atlas (after launch, a network change, a reboot). */
     data class Locating(val message: String) : Screen
     data class Connected(val baseUrl: String) : Screen
+    /** Just paired: show the owner this Atlas's own .local address once. */
+    data class Paired(val baseUrl: String, val name: String, val hostname: String) : Screen
     /** Atlas is up but restarting (update or reboot); we wait and reconnect. */
     data class Restarting(val message: String) : Screen
     /** Could not find the paired Atlas on any reachable network. */
@@ -104,6 +108,11 @@ class ConnectionViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     val deviceName: String get() = device?.name ?: "Atlas"
+    /** The paired Atlas's own .local name, when known (atlas-7kq3pm.local). */
+    val deviceHostname: String? get() = device?.hostname
+    /** The last address it answered on (an IP), for the device panel. */
+    val lastAddress: String? get() = AtlasAddress.hostOf(device?.lastUrl)
+    val localNetworkBlocked = LocalNetwork.blocked
     fun currentDevice(): PairedDevice? = device
 
     // ── connecting ───────────────────────────────────────────────────────
@@ -141,12 +150,26 @@ class ConnectionViewModel(app: Application) : AndroidViewModel(app) {
         store.rememberUrl(url)
         device = device?.copy(lastUrl = url)
         pendingUrls = emptyList()
+        LocalNetwork.noteSuccess()
+        refreshHostname(url)
         if (updateInProgress) {
             updateInProgress = false
             _events.tryEmit("Update complete.")
         }
         _screen.value = Screen.Connected(url)
         startMonitor(url)
+    }
+
+    /** Keep the stored .local name current (a first update can give a legacy Atlas its own name). */
+    private fun refreshHostname(url: String) {
+        val dev = device ?: return
+        viewModelScope.launch {
+            val name = AtlasClient.hostname(url, dev) ?: return@launch
+            if (name != device?.hostname) {
+                store.rememberHostname(name)
+                device = device?.copy(hostname = name)
+            }
+        }
     }
 
     /** While connected: notice restarts/updates quickly and keep notifications flowing. */
@@ -242,7 +265,33 @@ class ConnectionViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             _nearby.value = found.distinctBy { it.deviceId }
+            if (found.isNotEmpty()) LocalNetwork.noteSuccess()
             _searching.value = false
+        }
+    }
+
+    /**
+     * An address typed under Advanced: an IP, a URL, or a name such as
+     * atlas-7kq3pm(.local). Android often can't resolve .local names itself,
+     * so a .local name is first matched against the names Atlas devices
+     * advertise nearby; the connection then goes to that device's address.
+     */
+    fun chooseTyped(input: String) {
+        val typed = AtlasAddress.parse(input)
+        if (typed == null) {
+            _pairingError.value = "That doesn't look like an Atlas address. Try its .local name (on the label) or its IP address."
+            return
+        }
+        if (!typed.isLocalName) { choose(typed.url); return }
+        _pairingError.value = null
+        viewModelScope.launch {
+            val ctx = getApplication<Application>()
+            val seen = (_nearby.value + AtlasDiscovery.discover(ctx, 4_000L)).firstOrNull { it.hostname == typed.host }
+            if (seen != null) { choose(seen.baseUrl, seen.pin); return@launch }
+            val resolved = AtlasDiscovery.resolveName(typed.host).firstOrNull()
+            if (resolved != null) { choose(resolved); return@launch }
+            _pairingError.value = "Couldn't find ${typed.host} on this network. Make sure this phone is on the same " +
+                "Wi-Fi as Atlas, or type Atlas's IP address instead."
         }
     }
 
@@ -378,11 +427,19 @@ class ConnectionViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun finishPairing(t: PairingTarget, token: String) {
-        val dev = PairedDevice(t.info.deviceId, t.info.name, t.info.observedPin, token, t.info.baseUrl)
+        val dev = PairedDevice(t.info.deviceId, t.info.name, t.info.observedPin, token, t.info.baseUrl, t.info.hostname)
         store.save(dev)
         device = dev
         cancelPairing()
-        connected(t.info.baseUrl)
+        val name = t.info.hostname
+        if (name != null) _screen.value = Screen.Paired(t.info.baseUrl, t.info.name, name)
+        else connected(t.info.baseUrl)
+    }
+
+    /** "Open Atlas" on the just-paired screen. */
+    fun continueAfterPairing() {
+        val s = _screen.value as? Screen.Paired ?: return
+        connected(s.baseUrl)
     }
 
     /** Forget this Atlas (security warning → pair again, or owner's choice). */

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MainView: View {
     @ObservedObject var model: ConnectionModel
+    @ObservedObject private var localNetwork = LocalNetworkAccess.shared
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -15,10 +16,20 @@ struct MainView: View {
                 WaitingView(message: message, detail: "Atlas reconnects by itself — keep this app open.")
             case .connected(let url):
                 AtlasWebScreen(model: model, baseUrl: url).id(url).ignoresSafeArea(edges: .bottom)
+            case .paired(_, let name, let hostname):
+                YourAtlasAddressView(name: name, hostname: hostname) { model.continueAfterPairing() }
             case .notFound:
-                ProblemView(icon: "wifi.slash", title: "Can't find \(model.deviceName)",
-                            body: "Make sure Atlas is switched on and this iPhone is on the same Wi-Fi, or on Atlas's own Wi-Fi (its name and password are on the label). The app keeps looking and connects as soon as Atlas is reachable.",
-                            primary: ("Try again", { model.relocate() }), secondary: nil)
+                ScrollView {
+                    ProblemView(icon: "wifi.slash", title: "Can't find \(model.deviceName)",
+                                body: "Make sure Atlas is switched on and this iPhone is on the same Wi-Fi, or on Atlas's own Wi-Fi (its name and password are on the label). The app keeps looking and connects as soon as Atlas is reachable.",
+                                primary: ("Try again", { model.relocate() }), secondary: nil)
+                    VStack(spacing: 12) {
+                        if localNetwork.denied { LocalNetworkDeniedCard() }
+                        DeviceDetailsView(name: model.deviceName, hostname: model.deviceHostname,
+                                          lastAddress: model.lastAddress)
+                    }
+                    .padding(.horizontal, 24)
+                }
             case .securityWarning:
                 ProblemView(icon: "exclamationmark.shield",
                             title: "Security warning",

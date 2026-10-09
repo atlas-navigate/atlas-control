@@ -8,6 +8,8 @@ struct PairedDevice: Equatable {
     var pin: String
     var token: String
     var lastUrl: String?
+    /// Its own .local name (atlas-7kq3pm.local): shown to the owner, and one more way to find it.
+    var hostname: String? = nil
 }
 
 /// Device id, name, key pin and last address in UserDefaults; the pairing
@@ -21,7 +23,8 @@ enum DeviceStore {
               let pin = defaults.string(forKey: "atlas.pin"),
               let token = readToken() else { return nil }
         return PairedDevice(deviceId: id, name: defaults.string(forKey: "atlas.name") ?? "Atlas",
-                            pin: pin, token: token, lastUrl: defaults.string(forKey: "atlas.last_url"))
+                            pin: pin, token: token, lastUrl: defaults.string(forKey: "atlas.last_url"),
+                            hostname: defaults.string(forKey: "atlas.hostname"))
     }
 
     static func save(_ d: PairedDevice) {
@@ -29,13 +32,17 @@ enum DeviceStore {
         defaults.set(d.name, forKey: "atlas.name")
         defaults.set(d.pin, forKey: "atlas.pin")
         defaults.set(d.lastUrl, forKey: "atlas.last_url")
+        defaults.set(d.hostname, forKey: "atlas.hostname")
         writeToken(d.token)
     }
 
     static func rememberUrl(_ url: String) { defaults.set(url, forKey: "atlas.last_url") }
 
+    static func rememberHostname(_ name: String) { defaults.set(name, forKey: "atlas.hostname") }
+
     static func forget() {
-        for k in ["atlas.device_id", "atlas.name", "atlas.pin", "atlas.last_url", "atlas.share_location"] {
+        for k in ["atlas.device_id", "atlas.name", "atlas.pin", "atlas.last_url", "atlas.hostname",
+                  "atlas.share_location"] {
             defaults.removeObject(forKey: k)
         }
         SecItemDelete([kSecClass: kSecClassGenericPassword, kSecAttrService: service] as CFDictionary)

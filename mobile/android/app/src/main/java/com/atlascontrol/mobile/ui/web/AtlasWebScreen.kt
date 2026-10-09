@@ -39,8 +39,15 @@ private const val RENDERER_CRASH_MAX_BACKOFF_MS = 30_000L
 private const val RENDERER_CRASH_RESET_MS = 60_000L
 
 /** Calls the Atlas web UI makes into the app (window.AtlasAndroid). */
-private class AtlasJsBridge(private val vm: ConnectionViewModel) {
+private class AtlasJsBridge(private val vm: ConnectionViewModel, private val context: android.content.Context) {
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /** Settings → Local Device Address "Copy" (the WebView's clipboard API is unreliable here). */
+    @android.webkit.JavascriptInterface
+    fun copyText(text: String) {
+        val clean = text.take(256)
+        main.post { com.atlascontrol.mobile.ui.copyToClipboard(context, "Atlas", clean) }
+    }
 
     @android.webkit.JavascriptInterface
     fun reconnect() { main.post { vm.relocate() } }
@@ -98,7 +105,7 @@ fun AtlasWebScreen(vm: ConnectionViewModel, baseUrl: String) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = {
-                webView.addJavascriptInterface(AtlasJsBridge(vm), "AtlasAndroid")
+                webView.addJavascriptInterface(AtlasJsBridge(vm, context.applicationContext), "AtlasAndroid")
                 configureWebView(webView, origin, device.pin,
                     onProgress = { progress = it },
                     onNavigated = { canGoBack = webView.canGoBack() },

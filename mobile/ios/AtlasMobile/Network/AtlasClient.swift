@@ -12,6 +12,8 @@ struct AtlasInfo: Equatable {
     var version: String?
     /// Pairing protocol Atlas speaks (/api/device/info "pairing"); see AtlasClient.pairingVersion.
     var pairingVersion: Int = 1
+    /// Its own .local name, e.g. atlas-7kq3pm.local (nil on older Atlas software).
+    var hostname: String? = nil
 }
 
 struct PairingError: LocalizedError {
@@ -80,7 +82,21 @@ enum AtlasClient {
               let id = o["device_id"] as? String else { return nil }
         return AtlasInfo(baseUrl: base, deviceId: id, name: o["name"] as? String ?? "Atlas",
                          advertisedPin: o["tls_spki_sha256"] as? String, observedPin: pin,
-                         version: o["version"] as? String, pairingVersion: o["pairing"] as? Int ?? 1)
+                         version: o["version"] as? String, pairingVersion: o["pairing"] as? Int ?? 1,
+                         hostname: AtlasAddress.fqdn((o["fqdn"] as? String) ?? (o["hostname"] as? String)))
+    }
+
+    /// The paired Atlas's current .local name (it can change: a legacy unit's
+    /// first update, or a name conflict on the network). nil if unreachable.
+    static func hostname(_ baseUrl: String, device: PairedDevice) async -> String? {
+        let (s, _) = session(pin: device.pin, timeout: 5)
+        defer { s.invalidateAndCancel() }
+        guard let req = request("\(normalize(baseUrl))/api/device/info", token: device.token),
+              let (data, resp) = try? await s.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        let o = object(data)
+        guard o["device_id"] as? String == device.deviceId else { return nil }
+        return AtlasAddress.fqdn((o["fqdn"] as? String) ?? (o["hostname"] as? String))
     }
 
     /// Is this an Atlas running software from before pairing existed (it answers
