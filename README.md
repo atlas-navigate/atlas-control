@@ -104,7 +104,7 @@ Wi-Fi, or "Allow" on a device that is already paired — see
 
 | Network | Address |
 |---------|---------|
-| Atlas's Wi-Fi or your network | `https://atlas-xxxx.local` (on the label) |
+| Atlas's Wi-Fi or your network | `https://atlas-xxxxxx.local` (on the label; also in Settings → Local Device Address) |
 | Atlas's Wi-Fi | `https://10.42.0.1` |
 
 Browsers warn once about Atlas's own (self-signed) certificate.

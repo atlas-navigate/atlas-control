@@ -46,7 +46,7 @@ middleware (so `/socket.io/` is covered too):
   loopback **and** the request carries nginx's per-device `X-Atlas-Proxy`
   secret; otherwise every `X-Forwarded-*`/`X-Real-IP`/`X-Atlas-*` header is
   stripped. A forged `X-Forwarded-For` cannot make a LAN client look local.
-- **Host allowlist**: IP literals, the unit's own `atlas-xxxx.local`,
+- **Host allowlist**: IP literals, the unit's own `atlas-xxxxxx.local` (and avahi's conflict rename, and the legacy `atlas.local` alias),
   `atlas.local`, `localhost`, and names the owner adds. DNS rebinding
   (`evil.example` resolving to the unit) is refused.
 - **Cross-site**: state-changing requests must come from an allowed origin
@@ -76,7 +76,7 @@ middleware (so `/socket.io/` is covered too):
 ## Identity and TLS (`/etc/atlas/identity`)
 
 Created per unit on first install (never copied from a golden image):
-device id, `Atlas-XXXX` name and `atlas-xxxx` hostname, ECDSA P-256 key and
+device id, `Atlas-XXXXXX` name and `atlas-xxxxxx` hostname (derived from the module serial), ECDSA P-256 key and
 self-signed certificate (valid 2024–2099 so a wrong clock never breaks it),
 hotspot SSID (the password is the standard one shared by every unit, see
 [PAIRING.md](PAIRING.md)), setup code, the nginx proxy secret.

@@ -76,7 +76,7 @@ build units.
      files, a health check, and automatic rollback on failure;
    - checks Ollama is new enough for every model and has its GPU runners,
      and that every model is present (pulling any missing when online);
-   - gives the unit its **own identity**: `Atlas-XXXX` name, `atlas-xxxx`
+   - gives the unit its **own identity**: `Atlas-XXXXXX` name, `atlas-xxxxxx`
      hostname, TLS key and certificate, hotspot name (the hotspot password
      is the standard one every unit shares), setup code;
    - writes the **label** (`/root/atlas-labels/Atlas-XXXX.{png,svg,txt}`,
@@ -99,15 +99,26 @@ build units.
   → all active; `sudo finalize-retail.sh --check` → "Ready for retail."
 - From a phone: scan the label's app QR code in the Atlas app → paired, map
   loads, a cross-state route returns, Ray answers.
-- `ss -ltn` shows nothing on `*:5000`; `https://atlas-xxxx.local` shows the
+- `ss -ltn` shows nothing on `*:5000`; `https://atlas-xxxxxx.local` shows the
   pairing screen to an unpaired browser.
 
 ## Unique per unit, even from a cloned image
 
 The identity is never on the payload drive. It is created on each unit by
 `install.sh`, from the operating system's secure random source. It holds the
-setup code, TLS key, Wi-Fi name, device id and proxy secret. None of these is
-shared between units: there is no default setup code.
+setup code, TLS key, device id and proxy secret. None of these is shared
+between units: there is no default setup code.
+
+The unit's name code is derived one-way from the module serial. It appears as:
+- the name (Atlas-7KQ3PM);
+- the Wi-Fi name;
+- the `.local` hostname (`atlas-7kq3pm.local`).
+
+So a reflashed module keeps its printed name, and a different module never
+gets it. The code has 29⁶ ≈ 590 million values, so two units on one network
+practically never collide. A fleet registry should still check for
+duplicates: if a code repeats, bump `name_salt` with
+`identity.create(salt=1)` and reprint that label.
 
 The hotspot **password** is the exception: it is the same on every unit (owner
 decision, `FACTORY_HOTSPOT_PASSWORD`), so it can be pre-printed on the box and
@@ -127,6 +138,14 @@ start:
 
 Print the label after that first boot:
 `sudo atlas-identity label-json | make_label.py`.
+
+## The clock and the RTC backup cell
+
+Atlas keeps working offline after power loss (see
+[TIMEKEEPING.md](TIMEKEEPING.md)). Accurate offline time from the first second
+needs a backup cell on the RTC. On the line, after the first boot: unplug for
+a minute, boot, and check that `sudo atlas-engine clock status` shows
+`"status": "kept-time"`. `"lost-power"` means the cell is missing or flat.
 
 ## Developer units
 

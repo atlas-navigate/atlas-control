@@ -37,7 +37,7 @@ PBKDF2 hash that pairing checks. It is printed on that unit's label.
 
 The same run gives the unit its own:
 - device id and TLS key (the apps pin it);
-- `Atlas-XXXX` / `atlas-xxxx` name (also its Wi-Fi name);
+- `Atlas-XXXXXX` / `atlas-xxxxxx` name (also its Wi-Fi name and `.local` address);
 - proxy secret.
 
 ## The Wi-Fi password is the same on every Atlas
@@ -114,9 +114,54 @@ find it through:
 Whatever address answers must present the pinned key; if the same device id
 ever shows a different key, the app stops and warns instead of connecting.
 
-Browsers use `https://atlas-xxxx.local` (printed on the label). Each browser
+Browsers use `https://atlas-xxxxxx.local` (printed on the label). Each browser
 warns once about Atlas's self-signed certificate; the pairing cookie then
 lasts until the device is removed or Atlas is reset.
+
+## Every Atlas has its own .local name
+
+Each unit answers at its own address on the local network, for example
+`atlas-7kq3pm.local`. The code is the one in the unit's name (Atlas-7KQ3PM)
+and Wi-Fi name, so two Atlases on one network never share an address.
+
+- **Where it comes from.**
+  - New units derive the code one-way from the module serial number (HMAC,
+    six characters from the label alphabet, so no 0/O, 1/I/L or 5/S). A
+    reflash of the same module gets the same name back; a disk cloned into
+    another unit gets a different one. The serial can't be recovered from it.
+  - Units made before that keep their four-character code.
+- **Older units** that answered to `atlas.local` move to `atlas-<their
+  code>.local` on their first update. They keep their key, so paired apps
+  are unaffected; the certificate is re-issued with the new name. They also
+  keep answering `atlas.local` as an alias, but only while no other device
+  on the network claims it.
+- **Where it is published.** In the DNS-SD advert (TXT `host=`), the LAN
+  beacon, `/api/device/info` (`hostname`, and `fqdn` for the name that
+  resolves right now), `/api/device/local`, and Settings → Local Device
+  Address. The apps show it after pairing and when Atlas can't be found.
+- **Name conflicts.** If another device takes the name, avahi answers at
+  `atlas-7kq3pm-2.local` meanwhile. Atlas keeps accepting that name and
+  retries its own name after 30 s, 2 min and 10 min, then hourly.
+- **Names don't grant trust.** The apps confirm every address by device id
+  and pinned key.
+
+## Factory reset and resale
+
+Settings → Factory reset prepares Atlas for a new owner.
+
+| Erased | Kept (the hardware identity on the label) |
+|---|---|
+| every pairing (all phones and browsers must pair again) | name, `.local` hostname and device id |
+| messages, Ray conversations, owner documents, location history, trackers, routes, waypoints, schedules, calendar, alerts | TLS key (so the label's QR code still verifies) |
+| saved Wi-Fi networks, network hints, an owner-set hotspot name/password (back to the label's) | setup code and standard hotspot password on the label |
+| the security log, downloads, pre-migration database copies | installed software, maps, routing data, built-in reference |
+| Atlas's logs and caches, the system journal, Ray's in-memory conversation state | |
+
+The previous owner keeps nothing that lets them back in: their phones' and
+browsers' tokens are revoked. The setup code is printed on the label, so
+anyone holding the unit can pair. That is the intended physical-possession
+proof. Support can issue a new setup code (`atlas-identity new-setup-code`)
+if a label is lost or must change hands without the unit.
 
 ## Shared phone location (tracker)
 
