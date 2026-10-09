@@ -12,6 +12,11 @@ processed again on every turn.
 The "turn" layout keeps the system message stable (Ray's instructions, the
 unit and data rules, and the date, which changes once a day) and puts each
 turn's reference material in that turn's user message, before the question.
+Math questions are the exception: the calculator instruction and the
+calculator agent's verified numbers stay in the system message, where the
+model follows them (measured: 9/12 calculator answers right there, 4/12 when
+they rode in the user message).
+
 History is replayed exactly as stored, so consecutive prompts share
 everything up to the previous question. Nothing is left out: the same blocks
 reach the model, in a different message.
@@ -27,7 +32,7 @@ DEFAULT_LAYOUT = "turn"
 QUESTION_MARK = "=== QUESTION ==="
 LAYOUT_NOTE = (
     "A user message may start with reference material Atlas attached for that question "
-    "(live readings, knowledge passages, calculator results). It ends at the line "
+    "(live readings, knowledge passages). It ends at the line "
     f"{QUESTION_MARK}; the user's own words follow it. Treat the material exactly as the "
     "context blocks described above."
 )
@@ -42,11 +47,17 @@ def layout(settings):
     return value if value in LAYOUTS else DEFAULT_LAYOUT
 
 
-def system_message(base, date_block):
-    """The stable system message for the turn layout."""
+def system_message(base, date_block, extra=()):
+    """The system message for the turn layout: stable, except that a math
+    question appends the calculator instruction and the calculator agent's
+    verified results (`extra`) — a small model follows those reliably only
+    as system instructions. That turn then reuses less, nothing else changes."""
     text = base + "\n" + LAYOUT_NOTE
     if date_block:
         text += "\n\n" + date_block
+    for part in extra:
+        if part:
+            text += "\n\n" + part
     return text
 
 

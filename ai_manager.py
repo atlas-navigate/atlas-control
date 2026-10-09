@@ -7701,13 +7701,19 @@ class AIManager:
                 logger.warning(f"RAG search failed: {e}")
 
         # Calculator tool instruction — injected when query involves math/physics
+        _calc_idx = None
         if self._is_math_query(user_message):
             parts.append(_CALC_INSTRUCTION)
+            _calc_idx = len(parts) - 1
 
-        # For the "turn" layout (ray_prompt.py): the day-stable date block goes
-        # in the system message, everything else in this turn's user message.
+        # For the "turn" layout (ray_prompt.py): the day-stable date block and,
+        # on math questions, the calculator instruction go in the system
+        # message (a 3B model follows it there, and does its own — often
+        # wrong — arithmetic when it sits beside the reference material);
+        # everything else in this turn's user message.
         meta["date_block"] = parts[_date_idx]
-        meta["turn_parts"] = parts[:_date_idx] + parts[_date_idx + 1:]
+        meta["system_parts"] = [parts[_calc_idx]] if _calc_idx is not None else []
+        meta["turn_parts"] = [p for i, p in enumerate(parts) if i not in (_date_idx, _calc_idx)]
         return "\n\n".join(parts), meta
 
     # ------------------------------------------------------------------
@@ -8055,9 +8061,10 @@ class AIManager:
             render = lambda m: m["content"]
         else:
             turn = "\n\n".join(p for p in ctx_meta["turn_parts"] if p)
-            if calc_extra:
-                turn = (turn + "\n\n" + calc_extra).strip()
-            system = ray_prompt.system_message(base, ctx_meta.get("date_block"))
+            # Calculator instruction and the agent's verified numbers: system
+            # message, this turn only (see build_context).
+            extra = list(ctx_meta.get("system_parts") or []) + ([calc_extra] if calc_extra else [])
+            system = ray_prompt.system_message(base, ctx_meta.get("date_block"), extra)
             user = ray_prompt.user_message(turn, loc_prefix + user_message)
             render = lambda m: ray_prompt.history_text(m["content"])
         rows = db.ai_get_recent_messages(chat_id, _HISTORY_WINDOW_MAX)

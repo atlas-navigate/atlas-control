@@ -76,6 +76,18 @@ class LayoutTests(unittest.TestCase):
             self.assertIn(needle, self.rendered(legacy))
         self.assertIn("boil 1 minute", legacy[0]["content"])        # old: all in the system message
         self.assertNotIn("boil 1 minute", turn[0]["content"])
+        # Calculator results are instructions the model must follow: system message in both.
+        self.assertIn("CALC RESULTS 42", turn[0]["content"])
+        self.assertNotIn("CALC RESULTS 42", turn[-1]["content"])
+
+    def test_math_questions_keep_the_calculator_instruction_in_the_system_message(self):
+        date = "=== CURRENT DATE ===\nThursday\n=== END DATE ==="
+        meta = {"units": "metric", "date_block": date, "turn_parts": ["KB passage"],
+                "system_parts": ["[CALC: …] INSTRUCTION"], "user_location": None}
+        msgs, _ = self.m._compose_messages(self.chat, "what is 343*4.2?", _settings(), "", meta)
+        self.assertTrue(msgs[0]["content"].endswith("[CALC: …] INSTRUCTION"))
+        self.assertNotIn("[CALC: …] INSTRUCTION", msgs[-1]["content"])
+        self.assertIn("KB passage", msgs[-1]["content"])
 
     def test_legacy_layout_is_exactly_the_old_prompt(self):
         context, meta = _ctx("X")
