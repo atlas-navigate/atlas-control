@@ -123,3 +123,99 @@ follows the profiles.
    carry it, and capture refuses a payload without it. Units already sold get
    it through Settings → Ray when they are online, since the model files are
    not part of a release.
+
+## Where Ray's time goes, and what was tuned (October 2026)
+
+Measured on the development unit: Orin Nano 8 GB Super, MAXN_SUPER, Ollama
+0.32.1, Qwen2.5 3B, Ray-sized prompts of ~2,300 tokens. The tool is
+`tools/bench/ray_bench.py`; results are in `tools/bench/results/`. It has three
+modes:
+- **app end-to-end**, paired, over the real SSE stream;
+- **`--inproc`**, Ray's own pipeline in the bench process, on a copy of the
+  database;
+- **`direct`**, Ollama alone.
+
+Rates come from llama-server's own timing lines (tokens actually processed;
+Ollama's `prompt_eval_count` also counts cached tokens). Time to first token is
+measured by the client.
+
+| Where | Qwen2.5 3B | Notes |
+|---|---|---|
+| Generation | 19.6 tok/s at ~2.3k tokens of context (21.4 tok/s with a short prompt) | GPU ~970 MHz, memory controller ~3.15 GHz while generating: the governors do ramp |
+| Prompt processing | ~800-825 tok/s | ~1,150 new tokens per turn → ~1.45 s |
+| Building the context | ~0.54 s median | almost all of it the query embedding call |
+| Ollama per request | ~0.39 s (embed) / ~0.5 s (chat) | CPU work before the request reaches the model, even when resident |
+| Prompt-cache save | ~55-80 ms per request | llama-server saving the previous prompt to RAM |
+| Time to first token | ~2.5 s median (warm) | context 0.54 + Ollama ~0.4 + prefill 1.45 + first token |
+
+**What changed.**
+- **CPU clocks.** Ollama's per-request work runs on the CPU, which idled at
+  0.73 GHz. At 1.73 GHz it halves: embed 391 → 215 ms, chat 505 → 267 ms, about
+  0.4 s per answer. Ray now raises the CPU, GPU and memory-controller floors
+  from the moment a question arrives until 30 s after the last answer. This
+  happens on mains power only, below 85 °C, under a 90 s system-enforced lease
+  (`perf_boost.py`, engine `perf.py`).
+- **llama-server's RAM prompt cache.** It grew ~48 MB (Qwen2.5) or ~134 MB
+  (Qwen3.5) per distinct prompt, up to an 8 GiB default. On Qwen3.5, free
+  memory went from 689 MB to 0 in 21 turns and the first word took 3× longer.
+  It is now capped at 128 MiB (an Ollama drop-in shipped with releases).
+- **Models stay loaded.** Keep-alive defaults to "Always": no 15–25 s reload
+  after an idle night. Navigation still unloads Ray when it needs the memory.
+  A warmup with the models already resident doesn't reload them or turn Ray
+  away.
+- **Warmup processes Ray's real system prompt,** so the first question pays
+  only for itself.
+- **Prompt layout** (`ray_prompt.py`). Per-turn material moved from the
+  system message to the user message, so consecutive prompts share
+  everything up to the previous question.
+  - Within the 3,072-token budget Ray keeps only the last exchange or two, so
+    the history window slides every turn. Measured reuse is still the ~800–940
+    token system prompt, and conversation time to first token is unchanged
+    (2.67 s either way).
+  - An 8k context does let reuse grow (811 → 2,733 tokens by turn 6). But
+    Ray then keeps more history, so first-token time stays at 2.3–3.2 s, and
+    generation drops to ~18.2 tok/s on the longest prompts. That's more memory
+    for Ray, not more speed, so it isn't the default. Owners can choose 8k as
+    an expert override.
+  - Math questions and Qwen3.5 keep the original layout (below).
+- **Off the event loop.** Geocoder cache misses and the first load of its
+  tables run in a worker thread; the tables preload at startup.
+- **The browser re-renders** a streaming answer at most once per frame.
+
+**What was tried and left alone.**
+- **Batch size and threads.** Batch 512 vs 1024 and 2/4/6 threads made no
+  difference: generation 19.3–19.7 tok/s, prefill 824–839 tok/s. Batch 1024
+  costs 80 MB.
+- **KV cache q8_0 vs f16 was not measured.** A standalone runner could not
+  load Ollama's CUDA backend. At a 4k context the KV cache is ~4% of the
+  memory read per token, so the possible effect is small.
+- **The embedder's context** stays at 1,024 tokens. It was already sized to
+  the longest passage, and 1,024 is where its memory curve bends.
+
+**Quality guard** (`tools/bench/ray_eval.json`: 25 conversations with
+seed-document facts, calculator answers, live data, multi-turn follow-ups and
+prompt-injection probes; temperature 0.7, three runs each):
+
+| Qwen2.5 3B | Original layout | Final layout |
+|---|---|---|
+| All | 59/75 | 62/75 |
+| Knowledge-base facts | 29/36 | 30/36 |
+| Follow-ups across turns | 9/12 | 12/12 |
+| Injection probes held | 3/6 | 4/6 |
+| Retrieval recall | 33/36 | 33/36 |
+| Calculator | 9/12 | 7/12 before math turns returned to the original layout (4/12 with the calculator blocks in the user message); equal since, by construction |
+
+**Why math turns keep the original layout.** With the calculator instruction
+anywhere but last before the question, the 3B model answers arithmetic
+tersely and wrongly ("1,356 m" for 343 × 4.2). In the original arrangement
+it shows its working.
+
+**Qwen3.5** keeps the original layout (it can only reuse a prompt at its own
+checkpoints). Its regression run scored 22/25: every calculator, live and
+multi-turn item passed. Generation is 14.4–14.7 tok/s, and prefill ~460 tok/s
+on Ray-sized prompts.
+
+**Found, not changed (Ray's reasoning, not speed).** The calculator agent
+mis-extracts free-fall questions (√(2·g·h/4), h/(g/2)). The answer then
+sometimes ends in "approximately *" after `[CALC:]` post-processing. It fails
+in both layouts.
