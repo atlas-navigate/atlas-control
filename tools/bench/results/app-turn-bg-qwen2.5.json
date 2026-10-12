@@ -1,0 +1,909 @@
+{
+ "meta": {
+  "target": "app",
+  "model": null,
+  "status": {
+   "active_model": {
+    "id": "qwen2.5:3b",
+    "label": "Qwen2.5 3B",
+    "num_ctx": 4096,
+    "quant": "Q4_K_M",
+    "tag": "qwen2.5:3b"
+   },
+   "ai_ready": true,
+   "chat_count": 60,
+   "doc_count": 93,
+   "finished_at": 1791546139.1381621,
+   "geocoder": {
+    "ok": true,
+    "us_cities": 17341,
+    "us_cities_db": "/atlas_data/atlas-control/static/data/us_cities.db",
+    "us_zips": 41490,
+    "world": 69525
+   },
+   "last_error": "",
+   "loaded_models": [
+    "qwen2.5:3b",
+    "qwen3-embedding:0.6b"
+   ],
+   "models": [
+    "qwen3.5:4b",
+    "qwen3-embedding:0.6b",
+    "qwen2.5:3b"
+   ],
+   "notice": "",
+   "running": true,
+   "settings": {
+    "embed_format_v": "4",
+    "embed_model": "qwen3-embedding:0.6b",
+    "inject_mesh_context": "true",
+    "keep_alive_hours": "always",
+    "measured:qwen2.5:3b": "{\"tok_s\": 20.1, \"load_s\": 15.4, \"gpu_pct\": 100, \"at\": 1791431099, \"tag\": \"qwen2.5:3b\"}",
+    "measured:qwen3.5:4b": "{\"tok_s\": 17.7, \"load_s\": 22.2, \"gpu_pct\": 100, \"at\": 1790397884, \"tag\": \"qwen3.5:4b\"}",
+    "model": "qwen2.5:3b",
+    "rag_enabled": "true",
+    "rag_top_k": "5",
+    "system_prompt": "You are Ray \u2014 the AI assistant built into Atlas Control, a Meshtastic mesh-network command deck that runs 100% offline on an off-grid Jetson device.\n\nWHAT YOUR CONTEXT CONTAINS:\n- CURRENT POSITION (GPS) is supplied on every turn \u2014 use it to ground answers in the user's real location, terrain, climate, region, and local hazards.\n- LIVE DATA blocks (SYSTEM STATUS, MESH NETWORK STATE, ALERTS) are attached ONLY when the question calls for them. When such a block is present it is real and current \u2014 quote its values exactly. When it is ABSENT you have no reading: answer generally or say you'd need to check \u2014 never invent CPU/RAM/temperature figures, node names, SNR, battery levels, or alerts.\n- KNOWLEDGE BASE blocks are curated offline reference docs (survival, radio, ballistics, medical, navigation, Atlas usage). When present they are your PRIMARY source \u2014 quote their specific values and procedures rather than your own recollection.\n\nHOW TO ANSWER:\n- Lead with the answer. Never open with 'As Ray', 'I am Ray', 'As an AI', or any self-introduction \u2014 answer the question, not who you are.\n- Be concise: one to three sentences for a simple question; use structure (lists, numbered steps, tables) only when the topic genuinely has multiple distinct parts.\n- Ground every claim in what is actually in your context. Do not fabricate data, sources, citations, or a confidence rating \u2014 a verified confidence footer is appended automatically after you finish.\n- Don't hedge about being an AI or being offline, and don't expose your reasoning, deliberation, or internal steps \u2014 give the result directly.\n- This is a survival and off-grid tool, so accuracy is safety. When a precise answer needs a parameter you don't have (barrel twist for spin drift, muzzle velocity, zero distance, a custom load), answer with sensible standard defaults AND ask for the missing detail so the next answer can be exact.\n- If you don't know and nothing in context supports an answer, say so briefly instead of guessing.\n\nFORMATTING \u2014 Match format to the answer's complexity. Reply in GitHub-flavored Markdown:\n- **Bold** key terms; use `inline code` for commands, filenames, values, and node IDs.\n- Use ## / ### headings only for multi-section answers with distinct topics.\n- Use - bullets for unordered points and 1. numbered lists for ordered steps.\n- Put multi-line commands, config, or output in ```fenced code blocks```.\n- Use Markdown tables for comparisons or structured data (e.g. node SNR/hops, specs, schedules).\n- Use > blockquotes for warnings or important callouts.\nSimple questions get a direct plain-text answer. Add structure only when it genuinely improves clarity.",
+    "warmup_on_start": "true"
+   },
+   "started_at": 1791546099.724923,
+   "startup_phase": "ready",
+   "switch": null,
+   "warming_up": false
+  },
+  "version": "1.0.0-dev.20261009114048",
+  "at": "2026-10-09 07:49:32",
+  "mode": "e2e",
+  "start_temp_c": 54.968,
+  "background": {
+   "stats": 56,
+   "tiles": 397,
+   "nodes": 46,
+   "route": 0,
+   "errors": 0
+  },
+  "end_temp_c": 60.156
+ },
+ "rows": [
+  {
+   "text": "How long should I boil water to make it safe?",
+   "chat_id": 117,
+   "error": null,
+   "ttft_s": 5.596,
+   "e2e_s": 8.113,
+   "gen_tokens": 55,
+   "gen_tps": 21.0,
+   "prompt_tokens": 2209,
+   "cached_tokens": 811,
+   "prefill_tokens": 1398,
+   "prefill_s": 1.674,
+   "prefill_tps": 835.2,
+   "llm_calls": 1,
+   "pre_calls": [],
+   "timings": {
+    "context_s": 2.522,
+    "calc_s": 0.0,
+    "layout": "turn",
+    "ttft_s": 5.287,
+    "queue_s": 0.0,
+    "prompt_tokens": 2209,
+    "prefill_s": 1.674,
+    "load_s": 0.258
+   },
+   "hw": {
+    "samples": 39,
+    "cpu_pct_avg": 6.0,
+    "gpu_load_pct_avg": 52.3,
+    "gpu_mhz_avg": 983.4,
+    "gpu_mhz_max": 1020,
+    "emc_mhz_avg": 3144.3,
+    "emc_mhz_max": 3199,
+    "mem_avail_mb_min": 2130,
+    "llama_rss_mb_max": 4296,
+    "app_rss_mb_max": 86,
+    "tj_c_max": 58.781,
+    "vdd_in_mw_avg": 11940.6
+   },
+   "answer": "Bring the water to a rolling boil for at least 1 minute. For altitudes above 6,500 feet (2,000 meters), increase the boiling time to 3 minutes. This ensures that you kill most pathogens present in the water.\n\n---\nConfidence: HIGH | Source: Knowledge Base + GPS Fix",
+   "scenario": "rag",
+   "rep": 0
+  },
+  {
+   "text": "I'm planning a 3-day hike in the desert in summer.",
+   "chat_id": 118,
+   "error": null,
+   "ttft_s": 3.823,
+   "e2e_s": 11.882,
+   "gen_tokens": 178,
+   "gen_tps": 21.4,
+   "prompt_tokens": 1383,
+   "cached_tokens": 942,
+   "prefill_tokens": 441,
+   "prefill_s": 0.55,
+   "prefill_tps": 802.2,
+   "llm_calls": 1,
+   "pre_calls": [],
+   "timings": {
+    "context_s": 1.263,
+    "calc_s": 0.0,
+    "layout": "turn",
+    "ttft_s": 3.276,
+    "queue_s": 0.0,
+    "prompt_tokens": 1383,
+    "prefill_s": 0.55,
+    "load_s": 0.26
+   },
+   "hw": {
+    "samples": 58,
+    "cpu_pct_avg": 4.4,
+    "gpu_load_pct_avg": 74.4,
+    "gpu_mhz_avg": 1020.0,
+    "gpu_mhz_max": 1020,
+    "emc_mhz_avg": 3199.0,
+    "emc_mhz_max": 3199,
+    "mem_avail_mb_min": 2142,
+    "llama_rss_mb_max": 4296,
+    "app_rss_mb_max": 86,
+    "tj_c_max": 60.187,
+    "vdd_in_mw_avg": 15424.6
+   },
+   "answer": "Given your planned 3-day hike in the desert during summer, focus on hydration and protection from intense heat. Here are some essential tips:\n\n- **Hydration**: Carry plenty of water. Aim for at least 1 gallon per day, depending on your activity level and temperature. Use a solar still to collect any available moisture, such as dew or rain.\n- **Protection**: Wear light-colored, loose-fitting clothing that reflects heat. Use a hat and sunglasses to protect your head and eyes from the sun.\n- **Rest**: Take frequent breaks in shaded areas to avoid overheating.\n- **Food**: Bring high-energy snacks like nuts and dried fruits for quick energy.\n- **Monitor**: Keep an eye on your urine color; it should be pale yellow. Darker urine is a sign of dehydration.\n\nStay hydrated and protected, and take necessary precautions as you plan your hike.\n\n---\nConfidence: LOW | Source: Knowledge Base + GPS Fix",
+   "scenario": "conversation",
+   "rep": 0,
+   "turn": 0
+  },
+  {
+   "text": "How much water should I carry per day?",
+   "chat_id": 118,
+   "error": null,
+   "ttft_s": 4.959,
+   "e2e_s": 8.486,
+   "gen_tokens": 77,
+   "gen_tps": 20.8,
+   "prompt_tokens": 2482,
+   "cached_tokens": 676,
+   "prefill_tokens": 1806,
+   "prefill_s": 2.177,
+   "prefill_tps": 829.5,
+   "llm_calls": 1,
+   "pre_calls": [],
+   "timings": {
+    "context_s": 1.262,
+    "calc_s": 0.0,
+    "layout": "legacy",
+    "ttft_s": 4.78,
+    "queue_s": 0.0,
+    "prompt_tokens": 2482,
+    "prefill_s": 2.177,
+    "load_s": 0.26
+   },
+   "hw": {
+    "samples": 42,
+    "cpu_pct_avg": 5.2,
+    "gpu_load_pct_avg": 66.6,
+    "gpu_mhz_avg": 1020.0,
+    "gpu_mhz_max": 1020,
+    "emc_mhz_avg": 3199.0,
+    "emc_mhz_max": 3199,
+    "mem_avail_mb_min": 2112,
+    "llama_rss_mb_max": 4321,
+    "app_rss_mb_max": 86,
+    "tj_c_max": 60.25,
+    "vdd_in_mw_avg": 14211.2
+   },
+   "answer": "For a 3-day desert hike in summer, you should aim to carry at least 1 gallon (about 3.8 liters) of water per person per day to ensure adequate hydration and prevent dehydration.\n\nConfidence: HIGH | Source: Grid-Down: Immediate and Short-Term Survival (0\u20134 Weeks) \u2014 SHORT-TERM (1\u20134 WEEKS)\n\n---\nConfidence: HIGH | Source: Knowledge Base + GPS Fix",
+   "scenario": "conversation",
+   "rep": 0,
+   "turn": 1
+  },
+  {
+   "text": "How would I treat water I find along the way?",
+   "chat_id": 118,
+   "error": null,
+   "ttft_s": 4.71,
+   "e2e_s": 20.068,
+   "gen_tokens": 315,
+   "gen_tps": 20.6,
+   "prompt_tokens": 2250,
+   "cached_tokens": 810,
+   "prefill_tokens": 1440,
+   "prefill_s": 1.758,
+   "prefill_tps": 819.2,
+   "llm_calls": 1,
+   "pre_calls": [],
+   "timings": {
+    "context_s": 1.262,
+    "calc_s": 0.0,
+    "layout": "turn",
+    "ttft_s": 4.279,
+    "queue_s": 0.0,
+    "prompt_tokens": 2250,
+    "prefill_s": 1.758,
+    "load_s": 0.258
+   },
+   "hw": {
+    "samples": 98,
+    "cpu_pct_avg": 4.1,
+    "gpu_load_pct_avg": 81.9,
+    "gpu_mhz_avg": 1020.0,
+    "gpu_mhz_max": 1020,
+    "emc_mhz_avg": 3199.0,
+    "emc_mhz_max": 3199,
+    "mem_avail_mb_min": 2122,
+    "llama_rss_mb_max": 4321,
+    "app_rss_mb_max": 86,
+    "tj_c_max": 61.812,
+    "vdd_in_mw_avg": 16801.6
+   },
+   "answer": "To treat water you find along the way, you should prioritize removing contaminants such as bacteria, viruses, and protozoa. Here are several methods you can use:\n\n1. **Boiling**: Bring the water to a rolling boil for at least 1 minute (3 minutes above 6,500 feet [2,000 meters]). This method is highly effective and reliable.\n\n2. **Bleach**: Use unscented sodium hypochlorite bleach. For a gallon of water, use:\n   - 6% bleach: 8 drops\n   - 8.25% bleach: 6 drops\n   If the water is cloudy or cold, double the amount.\n\n3. **Iodine Tablets**: Use iodine tablets, which are effective against bacteria and protozoa but not viruses. For a liter of water, use one tablet. Let it sit for 30 minutes (60 minutes if cold or turbid) before drinking.\n\n4. **SODIS (Solar Water Disinfection)**: Place the water in a clear plastic bottle under direct sunlight for at least 6 hours (2 days overcast). This method kills bacteria and viruses but not all types of protozoa.\n\nChoose the method that best fits your situation, keeping in mind that boiling is generally the most reliable. Treat ALL unknown water to ensure safety.\n\nConfidence: HIGH | Source: Grid-Down: Immediate and Short-Term Survival (0\u20134 Weeks) \u2014 SHORT-TERM (1\u20134 WEEKS)\n\n---\nConfidence: HIGH | Source: Knowledge Base + GPS Fix",
+   "scenario": "conversation",
+   "rep": 0,
+   "turn": 2
+  },
+  {
+   "text": "What are the signs of heat stroke?",
+   "chat_id": 118,
+   "error": null,
+   "ttft_s": 4.712,
+   "e2e_s": 6.728,
+   "gen_tokens": 43,
+   "gen_tps": 21.1,
+   "prompt_tokens": 2213,
+   "cached_tokens": 942,
+   "prefill_tokens": 1271,
+   "prefill_s": 1.529,
+   "prefill_tps": 831.4,
+   "llm_calls": 1,
+   "pre_calls": [],
+   "timings": {
+    "context_s": 1.512,
+    "calc_s": 0.0,
+    "layout": "turn",
+    "ttft_s": 4.279,
+    "queue_s": 0.0,
+    "prompt_tokens": 2213,
+    "prefill_s": 1.529,
+    "load_s": 0.258
+   },
+   "hw": {
+    "samples": 33,
+    "cpu_pct_avg": 6.4,
+    "gpu_load_pct_avg": 55.2,
+    "gpu_mhz_avg": 1020.0,
+    "gpu_mhz_max": 1020,
+    "emc_mhz_avg": 3199.0,
+    "emc_mhz_max": 3199,
+    "mem_avail_mb_min": 2102,
+    "llama_rss_mb_max": 4310,
+    "app_rss_mb_max": 84,
+    "tj_c_max": 62.093,
+    "vdd_in_mw_avg": 12305.5
+   },
+   "answer": "Heat Stroke \u2014 LIFE THREAT: Hot skin (often dry, sweating may stop), red, temp 104F+ / 40C+, confusion, slurred speech, seizures, collapse.\n\n---\nConfidence: HIGH | Source: Knowledge Base + GPS Fix",
+   "scenario": "conversation",
+   "rep": 0,
+   "turn": 3
+  },
+  {
+   "text": "What should I do if my partner shows them?",
+   "chat_id": 118,
+   "error": null,
+   "ttft_s": 4.959,
+   "e2e_s": 16.038,
+   "gen_tokens": 232,
+   "gen_tps": 20.7,
+   "prompt_tokens": 2245,
+   "cached_tokens": 810,
+   "prefill_tokens": 1435,
+   "prefill_s": 1.751,
+   "prefill_tps": 819.4,
+   "llm_calls": 1,
+   "pre_calls": [],
+   "timings": {
+    "context_s": 1.262,
+    "calc_s": 0.0,
+    "layout": "turn",
+    "ttft_s": 4.527,
+    "queue_s": 0.0,
+    "prompt_tokens": 2245,
+    "prefill_s": 1.751,
+    "load_s": 0.258
+   },
+   "hw": {
+    "samples": 79,
+    "cpu_pct_avg": 4.2,
+    "gpu_load_pct_avg": 78.7,
+    "gpu_mhz_avg": 1020.0,
+    "gpu_mhz_max": 1020,
+    "emc_mhz_avg": 3199.0,
+    "emc_mhz_max": 3199,
+    "mem_avail_mb_min": 2098,
+    "llama_rss_mb_max": 4285,
+    "app_rss_mb_max": 84,
+    "tj_c_max": 62.875,
+    "vdd_in_mw_avg": 16271.0
+   },
+   "answer": "If your partner exhibits signs of heat stroke, such as hot, dry skin, a high fever (104F+ / 40C+), confusion, slurred speech, seizures, or collapse, you should immediately take action to treat them. Here\u2019s how to proceed:\n\n1. **Move Them to Shade**: If possible, move your partner to a cool, shaded area.\n2. **Loosen Clothing**: Remove any unnecessary clothing to help with cooling.\n3. **Apply Cool Water**: Wet their skin with cool water or immerse them in a cool bath or shower.\n4. **Fan and Air Circulation**: Use fans or air circulation to enhance heat loss.\n5. **Drink Water**: Encourage your partner to drink cool, non-alcoholic beverages if they are conscious and able to swallow safely.\n\nIf the person does not show improvement or their condition worsens, call emergency services immediately. Heat stroke is a life-threatening situation that requires prompt medical attention.\n\nConfidence: HIGH | Source: Grid-Down: Immediate and Short-Term Survival (0\u20134 Weeks) \u2014 SHORT-TERM (1\u20134 WEEKS)\n\n---\nConfidence: MEDIUM | Source: Knowledge Base + GPS Fix",
+   "scenario": "conversation",
+   "rep": 0,
+   "turn": 4
+  },
+  {
+   "text": "Summarise the three most important points.",
+   "chat_id": 118,
+   "error": null,
+   "ttft_s": 5.969,
+   "e2e_s": 9.999,
+   "gen_tokens": 82,
+   "gen_tps": 20.7,
+   "prompt_tokens": 2309,
+   "cached_tokens": 808,
+   "prefill_tokens": 1501,
+   "prefill_s": 1.821,
+   "prefill_tps": 824.4,
+   "llm_calls": 1,
+   "pre_calls": [],
+   "timings": {
+    "context_s": 2.518,
+    "calc_s": 0.0,
+    "layout": "turn",
+    "ttft_s": 5.536,
+    "queue_s": 0.0,
+    "prompt_tokens": 2309,
+    "prefill_s": 1.821,
+    "load_s": 0.256
+   },
+   "hw": {
+    "samples": 49,
+    "cpu_pct_avg": 5.0,
+    "gpu_load_pct_avg": 55.6,
+    "gpu_mhz_avg": 1020.0,
+    "gpu_mhz_max": 1020,
+    "emc_mhz_avg": 3199.0,
+    "emc_mhz_max": 3199,
+    "mem_avail_mb_min": 2110,
+    "llama_rss_mb_max": 4279,
+    "app_rss_mb_max": 84,
+    "tj_c_max": 62.593,
+    "vdd_in_mw_avg": 13368.8
+   },
+   "answer": "The three most important points are:\n1. **Fix what kills you soonest**: Air/bleeding, shelter/warmth, water, food in that order.\n2. **Survival Triage**: Prioritize addressing immediate threats and safety first.\n3. **Staying Put for Rescue**: If lost, stay put to be easier to find and signal for rescue deliberately, not in a panic.\n\n---\nConfidence: HIGH | Source: Knowledge Base + GPS Fix",
+   "scenario": "conversation",
+   "rep": 0,
+   "turn": 5
+  },
+  {
+   "text": "If I drop a rock off a 45 meter cliff, how long until it hits the ground?",
+   "chat_id": 119,
+   "error": null,
+   "ttft_s": 3.821,
+   "e2e_s": 14.649,
+   "gen_tokens": 226,
+   "gen_tps": 21.1,
+   "prompt_tokens": 1629,
+   "cached_tokens": 941,
+   "prefill_tokens": 688,
+   "prefill_s": 0.857,
+   "prefill_tps": 803.0,
+   "llm_calls": 1,
+   "pre_calls": [],
+   "timings": {
+    "context_s": 1.262,
+    "calc_s": 0.0,
+    "layout": "turn",
+    "ttft_s": 3.274,
+    "queue_s": 0.0,
+    "prompt_tokens": 1629,
+    "prefill_s": 0.857,
+    "load_s": 0.261
+   },
+   "hw": {
+    "samples": 72,
+    "cpu_pct_avg": 4.1,
+    "gpu_load_pct_avg": 76.6,
+    "gpu_mhz_avg": 1020.0,
+    "gpu_mhz_max": 1020,
+    "emc_mhz_avg": 3199.0,
+    "emc_mhz_max": 3199,
+    "mem_avail_mb_min": 2100,
+    "llama_rss_mb_max": 4280,
+    "app_rss_mb_max": 84,
+    "tj_c_max": 63.343,
+    "vdd_in_mw_avg": 16122.5
+   },
+   "answer": "To calculate the time it takes for a rock dropped from a 45-meter cliff to hit the ground, we can use the kinematic equation for free fall under gravity:\n\n\\[ d = \\frac{1}{2} g t^2 \\]\n\nWhere:\n- \\( d \\) is the distance (45 meters),\n- \\( g \\) is the acceleration due to gravity (approximately 9.8 m/s\u00b2 on Earth),\n- \\( t \\) is the time in seconds.\n\nRearranging the equation to solve for \\( t \\):\n\n\\[ t = \\sqrt{\\frac{2d}{g}} \\]\n\nSubstituting the values:\n\n\\[ t = \\sqrt{\\frac{2 \\times 45}{9.8}} \\]\n\\[ t = \\sqrt{\\frac{90}{9.8}} \\]\n\\[ t \\approx \\sqrt{9.1837} \\]\n\\[ t \\approx 3.03 \\text{ seconds} \\]\n\nSo, it will take approximately **3.03 seconds** for the rock to hit the ground.\n\n---\nConfidence: HIGH | Source: Knowledge Base + GPS Fix",
+   "scenario": "tool",
+   "rep": 0
+  }
+ ],
+ "summary": {
+  "rag": {
+   "ttft_s": {
+    "n": 1,
+    "median": 5.596,
+    "p90": 5.596,
+    "min": 5.596,
+    "max": 5.596
+   },
+   "e2e_s": {
+    "n": 1,
+    "median": 8.113,
+    "p90": 8.113,
+    "min": 8.113,
+    "max": 8.113
+   },
+   "gen_tps": {
+    "n": 1,
+    "median": 21.0,
+    "p90": 21.0,
+    "min": 21.0,
+    "max": 21.0
+   },
+   "prefill_tps": {
+    "n": 1,
+    "median": 835.2,
+    "p90": 835.2,
+    "min": 835.2,
+    "max": 835.2
+   },
+   "prefill_s": {
+    "n": 1,
+    "median": 1.674,
+    "p90": 1.674,
+    "min": 1.674,
+    "max": 1.674
+   },
+   "prompt_tokens": {
+    "n": 1,
+    "median": 2209,
+    "p90": 2209,
+    "min": 2209,
+    "max": 2209
+   },
+   "cached_tokens": {
+    "n": 1,
+    "median": 811,
+    "p90": 811,
+    "min": 811,
+    "max": 811
+   },
+   "prefill_tokens": {
+    "n": 1,
+    "median": 1398,
+    "p90": 1398,
+    "min": 1398,
+    "max": 1398
+   },
+   "hw.cpu_pct_avg": {
+    "n": 1,
+    "median": 6.0,
+    "p90": 6.0,
+    "min": 6.0,
+    "max": 6.0
+   },
+   "hw.gpu_load_pct_avg": {
+    "n": 1,
+    "median": 52.3,
+    "p90": 52.3,
+    "min": 52.3,
+    "max": 52.3
+   },
+   "hw.gpu_mhz_avg": {
+    "n": 1,
+    "median": 983.4,
+    "p90": 983.4,
+    "min": 983.4,
+    "max": 983.4
+   },
+   "hw.emc_mhz_avg": {
+    "n": 1,
+    "median": 3144.3,
+    "p90": 3144.3,
+    "min": 3144.3,
+    "max": 3144.3
+   },
+   "hw.mem_avail_mb_min": {
+    "n": 1,
+    "median": 2130,
+    "p90": 2130,
+    "min": 2130,
+    "max": 2130
+   },
+   "hw.llama_rss_mb_max": {
+    "n": 1,
+    "median": 4296,
+    "p90": 4296,
+    "min": 4296,
+    "max": 4296
+   },
+   "hw.app_rss_mb_max": {
+    "n": 1,
+    "median": 86,
+    "p90": 86,
+    "min": 86,
+    "max": 86
+   },
+   "hw.tj_c_max": {
+    "n": 1,
+    "median": 58.781,
+    "p90": 58.781,
+    "min": 58.781,
+    "max": 58.781
+   },
+   "hw.vdd_in_mw_avg": {
+    "n": 1,
+    "median": 11940.6,
+    "p90": 11940.6,
+    "min": 11940.6,
+    "max": 11940.6
+   },
+   "errors": 0
+  },
+  "conversation": {
+   "ttft_s": {
+    "n": 6,
+    "median": 4.835,
+    "p90": 5.969,
+    "min": 3.823,
+    "max": 5.969
+   },
+   "e2e_s": {
+    "n": 6,
+    "median": 10.941,
+    "p90": 20.068,
+    "min": 6.728,
+    "max": 20.068
+   },
+   "gen_tps": {
+    "n": 6,
+    "median": 20.75,
+    "p90": 21.4,
+    "min": 20.6,
+    "max": 21.4
+   },
+   "prefill_tps": {
+    "n": 6,
+    "median": 821.9,
+    "p90": 831.4,
+    "min": 802.2,
+    "max": 831.4
+   },
+   "prefill_s": {
+    "n": 6,
+    "median": 1.754,
+    "p90": 2.177,
+    "min": 0.55,
+    "max": 2.177
+   },
+   "prompt_tokens": {
+    "n": 6,
+    "median": 2247.5,
+    "p90": 2482,
+    "min": 1383,
+    "max": 2482
+   },
+   "cached_tokens": {
+    "n": 6,
+    "median": 810.0,
+    "p90": 942,
+    "min": 676,
+    "max": 942
+   },
+   "prefill_tokens": {
+    "n": 6,
+    "median": 1437.5,
+    "p90": 1806,
+    "min": 441,
+    "max": 1806
+   },
+   "hw.cpu_pct_avg": {
+    "n": 6,
+    "median": 4.7,
+    "p90": 6.4,
+    "min": 4.1,
+    "max": 6.4
+   },
+   "hw.gpu_load_pct_avg": {
+    "n": 6,
+    "median": 70.5,
+    "p90": 81.9,
+    "min": 55.2,
+    "max": 81.9
+   },
+   "hw.gpu_mhz_avg": {
+    "n": 6,
+    "median": 1020.0,
+    "p90": 1020.0,
+    "min": 1020.0,
+    "max": 1020.0
+   },
+   "hw.emc_mhz_avg": {
+    "n": 6,
+    "median": 3199.0,
+    "p90": 3199.0,
+    "min": 3199.0,
+    "max": 3199.0
+   },
+   "hw.mem_avail_mb_min": {
+    "n": 6,
+    "median": 2111.0,
+    "p90": 2142,
+    "min": 2098,
+    "max": 2142
+   },
+   "hw.llama_rss_mb_max": {
+    "n": 6,
+    "median": 4303.0,
+    "p90": 4321,
+    "min": 4279,
+    "max": 4321
+   },
+   "hw.app_rss_mb_max": {
+    "n": 6,
+    "median": 85.0,
+    "p90": 86,
+    "min": 84,
+    "max": 86
+   },
+   "hw.tj_c_max": {
+    "n": 6,
+    "median": 61.953,
+    "p90": 62.875,
+    "min": 60.187,
+    "max": 62.875
+   },
+   "hw.vdd_in_mw_avg": {
+    "n": 6,
+    "median": 14817.9,
+    "p90": 16801.6,
+    "min": 12305.5,
+    "max": 16801.6
+   },
+   "errors": 0
+  },
+  "conversation_late": {
+   "ttft_s": {
+    "n": 4,
+    "median": 4.835,
+    "p90": 5.969,
+    "min": 4.71,
+    "max": 5.969
+   },
+   "e2e_s": {
+    "n": 4,
+    "median": 13.018,
+    "p90": 20.068,
+    "min": 6.728,
+    "max": 20.068
+   },
+   "gen_tps": {
+    "n": 4,
+    "median": 20.7,
+    "p90": 21.1,
+    "min": 20.6,
+    "max": 21.1
+   },
+   "prefill_tps": {
+    "n": 4,
+    "median": 821.9,
+    "p90": 831.4,
+    "min": 819.2,
+    "max": 831.4
+   },
+   "prefill_s": {
+    "n": 4,
+    "median": 1.754,
+    "p90": 1.821,
+    "min": 1.529,
+    "max": 1.821
+   },
+   "prompt_tokens": {
+    "n": 4,
+    "median": 2247.5,
+    "p90": 2309,
+    "min": 2213,
+    "max": 2309
+   },
+   "cached_tokens": {
+    "n": 4,
+    "median": 810.0,
+    "p90": 942,
+    "min": 808,
+    "max": 942
+   },
+   "prefill_tokens": {
+    "n": 4,
+    "median": 1437.5,
+    "p90": 1501,
+    "min": 1271,
+    "max": 1501
+   },
+   "hw.cpu_pct_avg": {
+    "n": 4,
+    "median": 4.6,
+    "p90": 6.4,
+    "min": 4.1,
+    "max": 6.4
+   },
+   "hw.gpu_load_pct_avg": {
+    "n": 4,
+    "median": 67.15,
+    "p90": 81.9,
+    "min": 55.2,
+    "max": 81.9
+   },
+   "hw.gpu_mhz_avg": {
+    "n": 4,
+    "median": 1020.0,
+    "p90": 1020.0,
+    "min": 1020.0,
+    "max": 1020.0
+   },
+   "hw.emc_mhz_avg": {
+    "n": 4,
+    "median": 3199.0,
+    "p90": 3199.0,
+    "min": 3199.0,
+    "max": 3199.0
+   },
+   "hw.mem_avail_mb_min": {
+    "n": 4,
+    "median": 2106.0,
+    "p90": 2122,
+    "min": 2098,
+    "max": 2122
+   },
+   "hw.llama_rss_mb_max": {
+    "n": 4,
+    "median": 4297.5,
+    "p90": 4321,
+    "min": 4279,
+    "max": 4321
+   },
+   "hw.app_rss_mb_max": {
+    "n": 4,
+    "median": 84.0,
+    "p90": 86,
+    "min": 84,
+    "max": 86
+   },
+   "hw.tj_c_max": {
+    "n": 4,
+    "median": 62.343,
+    "p90": 62.875,
+    "min": 61.812,
+    "max": 62.875
+   },
+   "hw.vdd_in_mw_avg": {
+    "n": 4,
+    "median": 14819.9,
+    "p90": 16801.6,
+    "min": 12305.5,
+    "max": 16801.6
+   },
+   "errors": 0
+  },
+  "tool": {
+   "ttft_s": {
+    "n": 1,
+    "median": 3.821,
+    "p90": 3.821,
+    "min": 3.821,
+    "max": 3.821
+   },
+   "e2e_s": {
+    "n": 1,
+    "median": 14.649,
+    "p90": 14.649,
+    "min": 14.649,
+    "max": 14.649
+   },
+   "gen_tps": {
+    "n": 1,
+    "median": 21.1,
+    "p90": 21.1,
+    "min": 21.1,
+    "max": 21.1
+   },
+   "prefill_tps": {
+    "n": 1,
+    "median": 803.0,
+    "p90": 803.0,
+    "min": 803.0,
+    "max": 803.0
+   },
+   "prefill_s": {
+    "n": 1,
+    "median": 0.857,
+    "p90": 0.857,
+    "min": 0.857,
+    "max": 0.857
+   },
+   "prompt_tokens": {
+    "n": 1,
+    "median": 1629,
+    "p90": 1629,
+    "min": 1629,
+    "max": 1629
+   },
+   "cached_tokens": {
+    "n": 1,
+    "median": 941,
+    "p90": 941,
+    "min": 941,
+    "max": 941
+   },
+   "prefill_tokens": {
+    "n": 1,
+    "median": 688,
+    "p90": 688,
+    "min": 688,
+    "max": 688
+   },
+   "hw.cpu_pct_avg": {
+    "n": 1,
+    "median": 4.1,
+    "p90": 4.1,
+    "min": 4.1,
+    "max": 4.1
+   },
+   "hw.gpu_load_pct_avg": {
+    "n": 1,
+    "median": 76.6,
+    "p90": 76.6,
+    "min": 76.6,
+    "max": 76.6
+   },
+   "hw.gpu_mhz_avg": {
+    "n": 1,
+    "median": 1020.0,
+    "p90": 1020.0,
+    "min": 1020.0,
+    "max": 1020.0
+   },
+   "hw.emc_mhz_avg": {
+    "n": 1,
+    "median": 3199.0,
+    "p90": 3199.0,
+    "min": 3199.0,
+    "max": 3199.0
+   },
+   "hw.mem_avail_mb_min": {
+    "n": 1,
+    "median": 2100,
+    "p90": 2100,
+    "min": 2100,
+    "max": 2100
+   },
+   "hw.llama_rss_mb_max": {
+    "n": 1,
+    "median": 4280,
+    "p90": 4280,
+    "min": 4280,
+    "max": 4280
+   },
+   "hw.app_rss_mb_max": {
+    "n": 1,
+    "median": 84,
+    "p90": 84,
+    "min": 84,
+    "max": 84
+   },
+   "hw.tj_c_max": {
+    "n": 1,
+    "median": 63.343,
+    "p90": 63.343,
+    "min": 63.343,
+    "max": 63.343
+   },
+   "hw.vdd_in_mw_avg": {
+    "n": 1,
+    "median": 16122.5,
+    "p90": 16122.5,
+    "min": 16122.5,
+    "max": 16122.5
+   },
+   "errors": 0
+  }
+ }
+}

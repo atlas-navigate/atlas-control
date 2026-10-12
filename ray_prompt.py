@@ -23,15 +23,24 @@ History is replayed exactly as stored, so consecutive prompts share
 everything up to the previous question. Nothing is left out: the same blocks
 reach the model, in a different message.
 
-"legacy" is the old layout, kept for A/B measurements and as a rollback
-(ai_settings ray_prompt_layout). Models whose server can only reuse a prompt
+Measured outcome (tools/bench, October 2026): under the 3,072-token budget Ray
+keeps only the last exchange or two, so the window slides every turn and
+reuse stops at the system prompt in either layout — no speed gain — while
+arithmetic word problems Ray doesn't flag as math came out terser and wrong
+("1,356 m" for 343 m/s x 4.2 s). So "legacy", the original arrangement, is
+the default (ai_settings ray_prompt_layout), and "turn" is an opt-in for a
+larger context window. Models whose server can only reuse a prompt
 at its own checkpoints (hybrid models such as Qwen3.5: ai_models.json
 prefix_cache "checkpoint") gain nothing from "turn" and keep "legacy".
 """
 import re
 
 LAYOUTS = ("turn", "legacy")
-DEFAULT_LAYOUT = "turn"
+# The original arrangement is the default: measured through the app, "turn"
+# bought no speed under Ray's 3,072-token budget (the history window slides
+# every turn, so reuse stops at the system prompt either way) and answered
+# arithmetic word problems worse. "turn" stays available for a larger context.
+DEFAULT_LAYOUT = "legacy"
 
 QUESTION_MARK = "=== QUESTION ==="
 LAYOUT_NOTE = (

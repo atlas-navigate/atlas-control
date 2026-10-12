@@ -5246,6 +5246,9 @@ class AIManager:
         self._startup_last_error = ""
         self._startup_started_at = time.time()
         self._startup_finished_at = None
+        self._warmup_lock = threading.Lock()     # one warmup at a time
+        self._warmup_retry_timer = None
+        self._warmup_failures = 0
 
     def _set_startup_state(self, phase, *, ready=None, error=None, finished=False):
         with self._startup_state_lock:
@@ -5325,8 +5328,61 @@ class AIManager:
             self._startup_warmup_done.set()
 
     # ------------------------------------------------------------------
+    # A failed startup warmup is retried, not left as "Ray couldn't start":
+    # seen after a power cut — Ollama aborted the embedder's load when NTP
+    # stepped the clock forward 3.5 days mid-load, and Ray stayed down until a
+    # restart. Waits between attempts, then every 5 minutes while still down.
+    WARMUP_RETRY_S = (10, 30, 60, 300)
+
     def _warmup(self):
         """Background thread: load the embed model first, then the chat model."""
+        if not self._warmup_lock.acquire(blocking=False):
+            return                       # one already running; it sets the state
+        try:
+            self._warmup_once()
+        finally:
+            self._warmup_lock.release()
+
+    def _schedule_warmup_retry(self):
+        with self._startup_state_lock:
+            if self._warmup_retry_timer is not None:
+                return
+            delay = self.WARMUP_RETRY_S[min(self._warmup_failures, len(self.WARMUP_RETRY_S) - 1)]
+            self._warmup_failures += 1
+            t = threading.Timer(delay, self._retry_warmup)
+            t.daemon = True
+            self._warmup_retry_timer = t
+        logger.info(f"AI warmup will be retried in {delay} s")
+        t.start()
+
+    def _retry_warmup(self):
+        with self._startup_state_lock:
+            self._warmup_retry_timer = None
+            ready = self._startup_ready
+        if ready or not self._ai_enabled():
+            return
+        self._warmup()
+
+    def retry_warmup_if_degraded(self, reason=""):
+        """Retry now if Ray's startup failed (e.g. the clock was just stepped)."""
+        with self._startup_state_lock:
+            degraded = self._startup_phase == "degraded" and not self._startup_ready
+            timer, self._warmup_retry_timer = self._warmup_retry_timer, None
+        if timer is not None:
+            timer.cancel()
+        if degraded and self._ai_enabled():
+            logger.info(f"AI warmup retried now ({reason})")
+            threading.Thread(target=self._warmup, daemon=True, name="ai-warmup-retry").start()
+
+    @staticmethod
+    def _ai_enabled():
+        try:
+            import database as db
+            return db.get_app_settings().get("ai_enabled", "true") != "false"
+        except Exception:
+            return True
+
+    def _warmup_once(self):
         import database as db
         raw = db.ai_get_settings()
         settings = self.runtime_settings(raw)
@@ -5356,9 +5412,11 @@ class AIManager:
                 self._load_pair(settings)
             logger.info("AI warmup complete.")
             self._set_startup_state("ready", ready=True, error="", finished=True)
+            self._warmup_failures = 0
         except Exception as e:
             logger.warning(f"AI warmup failed (Ollama may not be running): {e}")
             self._set_startup_state("degraded", ready=False, error=e, finished=True)
+            self._schedule_warmup_retry()
         finally:
             self._startup_warmup_done.set()
 
@@ -5472,10 +5530,12 @@ class AIManager:
         return settings
 
     def _warmup_messages(self, settings):
-        """A first request whose system message is byte-identical to a real
-        turn's (ray_prompt "turn" layout), so loading the model also processes
-        Ray's instructions and the first question only pays for itself."""
-        if self._prompt_layout(settings) != "turn":
+        """A first request whose system message is byte-identical to the start
+        of a real turn's — Ray's instructions and the day's date (~1,000
+        tokens) — so loading the model also processes them and the first
+        question pays only for its own part. A hybrid model (Qwen3.5) can't
+        reuse a prefix, so it just loads."""
+        if (settings.get("_profile") or {}).get("prefix_cache", "any") != "any":
             return [{"role": "user", "content": "hi"}]
         try:
             import database as db
@@ -5483,9 +5543,14 @@ class AIManager:
         except Exception:
             units = "metric"
         date_block, _ = self._date_block()
-        system = ray_prompt.system_message(self._base_system(settings, units), date_block)
-        return [{"role": "system", "content": system},
-                {"role": "user", "content": ray_prompt.user_message("", "hi")}]
+        base = self._base_system(settings, units)
+        if self._prompt_layout(settings) == "turn":
+            return [{"role": "system", "content": ray_prompt.system_message(base, date_block)},
+                    {"role": "user", "content": ray_prompt.user_message("", "hi")}]
+        # Original layout: a turn's system message is base + "\n\n" + the
+        # context, and the context starts with the date block.
+        return [{"role": "system", "content": base + "\n\n" + date_block},
+                {"role": "user", "content": "hi"}]
 
     def _models_resident(self, settings):
         """Are the chat model (at its context) and the embedder loaded now?"""
@@ -8045,10 +8110,11 @@ class AIManager:
     def _compose_messages(self, chat_id, user_message, settings, context, ctx_meta, calc_extra=""):
         """The message list for one answer, and its token budget.
 
-        "turn" layout (default, ray_prompt.py): a stable system message, the
-        history as stored, and this turn's reference material in the final
-        user message, so the model server reuses the processed history.
-        "legacy": everything in the system message, as before.
+        "legacy" (default): the reference material in the system message,
+        then the history and the question. "turn" (opt-in, ray_prompt.py): a
+        stable system message, the history as stored, and this turn's
+        reference material in the final user message, so the model server
+        can reuse the processed history (worth it only with a larger context).
         """
         import database as db
         base = self._base_system(settings, ctx_meta.get("units", "metric"))

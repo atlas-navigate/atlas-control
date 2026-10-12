@@ -163,21 +163,31 @@ measured by the client.
   after an idle night. Navigation still unloads Ray when it needs the memory.
   A warmup with the models already resident doesn't reload them or turn Ray
   away.
-- **Warmup processes Ray's real system prompt,** so the first question pays
+- **Warmup processes the start of Ray's real prompt** (its instructions and
+  the day's date, byte-identical to a real turn), so the first question pays
   only for itself.
-- **Prompt layout** (`ray_prompt.py`). Per-turn material moved from the
-  system message to the user message, so consecutive prompts share
-  everything up to the previous question.
+- **A failed startup is retried.** After a power cut, NTP stepped the clock
+  3.5 days forward while Ollama was loading the embedder; Ollama aborted the
+  load and Ray stayed down until a restart. The warmup is now retried after
+  10 s, 30 s, 60 s, then every 5 minutes while Ray is down, and at once after
+  a clock step.
+- **Prompt layout: the original arrangement stays the default**
+  (`ray_prompt.py`). An alternative ("turn", opt-in via `ray_prompt_layout`)
+  moves per-turn material from the system message to the user message, so
+  consecutive prompts share everything up to the previous question.
   - Within the 3,072-token budget Ray keeps only the last exchange or two, so
-    the history window slides every turn. Measured reuse is still the ~800–940
-    token system prompt, and conversation time to first token is unchanged
-    (2.67 s either way).
+    the history window slides every turn. Measured reuse is the ~800–940
+    token system prompt in both layouts, and conversation time to first
+    token is unchanged (2.67 s either way).
   - An 8k context does let reuse grow (811 → 2,733 tokens by turn 6). But
     Ray then keeps more history, so first-token time stays at 2.3–3.2 s, and
     generation drops to ~18.2 tok/s on the longest prompts. That's more memory
-    for Ray, not more speed, so it isn't the default. Owners can choose 8k as
-    an expert override.
-  - Math questions and Qwen3.5 keep the original layout (below).
+    for Ray, not more speed.
+  - Quality: "turn" was better on follow-ups and injection probes, but
+    answered arithmetic word problems Ray doesn't flag as math tersely and
+    wrongly ("1,356 m" for 343 m/s × 4.2 s). Through the app the calculator
+    items fell from 4/4 to 1/4. With no speed to show for it, the original
+    layout is the default.
 - **Off the event loop.** Geocoder cache misses and the first load of its
   tables run in a worker thread; the tables preload at startup.
 - **The browser re-renders** a streaming answer at most once per frame.
@@ -196,22 +206,24 @@ measured by the client.
 seed-document facts, calculator answers, live data, multi-turn follow-ups and
 prompt-injection probes; temperature 0.7, three runs each):
 
-| Qwen2.5 3B | Original layout | Final layout |
+| Qwen2.5 3B | Original layout (default) | "turn" layout (opt-in) |
 |---|---|---|
 | All | 59/75 | 62/75 |
 | Knowledge-base facts | 29/36 | 30/36 |
 | Follow-ups across turns | 9/12 | 12/12 |
 | Injection probes held | 3/6 | 4/6 |
 | Retrieval recall | 33/36 | 33/36 |
-| Calculator | 9/12 | 7/12 before math turns returned to the original layout (4/12 with the calculator blocks in the user message); equal since, by construction |
+| Calculator | 9/12 | 7/12 (4/12 with the calculator blocks in the user message) |
 
-**Why math turns keep the original layout.** With the calculator instruction
-anywhere but last before the question, the 3B model answers arithmetic
-tersely and wrongly ("1,356 m" for 343 × 4.2). In the original arrangement
-it shows its working.
+**Why the original layout stays.** With the calculator instruction anywhere
+but last before the question, or with no calculator instruction at all for
+a word problem, the 3B model in the "turn" layout answers arithmetic tersely
+and wrongly ("1,356 m" for 343 × 4.2). In the original arrangement it shows
+its working. Routing flagged math turns back to the original layout did not
+cover the unflagged ones.
 
-**Qwen3.5** keeps the original layout (it can only reuse a prompt at its own
-checkpoints). Its regression run scored 22/25: every calculator, live and
+**Qwen3.5** always uses the original layout (it can only reuse a prompt at
+its own checkpoints). Its regression run scored 22/25: every calculator, live and
 multi-turn item passed. Generation is 14.4–14.7 tok/s, and prefill ~460 tok/s
 on Ray-sized prompts.
 

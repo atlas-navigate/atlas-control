@@ -331,6 +331,13 @@ def _on_clock_step(direction, seconds):
             limiter.reset()   # in-memory windows are wall-clock: they would stay blocked
         except Exception:
             pass
+    # Ollama aborts a model load when the clock jumps under it (seen when NTP
+    # corrected the clock 3.5 days forward during Ray's startup warmup).
+    if ai_manager is not None:
+        try:
+            ai_manager.retry_warmup_if_degraded(f"clock stepped {direction}")
+        except Exception:
+            pass
 
 
 import local_device
@@ -1372,12 +1379,13 @@ def _require_ai_ready():
         return jsonify({"error": f"Ray is switching to {switch['label']} — it will answer again in a minute.",
                         "reason": "switching", "retryable": True, "startup_phase": "switching"}), 503
     if status.get("last_error"):
+        # Not a dead end: a failed startup is retried automatically.
         reason = "startup_failed"
-        message = f"Ray startup failed: {status['last_error']}"
+        message = "Ray couldn't start yet and is trying again — ask again in a minute."
     return jsonify({
         "error": message,
         "reason": reason,
-        "retryable": reason != "startup_failed",
+        "retryable": True,
         "startup_phase": status.get("phase"),
     }), 503
 

@@ -159,7 +159,27 @@ class WarmupTests(unittest.TestCase):
             warm = m._warmup_messages(s)
         real, _ = m._compose_messages(chat, "q?", s, context, meta)
         self.assertEqual(warm[0], real[0])
-        self.assertEqual(m._warmup_messages(_settings("legacy")), [{"role": "user", "content": "hi"}])
+
+    def test_warmup_prefills_the_start_of_an_original_layout_turn(self):
+        db._local.conn = None
+        db.init_db()
+        chat = db.ai_create_chat()["id"]
+        m = _manager()
+        s = _settings("legacy")
+        date_block, _ = m._date_block()
+        context, meta = _ctx("=== CURRENT POSITION ===\nLIVE", date=date_block)
+        with mock.patch.object(db, "get_app_settings", return_value={"units": "metric"}):
+            warm = m._warmup_messages(s)
+        real, _ = m._compose_messages(chat, "q?", s, context, meta)
+        self.assertTrue(real[0]["content"].startswith(warm[0]["content"] + "\n\n"))
+        self.assertTrue(warm[0]["content"].endswith(date_block))
+        # A hybrid model can't reuse a prefix: it just loads.
+        self.assertEqual(m._warmup_messages(_settings("legacy", "checkpoint")),
+                         [{"role": "user", "content": "hi"}])
+
+    def test_the_original_layout_is_the_default(self):
+        self.assertEqual(ray_prompt.layout({}), "legacy")
+        self.assertEqual(ray_prompt.layout({"ray_prompt_layout": "turn"}), "turn")
 
 
 if __name__ == "__main__":
