@@ -1195,7 +1195,15 @@ _COMPUTE_INTENT_KEYWORDS = {
 # blast within 30 miles?") is not enough: that is the survival question the
 # keyword gates above protect. A two-number question that still needs no
 # arithmetic is answered NONE by the calculator agent (_calc_agent_pass).
+# A falling object brings its second quantity with it (g): "If I drop a rock
+# off a 45 meter cliff, how long until it hits the ground?" gives one number,
+# so a fall or throw with one measured quantity counts too.
 _NUMBER_RE = re.compile(r"(?<![\w.])\d[\d,]*(?:\.\d+)?")
+_FALLING_RE = re.compile(r"\b(?:fall(?:s|ing)?|fell|drop(?:s|ped)?|thrown|throw(?:s|n)?|tossed|free[- ]?fall)\b", re.I)
+# Advice ("how long should I boil water at 2,500 m — is 1 minute enough?",
+# "how far can I safely drop") asks what to do, not for a computed quantity:
+# the extraction model invented sqrt(2500) for it.
+_ADVICE_RE = re.compile(r"\bshould\s+(?:i|we|you|one|they)\b|\bsafe(?:ly)?\b|\benough\b|\brecommend", re.I)
 _NUMBER_WITH_UNIT_RE = re.compile(
     r"\d(?:[\d,]*\d)?(?:\.\d+)?\s*(?:%|°\s*[cfk]?\b|(?:"
     r"mph|kph|km/h|m/s|ft/s|fps|knots?|"
@@ -1214,9 +1222,12 @@ _QUANTITY_QUESTION_RE = re.compile(
 
 
 def _is_word_problem(text):
-    """A quantity question giving two or more numbers, one with a unit or rate."""
-    if not _QUANTITY_QUESTION_RE.search(text):
+    """A quantity question giving two or more numbers, one with a unit or
+    rate — or one measured quantity of a falling or thrown object."""
+    if not _QUANTITY_QUESTION_RE.search(text) or _ADVICE_RE.search(text):
         return False
+    if _FALLING_RE.search(text) and _NUMBER_WITH_UNIT_RE.search(text):
+        return True
     if len(_NUMBER_RE.findall(text)) < 2:
         return False
     return bool(_NUMBER_WITH_UNIT_RE.search(text) or _RATE_RE.search(text))
@@ -6529,6 +6540,8 @@ class AIManager:
             "[CALC: 80 * 3.5]\n"
             "Question: How long does a stone take to fall 20 m, ignoring air resistance?\n"
             "[CALC: sqrt(2 * 20 / g)]\n"
+            "Question: How far does an object fall in 3 seconds?\n"
+            "[CALC: 0.5 * g * 3**2]\n"
             "Question: How many watt-hours can I use from a 200Ah 24V battery at 50% depth of discharge?\n"
             "[CALC: 200 * 24 * 0.50]\n"
             "Question: What is 98.6 °F in Celsius?\n"
@@ -6537,6 +6550,7 @@ class AIManager:
             "[CALC: 80 * 15 / 100]\n"
             "Question: How long should I wait after adding 2 drops of bleach to 1 liter of water?\n"
             "NONE\n"
+            "Usually one expression answers the question; add another only for a second quantity it asks for. "
             "Output NOTHING else — no prose, no labels, no explanations."
         )
         extraction_user = (
