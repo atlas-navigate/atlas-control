@@ -84,6 +84,29 @@ Sources, best first:
 After any backward step, avahi is restarted so its announcements don't wait
 out the difference.
 
+## A real power-loss boot (October 2026)
+
+The development unit was switched off for three and a half days (Oct 9
+08:01 to Oct 12 19:20) with no backup cell. The boot, from `journalctl -b`:
+
+| Uptime | What happened |
+|---|---|
+| 13.2 s | `rtc0` registers, having lost power (it reads 31 s since 1970) |
+| 13.3 s | `atlas-clock` moves the clock forward to the last saved time (Oct 9 08:00:05), never back to 1970 |
+| 15.4 s | systemd-timesyncd starts |
+| 16.2 s | avahi starts and advertises `atlas-pjnt.local` |
+| 18.9 s | the app starts (it publishes the `atlas.local` alias, found active after boot) |
+| 25.6 s | NTP moves the clock forward 3.5 days (+300,028 s) |
+
+`/run/atlas-clock/state.json` showed `restored` with the floor from the saved
+time, then `ntp`; `/api/device/local` reported `rtc_status: lost-power`.
+
+**What it exposed:** Ray's startup warmup was loading the embedding model
+when NTP moved the clock. Ollama aborted the load ("Load failed", HTTP 500),
+and Ray stayed down until the app restarted. A failed warmup is now retried
+after 10 s, 30 s and 60 s, then every 5 minutes while Ray is down, and at
+once after a clock step (`ai_manager.retry_warmup_if_degraded`).
+
 ## What else changed so a corrected clock can't break anything
 
 - **Durations use the monotonic clock.** This covers:
@@ -104,7 +127,8 @@ out the difference.
   time, so it can only delete less, and purges run then.
 - **Scheduled jobs** don't fire while the clock is unset.
 - **Ray** says the date is "approximately …" after a restore, or unknown,
-  instead of giving seasonal advice for January 1970.
+  instead of giving seasonal advice for January 1970. If a clock step breaks
+  its startup (Ollama aborts a model load), the startup is retried.
 - **The TLS certificate** is valid 2024–2099, so a wrong clock never
   invalidates it.
 
