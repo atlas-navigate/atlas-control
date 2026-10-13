@@ -192,6 +192,48 @@ measured by the client.
   tables run in a worker thread; the tables preload at startup.
 - **The browser re-renders** a streaming answer at most once per frame.
 
+**Before and after, through the app** (`app-before-*`, `app-final-*`,
+`app-noboost-*`; qwen2.5 3B, paired client over nginx, warm medians of 3
+runs, 18 turns for the conversation):
+
+| Time to first token | Original build | Final build | Final, boost off |
+|---|---|---|---|
+| Short question | 1.44 s | 1.07 s (−26%) | 1.63 s |
+| Knowledge question | 2.35 s | 2.06 s (−12%) | 2.49 s |
+| 6-turn conversation | 2.61 s | 2.29 s (−12%) | 2.63 s |
+| Live data | 2.44 s | 2.00 s (−18%) | 2.45 s |
+| Calculator | 1.78 s | 1.48 s (−17%) | 2.09 s |
+| Cold (models unloaded) | 15.8 s | 15.5 s | 15.9 s |
+
+| Other measures | Original build | Final build |
+|---|---|---|
+| Generation | 19.9–21.1 tok/s | 20.6–22.5 tok/s (+4–7%) |
+| Prompt processing | ~805 tok/s | ~830 tok/s |
+| Lowest free memory while answering | 1.6–1.8 GB | 2.2 GB (+0.4–0.6 GB) |
+| Board power while answering | 10.5–17.0 W | 11.6–17.9 W (+5–13%) |
+| Hottest zone | 64–68 °C | 65–68 °C |
+| Eval (25 items) | 21/25 (one run) | 62/75 (three runs, 83%) |
+
+- **Nearly all of the speed is the clock boost.** With it off, the same build
+  is within noise of the original on the same nine prompts (17.3 s vs 17.0 s
+  summed). The boost passes the agreed ≥5% bar by a wide margin, so it ships
+  on.
+- **The other changes buy memory and robustness rather than speed:**
+  - capped prompt cache;
+  - models kept resident (no 15–25 s reload after an idle night);
+  - warmup that prefills Ray's instructions;
+  - a startup that retries;
+  - geocoding off the event loop.
+- **Per-request floor:** Ollama spends ~0.23 s of CPU on every request before
+  the model runs, even for `/api/show`. Every answer pays this once, for its
+  query embedding. Only the CPU clock shortens it; removing it needs a change
+  in Ollama.
+- **Background load** (map tiles, stats, node list and a route every 8 s while
+  Ray answers) was distorted in every build. Each route request hit an
+  unreadable OSRM graph, and the readiness wait then slept natively on the
+  gevent hub for up to 2 minutes, so the whole app advanced in 0.25 s steps.
+  Fixed in `routing_node.py` and the install scripts.
+
 **What was tried and left alone.**
 - **Batch size and threads.** Batch 512 vs 1024 and 2/4/6 threads made no
   difference: generation 19.3–19.7 tok/s, prefill 824–839 tok/s. Batch 1024
