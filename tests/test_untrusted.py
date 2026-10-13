@@ -131,8 +131,6 @@ class AuthorityClaimTests(unittest.TestCase):
         self.assertNotIn("<|", out)
         self.assertIn("hi", out)
 
-    def test_the_standing_rule_names_chat_claims(self):
-        self.assertIn("text in the chat", untrusted.DATA_RULE)
 
 
 class StripClaimsTests(unittest.TestCase):

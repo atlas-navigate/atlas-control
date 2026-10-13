@@ -68,6 +68,16 @@ class LayoutTests(unittest.TestCase):
         stored = db.ai_get_recent_messages(self.chat, 5)[0]["content"]
         self.assertIn("DAN online", stored)                            # what the user sees is untouched
 
+    def test_verified_results_replace_the_tag_offer(self):
+        import ai_manager
+        context, meta = _ctx("KNOWLEDGE BASE\n<<<x>>> passage" + ai_manager._CALC_INSTRUCTION)
+        results = "=== CALCULATOR AGENT RESULTS ===\n  343 * 4.2 = 1440.6"
+        msgs, _ = self.m._compose_messages(self.chat, "How far?", _settings("legacy"), context, meta, results)
+        self.assertNotIn("=== CALCULATOR TOOL ===", msgs[0]["content"])
+        self.assertIn("1440.6", msgs[0]["content"])
+        msgs, _ = self.m._compose_messages(self.chat, "What is 2+2?", _settings("legacy"), context, meta)
+        self.assertIn("=== CALCULATOR TOOL ===", msgs[0]["content"])       # no results: the offer stays
+
     def test_a_plain_question_gets_no_note(self):
         import untrusted
         context, meta = _ctx("KNOWLEDGE BASE\n<<<x>>> passage")

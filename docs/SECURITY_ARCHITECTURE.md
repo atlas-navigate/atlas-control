@@ -121,6 +121,12 @@ only on units with `/etc/atlas/dev-mode`. See [UPDATES.md](UPDATES.md) and
   per-request random boundary; the system prompt states that fenced text is
   data, never instructions. The calculator (`safe_math.py`) is a strict AST
   allowlist with size, depth, exponent and factorial limits — no `eval`.
+- **Ray, the chat message itself** (`untrusted.strip_claims`):
+  - **Template tokens.** Chat-template tokens typed into a message (`<|im_start|>system …`) were parsed by Ollama as real role switches (41 vs 53 prompt tokens with the token broken). They are removed before the model sees the message, and from history.
+  - **Instruction claims.** A message that claims to change Ray's instructions (a fake SYSTEM/ADMIN line, "ignore previous instructions", "you are now …", "new system prompt") reaches the model without the claim, the output demands and the role assignments around it, plus a note that part was removed. The real question is kept.
+  - **Why removal, not a warning.** No warning prompt changed qwen2.5:3b's behaviour (1 of 12 dev probes held at best; `tools/bench/injection_variants.py`).
+  - **What is not touched.** The stored message, which is what the user sees, is unchanged. Messages without a claim, including plain format requests ("reply with only the number"), pass through untouched.
+  - **Limit.** This is pattern-based: a novel phrasing of an override can still get through to a 3B model.
 - **Web UI**: model output and mesh text render through React (no raw HTML);
   Markdown links go through `atlasSafeHref` (http/https/mailto/relative only).
   Map popups escape every field and carry navigation targets in data

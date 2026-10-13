@@ -8157,10 +8157,9 @@ class AIManager:
     _CALC_RESULTS_INSTRUCTION = (
         "\n\n=== INSTRUCTION FOR THIS RESPONSE ===\n"
         "The CALCULATOR AGENT RESULTS above were computed exactly (for a ballistic question: drop, "
-        "correction, spin drift and time of flight). Use those exact numbers in your answer — "
-        "do NOT redo the arithmetic or recalculate the values listed. You may name the formula, "
-        "and give the final figure with its units, sensibly rounded. "
-        "If a listed value does not answer the question, ignore it. "
+        "correction, spin drift and time of flight). Use those exact numbers as-is — do NOT "
+        "recalculate the values listed or do the arithmetic yourself. "
+        "Present them directly to the user, with their units, without deliberation. "
         "For any quantity not listed above, answer from your knowledge."
     )
 
@@ -8218,6 +8217,11 @@ class AIManager:
                 return _untrusted.strip_claims(m["content"])[0]
             return _untrusted.strip_template_tokens(m["content"])
 
+        if calc_extra and _CALC_INSTRUCTION in context:
+            # One mechanism per answer: with the calculator agent's verified
+            # results present, the [CALC:] tag offer only invites the model to
+            # write its own expression ("**600** hours" for 50Ah x 12V on 60 W).
+            context = context.replace(_CALC_INSTRUCTION, "")
         if layout == "legacy" or "turn_parts" not in ctx_meta:
             full = (context + ("\n\n" + calc_extra if calc_extra else "")).strip()
             if note:
