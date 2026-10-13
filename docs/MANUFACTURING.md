@@ -98,7 +98,13 @@ build units.
 - `systemctl is-active atlas-control nginx ollama avahi-daemon atlas-firewall`
   → all active; `sudo finalize-retail.sh --check` → "Ready for retail."
 - From a phone: scan the label's app QR code in the Atlas app → paired, map
-  loads, a cross-state route returns, Ray answers.
+  loads, a cross-state route returns (following roads, not a straight line),
+  Ray answers.
+- `find /atlas_data/atlas-control/osrm-data ! -perm -o=r | wc -l` → `0`. The
+  app's service account must read the routing graphs; `osrm-extract` writes
+  each `.fileIndex` as 0700, and `install.sh` makes them readable. An
+  unreadable graph makes `osrm-routed` exit at once and the app logs
+  "cannot read region.osrm.fileIndex".
 - `ss -ltn` shows nothing on `*:5000`; `https://atlas-xxxxxx.local` shows the
   pairing screen to an unpaired browser.
 

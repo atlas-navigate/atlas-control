@@ -25,6 +25,8 @@ import time
 from typing import Optional, Tuple, Dict
 from gevent import monkey as _gevent_monkey
 
+import atlas_blocking
+
 logger = logging.getLogger("routing-node")
 
 # Routing prewarm/startup runs from real OS threads. gevent's patched subprocess
@@ -174,10 +176,17 @@ def _find_native_osrm() -> Optional[str]:
     return shutil.which("osrm-routed")
 
 
-def _port_ready(port: int, timeout: float = 30.0) -> bool:
-    """Wait until TCP port accepts connections, or timeout elapses."""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
+def _port_ready(port: int, timeout: float = 30.0, proc=None) -> bool:
+    """Wait until TCP port accepts connections, or timeout elapses.
+
+    Route requests call this on the gevent hub, so it sleeps cooperatively: a
+    native sleep there froze every request (UI, Socket.IO, Ray) for the whole
+    of a cold start. With `proc` (the osrm-routed being waited for) it gives
+    up as soon as that process has exited, instead of polling a dead port for
+    the full timeout.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
         try:
             s = socket.socket()
             s.settimeout(0.3)
@@ -185,8 +194,22 @@ def _port_ready(port: int, timeout: float = 30.0) -> bool:
             s.close()
             return True
         except OSError:
-            time.sleep(0.25)
+            if proc is not None and hasattr(proc, "poll") and proc.poll() is not None:
+                return False
+            atlas_blocking.sleep(0.25)
     return False
+
+
+def _unreadable_parts(osrm_file: str) -> list:
+    """The graph's files this account can't read (osrm-extract writes
+    .fileIndex as 0700, so a graph built by the setup account is unusable by
+    the service account until it is made readable)."""
+    folder, base = os.path.split(osrm_file)
+    try:
+        names = [n for n in os.listdir(folder) if n.startswith(base)]
+    except OSError:
+        return [folder]
+    return sorted(n for n in names if not os.access(os.path.join(folder, n), os.R_OK))
 
 
 class RoutingNode:
@@ -541,8 +564,15 @@ class RoutingNode:
             if not proc:
                 return None
 
-            if not _port_ready(port, timeout=120.0):
-                logger.error(f"OSRM {state}/{profile} port {port} never became ready")
+            if not _port_ready(port, timeout=120.0, proc=None if isinstance(proc, str) else proc):
+                code = proc.poll() if hasattr(proc, "poll") else None
+                if code is not None:
+                    unreadable = _unreadable_parts(osrm_file)
+                    logger.error(f"OSRM {state}/{profile} exited (code {code}) before it was ready"
+                                 + (f": cannot read {', '.join(unreadable)} — the graph must be "
+                                    f"readable by this account (chmod -R a+rX)" if unreadable else ""))
+                else:
+                    logger.error(f"OSRM {state}/{profile} port {port} never became ready")
                 self._stop_process(proc, (state, profile))
                 return None
 

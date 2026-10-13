@@ -152,6 +152,8 @@ process_profile() {
     }
 
     rm -f "$TMPBF"
+    # The app's service account reads the graph; osrm-extract writes .fileIndex 0700.
+    chmod -R a+rX "$PDIR"
     touch "$MARKER"
     echo -e "  ${GREEN}✓ $PROFILE done ($(du -sh "$PDIR" | cut -f1))${NC}"
 }

@@ -1522,7 +1522,7 @@ _AI_BEHAVIOUR_SETTINGS = {
     "inject_mesh_context": lambda v: "true" if str(v).lower() == "true" else "false",
     # Performance switches, kept for A/B measurement and rollback (no UI):
     # the prompt layout (ray_prompt.py) and the clock boost (perf_boost.py).
-    "ray_prompt_layout": lambda v: str(v) if str(v) in ("turn", "legacy") else "turn",
+    "ray_prompt_layout": lambda v: str(v) if str(v) in ("turn", "legacy") else "legacy",
     "ray_clock_boost": lambda v: "off" if str(v).lower() == "off" else "on",
 }
 

@@ -308,6 +308,15 @@ def handoff_state(state):
         p = os.path.join(APP, "data", secret)
         if os.path.exists(p):
             os.chmod(p, 0o600)
+    # The service account reads the routing graphs, which stay the setup
+    # account's: osrm-extract writes .fileIndex 0700, and unreadable it makes
+    # osrm-routed exit at once (every route became a straight line).
+    for dirpath, dirnames, filenames in os.walk(os.path.join(APP, "osrm-data")):
+        os.chmod(dirpath, os.stat(dirpath).st_mode | 0o555)
+        for f in filenames:
+            p = os.path.join(dirpath, f)
+            if not os.path.islink(p):
+                os.chmod(p, os.stat(p).st_mode | 0o444)
     say("state directories handed to the service account")
 
 

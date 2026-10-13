@@ -244,6 +244,8 @@ process_state() {
 
         rm -f "$PDIR/region.osm.pbf"
         [[ -f "$PDIR/region.osrm" ]] || touch "$PDIR/region.osrm"
+        # The app's service account reads the graph; osrm-extract writes .fileIndex 0700.
+        chmod -R a+rX "$PDIR"
         touch "$DONE_MARKER"
         echo -e "${GREEN}  ✓ $PROFILE done ($(du -sh "$PDIR" | cut -f1))${NC}"
     done

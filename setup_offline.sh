@@ -283,6 +283,8 @@ for PROFILE in "${PROFILES[@]}"; do
 
     # Remove the large intermediate files — only the .osrm.* graph files are needed at runtime
     rm -f "$PDIR/region.osm.pbf"
+    # The app's service account reads the graph; osrm-extract writes .fileIndex 0700.
+    chmod -R a+rX "$PDIR"
     touch "$DONE_MARKER"
 
     echo -e "${GREEN}✓ $PROFILE done ($(du -sh "$PDIR" | cut -f1))${NC}\n"

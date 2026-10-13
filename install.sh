@@ -96,12 +96,18 @@ PYEOF
 
 # Datasets belong to the setup account; data/ logs/ updates/ cache/ belong to
 # the 'atlas' service account once Atlas is installed — never take them back.
+# The service account must still be able to read the datasets: osrm-extract
+# writes each graph's .fileIndex as 0700, and with it unreadable osrm-routed
+# exits at once and every route falls back to a straight line.
 own_datasets() {
     if id -u atlas >/dev/null 2>&1; then
         find "$APP_DIR" \( -path "$APP_DIR/data" -o -path "$APP_DIR/logs" -o -path "$APP_DIR/updates" \
              -o -path "$APP_DIR/cache" \) -prune -o -exec chown -h "$ATLAS_USER:$ATLAS_USER" {} +
     else
         chown -R "$ATLAS_USER:$ATLAS_USER" "$APP_DIR"
+    fi
+    if [[ -d "$APP_DIR/osrm-data" ]]; then
+        chmod -R a+rX "$APP_DIR/osrm-data"
     fi
 }
 
@@ -919,6 +925,7 @@ _process_state() {
     rm -f "$state_dir/region.osm.pbf"
     touch "$state_dir/.processed"
     chown -R "$ATLAS_USER:$ATLAS_USER" "$state_dir"
+    chmod -R a+rX "$state_dir"     # osrm-extract writes .fileIndex 0700
     log "  ${abbr}/${profile} ready"
 }
 
