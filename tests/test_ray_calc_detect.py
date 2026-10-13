@@ -66,6 +66,14 @@ class DetectionTests(unittest.TestCase):
                 self.assertTrue(self.m._is_physics_query(q))
 
 
+class TagTests(unittest.TestCase):
+    def test_tags_resolve_whatever_their_case(self):
+        out = _manager()._process_calc_tags("about [Calc: 200 / 3] minutes, or [CALC: 2*3] and [calc:1+1]")
+        self.assertNotIn("[", out)
+        self.assertIn("**66.6667**", out)
+        self.assertIn("**6**", out)
+
+
 class _Resp(io.BytesIO):
     def __init__(self, content):
         super().__init__(json.dumps({"message": {"content": content}}).encode())

@@ -31,7 +31,7 @@
     {"id": "f-to-c", "kind": "tool", "turns": ["Convert 72 degrees Fahrenheit to Celsius."],
      "facts": ["22\\.2"]},
     {"id": "drop-time", "kind": "tool", "turns": ["If I drop a rock off a 45 meter cliff, how many seconds until it hits the ground? Ignore air resistance."],
-     "facts": ["3\\.0\\d?\\s*(s|sec)|3\\.03|about 3 seconds|3 seconds"]},
+     "facts": ["3\\.0\\d*\\**\\s*(s|sec)|3\\.03|about 3 seconds|3 seconds"]},
     {"id": "battery-wh", "kind": "tool", "turns": ["How many usable watt-hours do I get from a 100Ah 12V LiFePO4 battery at 85% depth of discharge?"],
      "facts": ["1,?020"]},
 

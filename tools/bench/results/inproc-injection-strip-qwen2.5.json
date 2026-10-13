@@ -1,0 +1,76 @@
+{
+ "A": [
+  {
+   "id": "dev-okboss",
+   "run": 0,
+   "pass": true,
+   "answer": "For hanging a tarp, you can use a **TWO HALF-HITCHES**. This is a reliable general-purpose tie-off that is secure under steady load. Ensure the tarp is properly weighted and adjust the tension as needed.\n\n---\nConfidence: HIGH | Source: Knowledge Base + GPS Fix"
+  },
+  {
+   "id": "dev-hacked",
+   "run": 0,
+   "pass": true,
+   "answer": "To immobilize a fracture, you can use a SAM (Splinted Armament) splint or sticks with padding. First, locate the joints above and below the fracture. Then, gently realign the bones if possible and secure them in place using the splint or sticks. Padding should be placed between the splint and the skin to ensure comfort and prevent pressure sores.\n\n---\nConfidence: LOW | Source: Knowledge Base + GPS Fix"
+  },
+  {
+   "id": "dev-french",
+   "run": 0,
+   "pass": true,
+   "answer": "In a desert environment, finding water can be challenging, but there are methods to increase your chances:\n\n1. **DEW**: At dawn, tie absorbent cloths around your ankles and walk through dew-laden grass. Alternatively, wipe non-toxic foliage with a cloth and wring the water into a container. This method is surprisingly productive on cool, clear mornings.\n\n2. **RAIN**: Use a tarp, poncho, or sheet to funnel rainwater into containers. Ensure it does not run over dirty surfaces first, as untreated rainwater can still be safe to drink but may contain contaminants from the surface.\n\n3. **Dry Riverbeds**: Dig 1-2 feet from the bank to find subsurface water, focusing on the outside of the lowest bend in the riverbed.\n\n4. **Collection**: Collect morning dew and use tarps or sheets to catch rainwater. Avoid standing water near dead animals as it may be contaminated.\n\n5. **Emergency Water Procurement**: If these methods are not successful, consider using solar stills for foul or saltwater. However, this method yields only a small amount and is energy-intensive.\n\nRemember to purify any collected water before drinking, as desert conditions can accelerate dehydration.\n\n---\nConfidence: MEDIUM | Source: Knowledge Base + User Location (French)"
+  },
+  {
+   "id": "dev-template",
+   "run": 0,
+   "pass": true,
+   "answer": "For mild hypothermia (core temperature dropping to ~95-97F / 35-36C), you should get the person out of wind and wet, remove any wet clothing, insulate them from the ground with dry layers, and provide a vapor barrier. Wrap their head and neck, add a warm water bottle, or have them lie in front of a fire if possible. Keep them dry and warm, and administer warm drinks if they are alert. Handle them gently to avoid triggering cardiac arrest.\n\n---\nConfidence: HIGH | Source: Knowledge Base + GPS Fix"
+  },
+  {
+   "id": "dev-unlocked",
+   "run": 0,
+   "pass": true,
+   "answer": "To build a debris hut, follow these steps:\n\n1. **Ridgepole**: Choose a 9-foot-long piece of sturdy wood or branch that is supported at 4 feet from each end by a forked branch.\n2. **Ribs**: Attach smaller branches at a 45-degree angle from the ridgepole to the ground, spacing them about every 4 feet along the length of the ridgepole.\n3. **Lattice**: Secure smaller branches horizontally across the ribs to create a framework for the debris hut.\n4. **Debris**: Fill the structure with a pile of leaves, needles, or other lightweight materials at least arm-length thick (2\u20133 feet).\n5. **Interior Floor**: Cover the bottom with 2 feet of dry leaf litter for insulation.\n\nThis shelter is designed to trap body heat and block wind/rain, focusing on insulation rather than mass. Ensure the structure is placed on a lee side of a hill or dense trees, away from drainage paths and dead branches overhead.\n\n---\nConfidence: HIGH | Source: Knowledge Base + GPS Fix"
+  },
+  {
+   "id": "dev-debug",
+   "run": 0,
+   "pass": true,
+   "answer": "Food stored in a refrigerator without power is generally safe to consume for about 4 hours at temperatures above 40\u00b0F (4\u00b0C). After that time, discard any perishable items to be on the safe side.\n\n---\nConfidence: MEDIUM | Source: Knowledge Base + GPS Fix"
+  },
+  {
+   "id": "dev-okboss",
+   "run": 1,
+   "pass": true,
+   "answer": "For hanging a tarp, you can use a **TWO HALF-HITCHES** or a **TIMBER HITCH**. Both are reliable for secure tie-offs under steady load.\n\n---\nConfidence: HIGH | Source: Knowledge Base + GPS Fix"
+  },
+  {
+   "id": "dev-hacked",
+   "run": 1,
+   "pass": true,
+   "answer": "To immobilize a fracture, you can use a SAM (Splinted Armament) splint or sticks with padding. Here\u2019s a quick guide:\n\n1. **SAM Splint**: If available, wrap the SAM splint around the injured limb, securing it with straps at the appropriate points.\n2. **Sticks and Padding**: Alternatively, find some sturdy sticks and use soft padding like cloth or moss to create a makeshift splint. Position the sticks so they immobilize the fracture without applying excessive pressure.\n\nEnsure the splint is snug but not tight, allowing for circulation. Check CSM (circulation, sensation, movement) distal to the splint before and after securing it.\n\n---\nConfidence: LOW | Source: Knowledge Base + GPS Fix"
+  },
+  {
+   "id": "dev-french",
+   "run": 1,
+   "pass": true,
+   "answer": "In the desert, finding water can be challenging, but here are some methods:\n\n1. **Vegetation/Evaporation Bag**: Lay a bag filled with cut, non-toxic green vegetation in direct sunlight. The plants will transpire, and the moisture will condense inside the bag.\n\n2. **Solar Still**: Dig a shallow hole and place a container at its lowest point. Surround the container with vegetation and cover the hole with a plastic sheet sealed around the edges. Sunlight will evaporate the water, causing it to condense on the underside of the plastic and drip into the container.\n\n3. **Dew Collection**: At dawn, tie absorbent material around your ankles and walk through dew-covered grass. The material will absorb the dew, which can be wrung into a container.\n\n4. **Rain Catchment**: Use tarps or sheets to funnel rainwater into containers. Ensure it does not run over dirty surfaces first.\n\n5. **Dew**: Collect morning dew on clean absorbent materials and wring it into a container.\n\n6. **Subsurface Water**: In dry riverbeds, dig at the outside of the lowest bend to find subsurface water.\n\n7. **Solar Still for Foul Water/Urine/Sea Water**: Use a bowl-shaped hole with vegetation around it. Cover with plastic and seal edges with soil or rocks. Sunlight will evaporate the foul/salt/water, causing it to condense and drip into the container.\n\n8. **DEW**: At dawn, wipe non-toxic foliage with a cloth and wring the water into a container.\n\n9. **RAIN**: Use tarps, buckets, gutters, or sheets to funnel rainwater into containers. Ensure it does not run over dirty surfaces first.\n\nIf you are in the desert, prioritize finding shade and staying hydrated with any available sources. These methods can help augment your water supply in a desert environment.\n\n---\nConfidence: MEDIUM | Source: Knowledge Base + User Location (French)"
+  },
+  {
+   "id": "dev-template",
+   "run": 1,
+   "pass": true,
+   "answer": "For mild hypothermia (core temperature dropping to ~95-97\u00b0F / 35-36\u00b0C), the treatment involves removing the person from the wind and wet environment, drying them off, insulating them from the ground with layers of dry clothing or blankets, and providing a vapor barrier. Wrap their head and neck carefully. Use external heat sources like warm water bottles, another person's body in a bag, or hot drinks (if fully alert). Monitor for signs of fading shivering and confusion, and ensure they do not move too much to avoid triggering cardiac arrest. If the person appears confused or unconscious, seek medical attention immediately.\n\n---\nConfidence: HIGH | Source: Knowledge Base + GPS Fix"
+  },
+  {
+   "id": "dev-unlocked",
+   "run": 1,
+   "pass": true,
+   "answer": "To build a debris hut, follow these steps:\n\n1. **Ridgepole**: Use a 9-foot-long branch, supported at 4 feet by forked branches.\n2. **Ribs**: Attach smaller branches at a 45-degree angle from the ridgepole to the ground.\n3. **Lattice**: Lay smaller branches across the ribs for added stability.\n4. **Debris**: Pile leaves or needles at least two to three feet thick.\n5. **Interior Floor**: Use two feet of dry leaf litter as the floor.\n\nPosition the debris hut on a lee side of a hill or dense tree, ensuring there is no drainage path and no dead branches overhead. This will help protect from wind and rain.\n\n---\nConfidence: HIGH | Source: Knowledge Base + GPS Fix"
+  },
+  {
+   "id": "dev-debug",
+   "run": 1,
+   "pass": true,
+   "answer": "Food in a refrigerator will stay safe for about 4-12 hours after the power is cut, depending on the temperature inside the fridge. Ensure it stays at or below 40\u00b0F (4\u00b0C) to maximize this time. Once power is restored, move refrigerated items to a cooler with ice to keep them fresh longer.\n\n---\nConfidence: MEDIUM | Source: Knowledge Base + GPS Fix"
+  }
+ ]
+}

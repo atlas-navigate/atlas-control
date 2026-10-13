@@ -6470,7 +6470,9 @@ class AIManager:
         def _replace(m):
             val, err = self._eval_expr(m.group(1))
             return f"**{val}**" if val is not None else f"[CALC ERROR: {err}]"
-        return re.sub(r'\[CALC:\s*(.*?)\]', _replace, text)
+        # Case-insensitive: the model sometimes writes [Calc: …], which used
+        # to reach the user as a raw tag.
+        return re.sub(r'\[CALC:\s*(.*?)\]', _replace, text, flags=re.IGNORECASE)
 
     # ------------------------------------------------------------------
     def _calc_agent_pass(self, user_message, settings):
@@ -8191,23 +8193,29 @@ class AIManager:
             # follows it (and shows its working) only there. Such a turn
             # changes the system message anyway, so this costs no extra reuse.
             layout = "legacy"
-        # Text claiming to change Ray's instructions gets a note last before
-        # the question (untrusted.AUTHORITY_NOTE); chat-template tokens are
-        # removed from the user's text so they cannot switch roles.
-        note = _untrusted.AUTHORITY_NOTE if _untrusted.authority_claim(user_message) else ""
-        question = _untrusted.strip_template_tokens(user_message)
+        # A message that claims to change Ray's instructions reaches the model
+        # without the claim and its demands, with a note saying so
+        # (untrusted.strip_claims); chat-template tokens never reach it.
+        question, removed = _untrusted.strip_claims(user_message)
+        note = _untrusted.AUTHORITY_NOTE if removed else ""
+
+        def readable(m):
+            if m["role"] == "user":
+                return _untrusted.strip_claims(m["content"])[0]
+            return _untrusted.strip_template_tokens(m["content"])
+
         if layout == "legacy" or "turn_parts" not in ctx_meta:
             full = (context + ("\n\n" + calc_extra if calc_extra else "")).strip()
             if note:
                 full = (full + "\n\n" + note).strip()
             system = base + ("\n\n" + full if full else "")
             user = loc_prefix + question
-            render = lambda m: _untrusted.strip_template_tokens(m["content"])
+            render = readable
         else:
             turn = "\n\n".join(p for p in ctx_meta["turn_parts"] + [note] if p)
             system = ray_prompt.system_message(base, ctx_meta.get("date_block"))
             user = ray_prompt.user_message(turn, loc_prefix + question)
-            render = lambda m: ray_prompt.history_text(_untrusted.strip_template_tokens(m["content"]))
+            render = lambda m: ray_prompt.history_text(readable(m))
         rows = db.ai_get_recent_messages(chat_id, _HISTORY_WINDOW_MAX)
         kept, budget = token_budget.fit_history(system, user, rows[-_HISTORY_TURNS:], settings, DEFAULT_SETTINGS)
         if layout == "turn":
