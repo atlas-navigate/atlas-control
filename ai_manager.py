@@ -1187,6 +1187,40 @@ _COMPUTE_INTENT_KEYWORDS = {
     "how many", "how much", "equation", "formula", "solve",
 }
 
+# A word problem states its quantities: "How far does sound travel in 4.2
+# seconds at 343 m/s?" has no compute verb, so it used to reach the model
+# bare — and qwen2.5:3b multiplied wrong (1458.6 for 1440.6). It counts as a
+# computation when it asks a quantity question AND gives at least two numbers,
+# one with a unit or rate attached. One number ("how far should I be from a
+# blast within 30 miles?") is not enough: that is the survival question the
+# keyword gates above protect. A two-number question that still needs no
+# arithmetic is answered NONE by the calculator agent (_calc_agent_pass).
+_NUMBER_RE = re.compile(r"(?<![\w.])\d[\d,]*(?:\.\d+)?")
+_NUMBER_WITH_UNIT_RE = re.compile(
+    r"\d(?:[\d,]*\d)?(?:\.\d+)?\s*(?:%|°\s*[cfk]?\b|(?:"
+    r"mph|kph|km/h|m/s|ft/s|fps|knots?|"
+    r"seconds?|secs?|s|minutes?|mins?|hours?|hrs?|h|days?|weeks?|"
+    r"volts?|v|watts?|w|kw|kwh|wh|mah|ah|amps?|"
+    r"liters?|litres?|l|ml|gallons?|gal|quarts?|"
+    r"kg|g|grams?|lbs?|pounds?|oz|ounces?|tons?|"
+    r"km|m|meters?|metres?|cm|mm|mi|miles?|ft|feet|foot|yards?|yd|inch(?:es)?|"
+    r"calories|kcal|degrees?|psi)\b)", re.I)
+_RATE_RE = re.compile(r"\bper\s+\w+|\d\s*\w+\s*/\s*\w+", re.I)
+_QUANTITY_QUESTION_RE = re.compile(
+    r"\bhow\s+(?:far|long|fast|high|deep|heavy|big|tall|hot|cold|wide|often|much|many)\b"
+    r"|\bat\s+what\b"
+    r"|\bwhat(?:'s|\s+is|\s+are)\s+(?:\d|the\s+(?:total|time|distance|speed|range|energy|power|"
+    r"runtime|weight|volume|area|cost|rate|temperature|pressure|flow|velocity|height|depth))", re.I)
+
+
+def _is_word_problem(text):
+    """A quantity question giving two or more numbers, one with a unit or rate."""
+    if not _QUANTITY_QUESTION_RE.search(text):
+        return False
+    if len(_NUMBER_RE.findall(text)) < 2:
+        return False
+    return bool(_NUMBER_WITH_UNIT_RE.search(text) or _RATE_RE.search(text))
+
 _CALC_INSTRUCTION = (
     "\n\n=== CALCULATOR TOOL ===\n"
     "When you need a precise numerical result, write it as [CALC: expression] "
@@ -6378,7 +6412,7 @@ class AIManager:
     def _is_physics_query(self, user_message):
         """Return True if the query involves physics/ballistics — triggers the agent loop.
 
-        Three gates, in order of confidence:
+        Four gates, in order of confidence:
           1. Ballistic queries ALWAYS qualify (a keyword gap here must never
              starve the compute path — this exact drift is what let "spin drift
              of a 9mm…" fall through to the bare model).
@@ -6387,15 +6421,18 @@ class AIManager:
              explicit compute intent, so an ordinary survival question that
              merely mentions a distance ("within 30 miles of a blast") does not
              drag in the calculator agent and its fabricated expressions.
+          4. A word problem: a quantity question that gives two or more
+             numbers, one with a unit or rate (_is_word_problem).
         """
         msg_lower = user_message.lower()
         if self._is_ballistic_query(user_message):
             return True
         if any(_kw_hit(kw, msg_lower) for kw in _PHYSICS_STRONG_KEYWORDS):
             return True
-        if any(_kw_hit(kw, msg_lower) for kw in _PHYSICS_WEAK_KEYWORDS):
-            return any(kw in msg_lower for kw in _COMPUTE_INTENT_KEYWORDS)
-        return False
+        if any(_kw_hit(kw, msg_lower) for kw in _PHYSICS_WEAK_KEYWORDS) and \
+                any(kw in msg_lower for kw in _COMPUTE_INTENT_KEYWORDS):
+            return True
+        return _is_word_problem(user_message)
 
     def _is_ballistic_query(self, user_message):
         """Return True if the query is specifically about bullet trajectory / ballistic drop."""
@@ -6470,18 +6507,39 @@ class AIManager:
         else:
             round_hint = ""
 
+        # Worked examples: without them the 3B model wrote free fall as
+        # sqrt(2*g*h/4) (14.85 s for 45 m, not 3.03 s). NONE lets a question
+        # that only mentions numbers ("how long can I go without water at
+        # 40 °C with 2 liters?") get no "pre-verified" result at all — a
+        # fabricated one would be forced into the answer.
         extraction_system = (
             "You are a math expression extractor. "
-            "When given a question, output ONLY the Python expressions needed to answer it numerically. "
+            "When given a question, output ONLY the Python expressions needed to answer it numerically, "
+            "using the numbers stated in the question. "
             "Each expression must be on its own line in the format: [CALC: expression]\n"
+            "If answering needs knowledge or judgement rather than arithmetic on the stated numbers, "
+            "output exactly: NONE\n"
             "Available functions: ballistic_drop(range_m, zero_m, v0_mps, bc_g1) → drop in cm; "
             "sqrt, sin, cos, tan, radians, degrees, log, log10, exp, pi, g=9.80665, "
             "mps_to_fps, fps_to_mps, cm_to_inches, km_to_miles, c_to_f, f_to_c, lbs_to_kg.\n"
+            "Examples:\n"
+            "Question: A truck averages 80 km/h. How far does it go in 3.5 hours?\n"
+            "[CALC: 80 * 3.5]\n"
+            "Question: How long does a stone take to fall 20 m, ignoring air resistance?\n"
+            "[CALC: sqrt(2 * 20 / g)]\n"
+            "Question: How many watt-hours can I use from a 200Ah 24V battery at 50% depth of discharge?\n"
+            "[CALC: 200 * 24 * 0.50]\n"
+            "Question: What is 98.6 °F in Celsius?\n"
+            "[CALC: f_to_c(98.6)]\n"
+            "Question: What is 15% of 80?\n"
+            "[CALC: 80 * 15 / 100]\n"
+            "Question: How long should I wait after adding 2 drops of bleach to 1 liter of water?\n"
+            "NONE\n"
             "Output NOTHING else — no prose, no labels, no explanations."
         )
         extraction_user = (
-            f"{round_hint}Question: {user_message}\n\n"
-            "List every expression that must be computed. One [CALC: ...] per line only."
+            f"{round_hint}Question: {_untrusted.strip_template_tokens(user_message)}\n\n"
+            "List every expression that must be computed. One [CALC: ...] per line only, or NONE."
         )
 
         payload = json.dumps(self._finalize_payload({
@@ -6493,7 +6551,10 @@ class AIManager:
             "stream": False,
             # Same runner options as the chat path: a different context or
             # batch size makes Ollama reload the whole model before answering.
-            "options": dict(self._runner_options(settings), temperature=0.05, num_predict=300),
+            # A few short expressions; a ballistic round may need several
+            # ballistic_drop() lines.
+            "options": dict(self._runner_options(settings), temperature=0.05,
+                            num_predict=300 if round_info else 120),
         })).encode()
 
         try:
@@ -6512,6 +6573,8 @@ class AIManager:
             return "", False
 
         exprs = re.findall(r'\[CALC:\s*(.*?)\]', extraction, re.IGNORECASE)
+        if not exprs and re.search(r'\bNONE\b', extraction, re.IGNORECASE):
+            return "", False
         if not exprs:
             lines = [l.strip() for l in extraction.splitlines()
                      if l.strip() and not l.strip().startswith('#')]
@@ -8077,9 +8140,11 @@ class AIManager:
     # ------------------------------------------------------------------
     _CALC_RESULTS_INSTRUCTION = (
         "\n\n=== INSTRUCTION FOR THIS RESPONSE ===\n"
-        "The CALCULATOR AGENT RESULTS above contain pre-verified drop, correction, spin drift, and time-of-flight values. "
-        "Use those exact numbers as-is — do NOT recalculate the values listed. "
-        "Present them directly to the user without deliberation. "
+        "The CALCULATOR AGENT RESULTS above were computed exactly (for a ballistic question: drop, "
+        "correction, spin drift and time of flight). Use those exact numbers in your answer — "
+        "do NOT redo the arithmetic or recalculate the values listed. You may name the formula, "
+        "and give the final figure with its units, sensibly rounded. "
+        "If a listed value does not answer the question, ignore it. "
         "For any quantity not listed above, answer from your knowledge."
     )
 
@@ -8126,16 +8191,23 @@ class AIManager:
             # follows it (and shows its working) only there. Such a turn
             # changes the system message anyway, so this costs no extra reuse.
             layout = "legacy"
+        # Text claiming to change Ray's instructions gets a note last before
+        # the question (untrusted.AUTHORITY_NOTE); chat-template tokens are
+        # removed from the user's text so they cannot switch roles.
+        note = _untrusted.AUTHORITY_NOTE if _untrusted.authority_claim(user_message) else ""
+        question = _untrusted.strip_template_tokens(user_message)
         if layout == "legacy" or "turn_parts" not in ctx_meta:
             full = (context + ("\n\n" + calc_extra if calc_extra else "")).strip()
+            if note:
+                full = (full + "\n\n" + note).strip()
             system = base + ("\n\n" + full if full else "")
-            user = loc_prefix + user_message
-            render = lambda m: m["content"]
+            user = loc_prefix + question
+            render = lambda m: _untrusted.strip_template_tokens(m["content"])
         else:
-            turn = "\n\n".join(p for p in ctx_meta["turn_parts"] if p)
+            turn = "\n\n".join(p for p in ctx_meta["turn_parts"] + [note] if p)
             system = ray_prompt.system_message(base, ctx_meta.get("date_block"))
-            user = ray_prompt.user_message(turn, loc_prefix + user_message)
-            render = lambda m: ray_prompt.history_text(m["content"])
+            user = ray_prompt.user_message(turn, loc_prefix + question)
+            render = lambda m: ray_prompt.history_text(_untrusted.strip_template_tokens(m["content"]))
         rows = db.ai_get_recent_messages(chat_id, _HISTORY_WINDOW_MAX)
         kept, budget = token_budget.fit_history(system, user, rows[-_HISTORY_TURNS:], settings, DEFAULT_SETTINGS)
         if layout == "turn":

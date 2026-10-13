@@ -633,7 +633,7 @@ def cmd_eval(args):
     target = make_target(args)
     if isinstance(target, InprocTarget):
         target.load()
-    with open(EVAL_FILE) as f:
+    with open(args.items or EVAL_FILE) as f:
         items = json.load(f)["items"]
     if args.only:
         keep = set(args.only.split(","))
@@ -941,6 +941,7 @@ def main():
     v.add_argument("--out")
     v.add_argument("--runs", type=int, default=1)
     v.add_argument("--only")
+    v.add_argument("--items", help="eval file (default tools/bench/ray_eval.json)")
     v.add_argument("--inproc", action="store_true")
     v.add_argument("--layout", default="turn", choices=("turn", "legacy"))
     v.add_argument("--model")
