@@ -1,0 +1,352 @@
+{
+ "meta": {
+  "target": "app",
+  "model": null,
+  "status": {
+   "active_model": {
+    "id": "qwen2.5:3b",
+    "label": "Qwen2.5 3B",
+    "num_ctx": 4096,
+    "quant": "Q4_K_M",
+    "tag": "qwen2.5:3b"
+   },
+   "ai_ready": true,
+   "chat_count": 527,
+   "doc_count": 93,
+   "finished_at": 1791859828.6674826,
+   "geocoder": {
+    "ok": true,
+    "us_cities": 17341,
+    "us_cities_db": "/atlas_data/atlas-control/static/data/us_cities.db",
+    "us_zips": 41490,
+    "world": 69525
+   },
+   "last_error": "",
+   "loaded_models": [
+    "qwen2.5:3b",
+    "qwen3-embedding:0.6b"
+   ],
+   "models": [
+    "qwen3.5:4b",
+    "qwen3-embedding:0.6b",
+    "qwen2.5:3b"
+   ],
+   "notice": "",
+   "running": true,
+   "settings": {
+    "embed_format_v": "4",
+    "embed_model": "qwen3-embedding:0.6b",
+    "inject_mesh_context": "true",
+    "keep_alive_hours": "always",
+    "measured:qwen2.5:3b": "{\"tok_s\": 24.2, \"load_s\": 14.8, \"gpu_pct\": 100, \"at\": 1791855070, \"tag\": \"qwen2.5:3b\"}",
+    "measured:qwen3.5:4b": "{\"tok_s\": 7.8, \"load_s\": 23.7, \"gpu_pct\": 100, \"at\": 1791854231, \"tag\": \"qwen3.5:4b\"}",
+    "model": "qwen2.5:3b",
+    "rag_enabled": "true",
+    "rag_top_k": "5",
+    "ray_clock_boost": "on",
+    "system_prompt": "You are Ray \u2014 the AI assistant built into Atlas Control, a Meshtastic mesh-network command deck that runs 100% offline on an off-grid Jetson device.\n\nWHAT YOUR CONTEXT CONTAINS:\n- CURRENT POSITION (GPS) is supplied on every turn \u2014 use it to ground answers in the user's real location, terrain, climate, region, and local hazards.\n- LIVE DATA blocks (SYSTEM STATUS, MESH NETWORK STATE, ALERTS) are attached ONLY when the question calls for them. When such a block is present it is real and current \u2014 quote its values exactly. When it is ABSENT you have no reading: answer generally or say you'd need to check \u2014 never invent CPU/RAM/temperature figures, node names, SNR, battery levels, or alerts.\n- KNOWLEDGE BASE blocks are curated offline reference docs (survival, radio, ballistics, medical, navigation, Atlas usage). When present they are your PRIMARY source \u2014 quote their specific values and procedures rather than your own recollection.\n\nHOW TO ANSWER:\n- Lead with the answer. Never open with 'As Ray', 'I am Ray', 'As an AI', or any self-introduction \u2014 answer the question, not who you are.\n- Be concise: one to three sentences for a simple question; use structure (lists, numbered steps, tables) only when the topic genuinely has multiple distinct parts.\n- Ground every claim in what is actually in your context. Do not fabricate data, sources, citations, or a confidence rating \u2014 a verified confidence footer is appended automatically after you finish.\n- Don't hedge about being an AI or being offline, and don't expose your reasoning, deliberation, or internal steps \u2014 give the result directly.\n- This is a survival and off-grid tool, so accuracy is safety. When a precise answer needs a parameter you don't have (barrel twist for spin drift, muzzle velocity, zero distance, a custom load), answer with sensible standard defaults AND ask for the missing detail so the next answer can be exact.\n- If you don't know and nothing in context supports an answer, say so briefly instead of guessing.\n\nFORMATTING \u2014 Match format to the answer's complexity. Reply in GitHub-flavored Markdown:\n- **Bold** key terms; use `inline code` for commands, filenames, values, and node IDs.\n- Use ## / ### headings only for multi-section answers with distinct topics.\n- Use - bullets for unordered points and 1. numbered lists for ordered steps.\n- Put multi-line commands, config, or output in ```fenced code blocks```.\n- Use Markdown tables for comparisons or structured data (e.g. node SNR/hops, specs, schedules).\n- Use > blockquotes for warnings or important callouts.\nSimple questions get a direct plain-text answer. Add structure only when it genuinely improves clarity.",
+    "warmup_on_start": "true"
+   },
+   "started_at": 1791859828.1316845,
+   "startup_phase": "ready",
+   "switch": null,
+   "warming_up": false
+  },
+  "version": "1.0.0-dev.20261013024940",
+  "at": "2026-10-12 23:08:07",
+  "mode": "e2e",
+  "start_temp_c": 54.843,
+  "end_temp_c": 60.687
+ },
+ "rows": [
+  {
+   "text": "If I drop a rock off a 45 meter cliff, how long until it hits the ground?",
+   "chat_id": 584,
+   "error": null,
+   "ttft_s": 3.19,
+   "e2e_s": 12.442,
+   "gen_tokens": 195,
+   "gen_tps": 21.1,
+   "prompt_tokens": 1718,
+   "cached_tokens": 890,
+   "prefill_tokens": 828,
+   "prefill_s": 1.011,
+   "prefill_tps": 819.1,
+   "llm_calls": 2,
+   "pre_calls": [
+    {
+     "task": 59757,
+     "ctx": 4096,
+     "prompt_tokens": 476,
+     "cached_tokens": 5,
+     "prefill_tokens": 471,
+     "prefill_ms": 579.8,
+     "gen_tokens": 15,
+     "gen_ms": 654.75,
+     "prefill_tps": 812.3
+    }
+   ],
+   "timings": {
+    "context_s": 0.303,
+    "calc_s": 1.523,
+    "layout": "legacy",
+    "ttft_s": 3.138,
+    "queue_s": 0.0,
+    "prompt_tokens": 1718,
+    "prefill_s": 1.011,
+    "load_s": 0.256
+   },
+   "hw": {
+    "samples": 61,
+    "cpu_pct_avg": 6.2,
+    "gpu_load_pct_avg": 89.2,
+    "gpu_mhz_avg": 1020.0,
+    "gpu_mhz_max": 1020,
+    "emc_mhz_avg": 3199.0,
+    "emc_mhz_max": 3199,
+    "mem_avail_mb_min": 1783,
+    "llama_rss_mb_max": 4132,
+    "app_rss_mb_max": 183,
+    "tj_c_max": 60.937,
+    "vdd_in_mw_avg": 17446.7
+   },
+   "answer": "The time it takes for the rock to hit the ground can be calculated using the formula for free fall under gravity:\n\n\\[ t = \\sqrt{\\frac{2h}{g}} \\]\n\nWhere:\n- \\( h = 45 \\) meters (height of the cliff),\n- \\( g = 9.81 \\) m/s\u00b2 (acceleration due to gravity).\n\nUsing the exact values from the CALCULATOR AGENT RESULTS:\n\n\\[ t = \\sqrt{\\frac{2 \\times 45}{9.81}} \\]\n\nLet's compute this:\n```python\nimport math\n\n# Given values\nh = 45  # height in meters\ng = 9.81  # acceleration due to gravity in m/s^2\n\n# Calculate time of fall\nt = math.sqrt((2 * h) / g)\nt\n```\n\nThe rock will hit the ground after approximately **3.03 seconds**.\n\n---\nConfidence: HIGH | Source: Knowledge Base + GPS Fix",
+   "scenario": "tool",
+   "rep": 0
+  },
+  {
+   "text": "How far does sound travel in 4.2 seconds at 343 m/s?",
+   "chat_id": 585,
+   "error": null,
+   "ttft_s": 3.089,
+   "e2e_s": 3.439,
+   "gen_tokens": 8,
+   "gen_tps": 23.0,
+   "prompt_tokens": 2050,
+   "cached_tokens": 890,
+   "prefill_tokens": 1160,
+   "prefill_s": 1.433,
+   "prefill_tps": 809.5,
+   "llm_calls": 2,
+   "pre_calls": [
+    {
+     "task": 59970,
+     "ctx": 4096,
+     "prompt_tokens": 474,
+     "cached_tokens": 428,
+     "prefill_tokens": 46,
+     "prefill_ms": 93.32,
+     "gen_tokens": 15,
+     "gen_ms": 649.09,
+     "prefill_tps": 492.9
+    }
+   ],
+   "timings": {
+    "context_s": 0.263,
+    "calc_s": 1.03,
+    "layout": "legacy",
+    "ttft_s": 3.041,
+    "queue_s": 0.0,
+    "prompt_tokens": 2050,
+    "prefill_s": 1.433,
+    "load_s": 0.258
+   },
+   "hw": {
+    "samples": 16,
+    "cpu_pct_avg": 13.0,
+    "gpu_load_pct_avg": 68.2,
+    "gpu_mhz_avg": 1020.0,
+    "gpu_mhz_max": 1020,
+    "emc_mhz_avg": 3199.0,
+    "emc_mhz_max": 3199,
+    "mem_avail_mb_min": 1815,
+    "llama_rss_mb_max": 4091,
+    "app_rss_mb_max": 183,
+    "tj_c_max": 60.937,
+    "vdd_in_mw_avg": 14022.3
+   },
+   "answer": "1440.6 meters\n\n---\nConfidence: MEDIUM | Source: Knowledge Base + GPS Fix",
+   "scenario": "tool",
+   "rep": 1
+  },
+  {
+   "text": "A stone falls for 2.5 seconds. How far did it fall?",
+   "chat_id": 586,
+   "error": null,
+   "ttft_s": 2.243,
+   "e2e_s": 12.634,
+   "gen_tokens": 223,
+   "gen_tps": 21.5,
+   "prompt_tokens": 1222,
+   "cached_tokens": 890,
+   "prefill_tokens": 332,
+   "prefill_s": 0.416,
+   "prefill_tps": 797.2,
+   "llm_calls": 2,
+   "pre_calls": [
+    {
+     "task": 59997,
+     "ctx": 4096,
+     "prompt_tokens": 471,
+     "cached_tokens": 428,
+     "prefill_tokens": 43,
+     "prefill_ms": 92.69,
+     "gen_tokens": 20,
+     "gen_ms": 879.61,
+     "prefill_tps": 463.9
+    }
+   ],
+   "timings": {
+    "context_s": 0.267,
+    "calc_s": 1.259,
+    "layout": "legacy",
+    "ttft_s": 2.236,
+    "queue_s": 0.0,
+    "prompt_tokens": 1222,
+    "prefill_s": 0.416,
+    "load_s": 0.255
+   },
+   "hw": {
+    "samples": 61,
+    "cpu_pct_avg": 5.8,
+    "gpu_load_pct_avg": 89.8,
+    "gpu_mhz_avg": 1020.0,
+    "gpu_mhz_max": 1020,
+    "emc_mhz_avg": 3199.0,
+    "emc_mhz_max": 3199,
+    "mem_avail_mb_min": 1846,
+    "llama_rss_mb_max": 4055,
+    "app_rss_mb_max": 183,
+    "tj_c_max": 62.687,
+    "vdd_in_mw_avg": 17775.2
+   },
+   "answer": "To determine how far the stone fell, we can use the equation for distance under constant acceleration due to gravity:\n\n\\[ d = \\frac{1}{2} g t^2 \\]\n\nWhere:\n- \\( d \\) is the distance fallen,\n- \\( g \\) is the acceleration due to gravity (approximately \\( 32.2 \\, \\text{ft/s}^2 \\) on Earth),\n- \\( t \\) is the time of fall.\n\nGiven \\( t = 2.5 \\, \\text{seconds} \\), we can calculate \\( d \\):\n\n\\[ d = \\frac{1}{2} \\times 32.2 \\times (2.5)^2 \\]\n\nLet's calculate this using the exact values provided in the CALCULATOR AGENT RESULTS:\n\n\\[ 0.5 \\times g \\times 2.5^2 = 30.6458 \\, \\text{feet} \\]\n\nSo, the stone fell \\( 30.6458 \\, \\text{feet} \\).\n\n---\nConfidence: MEDIUM | Source: Knowledge Base + GPS Fix",
+   "scenario": "tool",
+   "rep": 2
+  }
+ ],
+ "summary": {
+  "tool": {
+   "ttft_s": {
+    "n": 3,
+    "median": 3.089,
+    "p90": 3.19,
+    "min": 2.243,
+    "max": 3.19
+   },
+   "e2e_s": {
+    "n": 3,
+    "median": 12.442,
+    "p90": 12.634,
+    "min": 3.439,
+    "max": 12.634
+   },
+   "gen_tps": {
+    "n": 3,
+    "median": 21.5,
+    "p90": 23.0,
+    "min": 21.1,
+    "max": 23.0
+   },
+   "prefill_tps": {
+    "n": 3,
+    "median": 809.5,
+    "p90": 819.1,
+    "min": 797.2,
+    "max": 819.1
+   },
+   "prefill_s": {
+    "n": 3,
+    "median": 1.011,
+    "p90": 1.433,
+    "min": 0.416,
+    "max": 1.433
+   },
+   "prompt_tokens": {
+    "n": 3,
+    "median": 1718,
+    "p90": 2050,
+    "min": 1222,
+    "max": 2050
+   },
+   "cached_tokens": {
+    "n": 3,
+    "median": 890,
+    "p90": 890,
+    "min": 890,
+    "max": 890
+   },
+   "prefill_tokens": {
+    "n": 3,
+    "median": 828,
+    "p90": 1160,
+    "min": 332,
+    "max": 1160
+   },
+   "hw.cpu_pct_avg": {
+    "n": 3,
+    "median": 6.2,
+    "p90": 13.0,
+    "min": 5.8,
+    "max": 13.0
+   },
+   "hw.gpu_load_pct_avg": {
+    "n": 3,
+    "median": 89.2,
+    "p90": 89.8,
+    "min": 68.2,
+    "max": 89.8
+   },
+   "hw.gpu_mhz_avg": {
+    "n": 3,
+    "median": 1020.0,
+    "p90": 1020.0,
+    "min": 1020.0,
+    "max": 1020.0
+   },
+   "hw.emc_mhz_avg": {
+    "n": 3,
+    "median": 3199.0,
+    "p90": 3199.0,
+    "min": 3199.0,
+    "max": 3199.0
+   },
+   "hw.mem_avail_mb_min": {
+    "n": 3,
+    "median": 1815,
+    "p90": 1846,
+    "min": 1783,
+    "max": 1846
+   },
+   "hw.llama_rss_mb_max": {
+    "n": 3,
+    "median": 4091,
+    "p90": 4132,
+    "min": 4055,
+    "max": 4132
+   },
+   "hw.app_rss_mb_max": {
+    "n": 3,
+    "median": 183,
+    "p90": 183,
+    "min": 183,
+    "max": 183
+   },
+   "hw.tj_c_max": {
+    "n": 3,
+    "median": 60.937,
+    "p90": 62.687,
+    "min": 60.937,
+    "max": 62.687
+   },
+   "hw.vdd_in_mw_avg": {
+    "n": 3,
+    "median": 17446.7,
+    "p90": 17775.2,
+    "min": 14022.3,
+    "max": 17775.2
+   },
+   "errors": 0
+  }
+ }
+}
