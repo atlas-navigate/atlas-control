@@ -88,7 +88,7 @@ class Sandbox:
 
     # ── releases ─────────────────────────────────────────────────────────
     def release_tree(self, version, seq, system_marker="v", schema_target=1, extra_files=None):
-        tree = tempfile.mkdtemp(prefix="atlas-rel-")
+        tree = tempfile.mkdtemp(prefix="atlas-rel-", dir=self.root)
         files = {
             "release.json": json.dumps({"version": version, "seq": seq, "schema_target": schema_target,
                                         "engine_version": 1}),
@@ -119,7 +119,7 @@ class Sandbox:
 
     def make_bundle(self, tree, version, seq, tamper=None, members=None, unpacked=None, sign_key=None,
                     manifest_overrides=None):
-        out = tempfile.mkdtemp(prefix="atlas-pub-")
+        out = tempfile.mkdtemp(prefix="atlas-pub-", dir=self.root)
         name = f"atlas-{version}.tar.xz"
         bundle = os.path.join(out, name)
         with tarfile.open(bundle, "w:xz") as tar:

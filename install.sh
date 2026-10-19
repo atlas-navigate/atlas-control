@@ -687,27 +687,27 @@ else
     log "pmtiles CLI installed ($PMTILES_VER)"
 fi
 
-# ── 7b. Vector basemap (Protomaps full-planet build, ~126 GB) ────────────────
+# ── 7b. Vector basemap (world z0–6 + US z7–15, ~20 GB) ───────────────────────
 BASEMAP="$TILES_DIR/map.pmtiles"
 if [[ -f "$BASEMAP" ]]; then
     BSIZE=$(du -sh "$BASEMAP" | cut -f1)
     log "Vector basemap already present ($BSIZE) — skipping download"
 else
-    # Verify the resolved URL is reachable BEFORE the ~126 GB download so a
+    # Verify the resolved URL is reachable BEFORE the ~20 GB extract so a
     # stale fallback key (Protomaps prunes old builds) or being offline fails
-    # fast with a clear message instead of writing a 404 body into the .tmp.
+    # fast with a clear message instead of a half-built archive.
     if ! curl -sfI --max-time 30 "$BASEMAP_URL" >/dev/null 2>&1; then
         die "Basemap URL not reachable: $BASEMAP_URL
     The Protomaps build may have been pruned, or the machine is offline.
     Find a current key at $PROTOMAPS_METADATA_URL, update PROTOMAPS_FALLBACK_KEY
     at the top of this script (or restore connectivity), then re-run."
     fi
-    info "Downloading map.pmtiles (~126 GB, full-planet vector basemap) ..."
-    info "URL: $BASEMAP_URL"
-    sudo -u "$ATLAS_USER" wget -q --show-progress \
-        -O "$BASEMAP.tmp" "$BASEMAP_URL" && \
-        mv "$BASEMAP.tmp" "$BASEMAP"
-    log "Vector basemap downloaded ($(du -sh "$BASEMAP" | cut -f1))"
+    # Only the byte ranges for the world overview and the US are fetched, not
+    # the ~127 GB planet (setup_basemap.sh, basemap-region-us.geojson).
+    info "Building map.pmtiles (~20 GB: world z0–6 + US detail) ..."
+    info "Source: $BASEMAP_URL"
+    sudo -u "$ATLAS_USER" bash "$APP_DIR/setup_basemap.sh" "$BASEMAP_URL" "$BASEMAP"
+    log "Vector basemap ready ($(du -sh "$BASEMAP" | cut -f1))"
 fi
 
 # ── 7b. Noto Sans glyph PBFs (required for map label rendering) ──────────────
@@ -809,6 +809,11 @@ else
     info "Building topo.pmtiles ..."
     sudo -u "$ATLAS_USER" bash "$APP_DIR/setup_topo_pmtiles.sh"
     log "topo.pmtiles built ($(du -sh "$TOPO_PMTILES" | cut -f1))"
+fi
+# The raw z/x/y cache (~25 GB) only feeds setup_topo_pmtiles.sh; the map
+# reads topo.pmtiles.
+if [[ -f "$TOPO_PMTILES" ]]; then
+    rm -rf "$TOPO_TILES"
 fi
 
 # ── 7d. City & trail databases ────────────────────────────────────────────────
@@ -923,6 +928,9 @@ _process_state() {
     rm -f "$customize_log"
 
     rm -f "$state_dir/region.osm.pbf"
+    # Only osrm-customize reads these (~30% of a graph, ~32 GB across all
+    # states); osrm-routed never does. Rebuilding a state starts from extract.
+    rm -f "$state_dir"/region.osrm.{ebg,enw,cnbg,cnbg_to_ebg,turn_penalties_index}
     touch "$state_dir/.processed"
     chown -R "$ATLAS_USER:$ATLAS_USER" "$state_dir"
     chmod -R a+rX "$state_dir"     # osrm-extract writes .fileIndex 0700

@@ -152,6 +152,8 @@ process_profile() {
     }
 
     rm -f "$TMPBF"
+    # Only osrm-customize reads these (~30% of a graph); osrm-routed never does.
+    rm -f "$PDIR"/region.osrm.{ebg,enw,cnbg,cnbg_to_ebg,turn_penalties_index}
     # The app's service account reads the graph; osrm-extract writes .fileIndex 0700.
     chmod -R a+rX "$PDIR"
     touch "$MARKER"

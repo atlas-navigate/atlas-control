@@ -268,6 +268,7 @@ class PowerLossTests(EngineTestCase):
     def tearDown_sandbox_and_reset(self):
         self.sb.cleanup()
         self.sb = Sandbox()
+        self.addCleanup(self.sb.cleanup)
         self.sb.install_initial("1.0.0", seq=1)
         self.sb.healthy_versions = {"1.0.0", "1.1.0"}
 
