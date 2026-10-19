@@ -81,6 +81,15 @@ class RaySettingsTemplateTests(unittest.TestCase):
         self.assertIn("api.post('/api/ai/model'", self.html)
         self.assertNotIn('placeholder="qwen2.5:3b"', self.html)
 
+    def test_the_ray_header_follows_model_switches_itself(self):
+        # The model picker lives on Ray's Settings tab and unmounts (with its
+        # socket listener) on Chat; the page must listen and poll on its own,
+        # or the header keeps showing the old model after a switch.
+        page = self.html[self.html.index("function AIPage()"):]
+        page = page[:page.index("\nfunction ", 10)]
+        self.assertIn("sock.on('ai_model'", page)
+        self.assertIn("if (aiReady && !switchRunning) return;", page)
+
     def test_no_global_inference_fields_remain(self):
         # Low-level values live per model, behind "Expert overrides".
         for field in ("settings.num_ctx", "settings.num_gpu", "settings.num_thread", "settings.num_batch",

@@ -5570,6 +5570,8 @@ function RayModelPicker({ labelStyle, inputStyle, onChanged }) {
     setEmbedDraft(data?.embed_model || '');
   }, [active?.id, JSON.stringify(active?.overrides), data?.embed_model]);
 
+  // A started switch: show it here, and let the page header follow it.
+  function track(sw) { setData(d => ({ ...d, switch: sw })); onChanged && onChanged(); }
   async function choose(m) {
     if (m.status === 'download' && !(await atlasConfirm({
       title: `Download ${m.label}?`,
@@ -5577,7 +5579,7 @@ function RayModelPicker({ labelStyle, inputStyle, onChanged }) {
       confirmLabel: 'Download and switch' }))) return;
     try {
       const r = await api.post('/api/ai/model', { model: m.id });
-      setData(d => ({ ...d, switch: r.switch }));
+      track(r.switch);
     } catch (e) { setError(e.message); }
   }
   async function applyOverrides() {
@@ -5587,14 +5589,14 @@ function RayModelPicker({ labelStyle, inputStyle, onChanged }) {
       const r = await api.put(`/api/ai/models/${encodeURIComponent(active.id)}/overrides`, { overrides });
       const clamped = Object.entries(r.clamped || {});
       setClampNote(clamped.length ? clamped.map(([k, [asked, used]]) => `${k}: ${asked} → ${used}`).join(', ') : null);
-      if (r.switch) setData(d => ({ ...d, switch: r.switch })); else load();
+      if (r.switch) track(r.switch); else load();
     } catch (e) { setError(e.message); }
   }
   async function resetOverrides() {
     try {
       const r = await api.del(`/api/ai/models/${encodeURIComponent(active.id)}/overrides`);
       setClampNote(null);
-      if (r.switch) setData(d => ({ ...d, switch: r.switch })); else load();
+      if (r.switch) track(r.switch); else load();
     } catch (e) { setError(e.message); }
   }
   async function changeEmbedder() {
@@ -5605,7 +5607,7 @@ function RayModelPicker({ labelStyle, inputStyle, onChanged }) {
       confirmLabel: 'Change and rebuild' }))) return;
     try {
       const r = await api.post('/api/ai/model', { model: active.id, embed_model: name });
-      setData(d => ({ ...d, switch: r.switch }));
+      track(r.switch);
     } catch (e) { setError(e.message); }
   }
 
@@ -5818,11 +5820,41 @@ function AIPage() {
     return () => { cancelled = true; };
   }, []);
 
+  // The header names Ray's model, so it follows every switch — started on
+  // this page's Settings tab or from another device. It can't rely on the
+  // model picker: that lives on the Settings tab and unmounts (with its socket
+  // listener) when the user goes back to Chat, which used to leave the header
+  // showing the old model for good.
+  const switchRunning = !!(status?.switch && !status.switch.finished);
   useEffect(() => {
-    if (aiReady) return;
+    const sock = window._atlasSocket;
+    if (!sock) return;
+    const onJob = (j) => {
+      loadStatus().catch(() => {});
+      if (j && j.finished) loadSettings().catch(() => {});
+    };
+    sock.on('ai_model', onJob);
+    return () => sock.off('ai_model', onJob);
+  }, []);
+
+  // Poll while Ray is starting or switching (no socket, or a missed event).
+  useEffect(() => {
+    if (aiReady && !switchRunning) return;
     const poll = setInterval(() => { loadStatus().catch(() => {}); }, 2000);
     return () => clearInterval(poll);
-  }, [aiReady]);
+  }, [aiReady, switchRunning]);
+
+  // A switch that ended while we polled: pick up the new model's settings.
+  const wasSwitchingRef = useRef(false);
+  useEffect(() => {
+    if (wasSwitchingRef.current && !switchRunning) loadSettings().catch(() => {});
+    wasSwitchingRef.current = switchRunning;
+  }, [switchRunning]);
+
+  // Back on the chat: make sure the header is current.
+  useEffect(() => {
+    if (tab === 'chat' && status) loadStatus().catch(() => {});
+  }, [tab]);
 
   // Re-load when active chat changes
   useEffect(() => {
