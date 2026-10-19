@@ -11,8 +11,10 @@
 # ║      (same technician password on every unit = universal credential)     ║
 # ║    - SSH is switched off and masked                                      ║
 # ║    - the setup account leaves the atlas group (no reading owner data)    ║
-# ║    - mDNS is not pinned to one Wi-Fi interface name, hides host details ║
-# ║    - checks: no sudo rules, firewall on, app only on loopback           ║
+# ║    - boots headless; docker, containerd, snapd, ModemManager masked     ║
+# ║    - checks: no sudo rules, firewall on, app only on loopback, mDNS     ║
+# ║      settings from the release (any interface but docker0, no AAAA,     ║
+# ║      no host details)                                                    ║
 # ║  Developer units (/etc/atlas/dev-mode) are left alone.                   ║
 # ╚══════════════════════════════════════════════════════════════════════════╝
 set -Eeuo pipefail
@@ -62,27 +64,30 @@ for unit in ssh.socket ssh.service sshd.service; do
 done
 log "SSH disabled and masked"
 
-# ── mDNS ─────────────────────────────────────────────────────────────────────
-AVAHI_CONF=/etc/avahi/avahi-daemon.conf
-if [[ -f "$AVAHI_CONF" ]]; then
-    if (( ! CHECK_ONLY )); then
-        cp -n "$AVAHI_CONF" "$AVAHI_CONF.atlas-orig" || true
-        # Pinning allow-interfaces to one Wi-Fi name silently stops discovery
-        # on a unit whose module enumerates differently; deny the container
-        # bridge instead, and publish no workstation/host details. No AAAA
-        # records either: clients should not latch onto a rotating privacy
-        # address, and each rotation re-registers the host records, which can
-        # push avahi into a name conflict (atlas-xxxx-2.local).
-        sed -i -E 's/^[#[:space:]]*allow-interfaces=.*/#allow-interfaces=/' "$AVAHI_CONF"
-        sed -i -E 's/^[#[:space:]]*deny-interfaces=.*/deny-interfaces=docker0/' "$AVAHI_CONF"
-        grep -q '^deny-interfaces=' "$AVAHI_CONF" || sed -i '/^\[server\]/a deny-interfaces=docker0' "$AVAHI_CONF"
-        sed -i -E 's/^[#[:space:]]*publish-workstation=.*/publish-workstation=no/; s/^[#[:space:]]*publish-hinfo=.*/publish-hinfo=no/' "$AVAHI_CONF"
-        sed -i -E 's/^[#[:space:]]*publish-aaaa-on-ipv4=.*/publish-aaaa-on-ipv4=no/' "$AVAHI_CONF"
-        grep -q '^publish-aaaa-on-ipv4=' "$AVAHI_CONF" || sed -i '/^\[publish\]/a publish-aaaa-on-ipv4=no' "$AVAHI_CONF"
-        systemctl try-restart avahi-daemon.service || true
-    fi
-    log "mDNS: every interface but docker0, IPv4 addresses only, no host details published"
+# ── Headless, and only what Atlas uses ───────────────────────────────────────
+# A sold unit has no screen session: the desktop (~140 MB resident, more in
+# swap on an 8 GB unit that shares RAM with Ray) and these services are off.
+# Takes effect at the next boot, so a technician's desktop session here is
+# not cut off. Absent services are skipped.
+#   docker / containerd   container runtime (and its docker0 bridge)
+#   snapd                 snap packages (desktop apps on the stock image)
+#   ModemManager          probes serial ports with AT commands — the radio
+#                         and GPS are serial devices
+RETAIL_OFF=(docker.service docker.socket containerd.service snapd.service snapd.socket ModemManager.service)
+if [[ "$(systemctl get-default)" != "multi-user.target" ]]; then
+    do_ systemctl set-default multi-user.target >/dev/null
+    log "Boots without the desktop from the next start (multi-user.target)"
+else
+    log "Boots without the desktop"
 fi
+for unit in "${RETAIL_OFF[@]}"; do
+    systemctl cat "$unit" >/dev/null 2>&1 || continue
+    if [[ "$(systemctl is-enabled "$unit" 2>/dev/null || true)" != "masked" ]]; then
+        do_ systemctl disable --now "$unit" >/dev/null 2>&1 || true
+        do_ systemctl mask "$unit" >/dev/null 2>&1 || true
+    fi
+done
+log "Unused services off: ${RETAIL_OFF[*]}"
 
 # ── Checks ───────────────────────────────────────────────────────────────────
 ls /etc/sudoers.d/atlas-* >/dev/null 2>&1 && bad "sudo rules for Atlas still present: $(ls /etc/sudoers.d/atlas-*)"
@@ -94,6 +99,21 @@ if ss -ltnH 2>/dev/null | awk '{print $4}' | grep -Eq '(^|[^0-9])(0\.0\.0\.0|\*|
     bad "the app port 5000 is reachable from the network"
 fi
 [[ -s /etc/atlas/identity/device.json ]] || bad "no device identity"
+if (( ! CHECK_ONLY )); then
+    [[ "$(systemctl get-default)" == "multi-user.target" ]] || bad "still boots into the desktop"
+    for unit in "${RETAIL_OFF[@]}"; do
+        case "$(systemctl is-enabled "$unit" 2>/dev/null || true)" in
+            enabled|enabled-runtime) bad "$unit is still enabled" ;;
+        esac
+    done
+fi
+# mDNS settings come with the release (system/files.json "settings"):
+# every interface but docker0, IPv4 only, no host details.
+AVAHI_CONF=/etc/avahi/avahi-daemon.conf
+for want in use-ipv6=no publish-aaaa-on-ipv4=no publish-hinfo=no publish-workstation=no deny-interfaces=docker0; do
+    grep -qx "$want" "$AVAHI_CONF" 2>/dev/null || bad "mDNS: $want not set in $AVAHI_CONF (sudo /usr/local/lib/atlas/bin/atlas-engine reapply)"
+done
+! grep -Eq '^allow-interfaces=' "$AVAHI_CONF" 2>/dev/null || bad "mDNS is pinned to one interface (allow-interfaces) in $AVAHI_CONF"
 
 if (( FAIL )); then
     die "Not ready for retail — fix the items above."
