@@ -87,8 +87,12 @@ class RaySettingsTemplateTests(unittest.TestCase):
         # or the header keeps showing the old model after a switch.
         page = self.html[self.html.index("function AIPage()"):]
         page = page[:page.index("\nfunction ", 10)]
+        self.assertIn("onAtlasSocket(sock =>", page)
         self.assertIn("sock.on('ai_model'", page)
-        self.assertIn("if (aiReady && !switchRunning) return;", page)
+        self.assertIn("const busy = !aiReady || switchRunning;", page)
+        # The socket is created after the page mounts on a reload: App must
+        # announce it so late subscribers attach.
+        self.assertIn("window.dispatchEvent(new Event('atlas-socket'))", self.html)
 
     def test_no_global_inference_fields_remain(self):
         # Low-level values live per model, behind "Expert overrides".

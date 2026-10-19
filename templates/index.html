@@ -5532,6 +5532,22 @@ const SWITCH_STAGE_LABEL = {
 };
 function fmtMB(mb) { return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`; }
 
+// App creates the Socket.IO connection in its own effect, which React runs
+// after its children's: a page open from the start (a reload on ?page=ai)
+// mounts before window._atlasSocket exists, and a listener added then is
+// never attached. onAtlasSocket(attach) calls attach(socket) now, or as soon
+// as App announces the socket; attach may return a cleanup.
+function onAtlasSocket(attach) {
+  let detach = null;
+  const run = () => {
+    if (detach || !window._atlasSocket) return;
+    detach = attach(window._atlasSocket) || (() => {});
+  };
+  run();
+  window.addEventListener('atlas-socket', run);
+  return () => { window.removeEventListener('atlas-socket', run); if (detach) detach(); };
+}
+
 function RayModelPicker({ labelStyle, inputStyle, onChanged }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -5546,16 +5562,14 @@ function RayModelPicker({ labelStyle, inputStyle, onChanged }) {
   const active = data?.models?.find(m => m.active);
 
   useEffect(() => { load(); }, [load]);
-  useEffect(() => {
-    const sock = window._atlasSocket;
-    if (!sock) return;
+  useEffect(() => onAtlasSocket(sock => {
     const onJob = (j) => {
       setData(d => d ? { ...d, switch: j } : d);
       if (j.finished) { load(); onChanged && onChanged(); }
     };
     sock.on('ai_model', onJob);
     return () => sock.off('ai_model', onJob);
-  }, [load, onChanged]);
+  }), [load, onChanged]);
   // No socket (or a missed event): poll while a switch runs.
   useEffect(() => {
     if (!busy) return;
@@ -5826,21 +5840,24 @@ function AIPage() {
   // listener) when the user goes back to Chat, which used to leave the header
   // showing the old model for good.
   const switchRunning = !!(status?.switch && !status.switch.finished);
-  useEffect(() => {
-    const sock = window._atlasSocket;
-    if (!sock) return;
+  useEffect(() => onAtlasSocket(sock => {
     const onJob = (j) => {
       loadStatus().catch(() => {});
       if (j && j.finished) loadSettings().catch(() => {});
     };
     sock.on('ai_model', onJob);
     return () => sock.off('ai_model', onJob);
-  }, []);
+  }), []);
 
-  // Poll while Ray is starting or switching (no socket, or a missed event).
+  // Poll every 2 s while Ray is starting or switching; otherwise every 30 s
+  // while the page is visible, in case a socket event was missed (the mobile
+  // app's polling transport, a reconnect).
   useEffect(() => {
-    if (aiReady && !switchRunning) return;
-    const poll = setInterval(() => { loadStatus().catch(() => {}); }, 2000);
+    const busy = !aiReady || switchRunning;
+    const poll = setInterval(() => {
+      if (!busy && document.visibilityState === 'hidden') return;
+      loadStatus().catch(() => {});
+    }, busy ? 2000 : 30000);
     return () => clearInterval(poll);
   }, [aiReady, switchRunning]);
 
@@ -11563,6 +11580,7 @@ function App() {
       socketRef.current = socket;
       // Expose to MapPage so it can subscribe to position_update without a second connection.
       window._atlasSocket = socket;
+      window.dispatchEvent(new Event('atlas-socket'));
 
       socket.on('connect', () => {
         setSocketConnected(true);
