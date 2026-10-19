@@ -18,7 +18,6 @@ import sys
 import tempfile
 import time
 import unittest
-from unittest import mock
 
 from engine_sandbox import Sandbox
 
@@ -380,73 +379,76 @@ class InstallerSourceTests(unittest.TestCase):
         self.assertLess(names.index("97-retail.sh"), names.index("98-verify.sh"))   # check sees the locked unit
 
 
+HELPER_SERVER = r"""
+import json, os, socket, sys
+sock_path, reply, status_path, new_status = sys.argv[1:5]
+srv = socket.socket(socket.AF_UNIX)
+srv.bind(sock_path)
+srv.listen(1)
+print("ready", flush=True)
+conn, _ = srv.accept()
+conn.recv(4096)
+if new_status:
+    tmp = status_path + ".tmp"
+    open(tmp, "w").write(new_status)
+    os.replace(tmp, status_path)
+conn.sendall(reply.encode() + b"\n")
+conn.close()
+"""
+
+
 class HandoffTests(unittest.TestCase):
-    """tools/release/handoff.py, as install.sh and tools/dev/deploy use it."""
+    """tools/release/handoff.py as install.sh and tools/dev/deploy run it: its
+    own process, a fake atlas-helper on a UNIX socket, the engine's status file."""
 
     def setUp(self):
-        import importlib.util
-        import socket
-        import threading
         self.tmp = tempfile.mkdtemp(prefix="atlas-handoff-")
         self.addCleanup(shutil.rmtree, self.tmp, True)
-        spec = importlib.util.spec_from_file_location("handoff", os.path.join(REPO, "tools", "release", "handoff.py"))
-        self.h = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(self.h)
-        self.h.STATUS = os.path.join(self.tmp, "status.json")
-        self.h.HELPER = os.path.join(self.tmp, "helper.sock")
-        self.h.time = mock.Mock(monotonic=time.monotonic, sleep=lambda s: time.sleep(0.01))
+        self.status = os.path.join(self.tmp, "status.json")
+        self.sock = os.path.join(self.tmp, "helper.sock")
         self.release = os.path.join(self.tmp, "rel")
         for name in ("atlas-release.json", "atlas-release.json.sig", "atlas-1.tar.xz"):
             _write(os.path.join(self.release, name), name)
         self.state = os.path.join(self.tmp, "state")
-        os.makedirs(os.path.join(self.state, "updates", "ready"))
         _write(os.path.join(self.state, "updates", "ready", "stale"), "old")
-        self.reply = b'{"ok": true}\n'
-        self.on_apply = lambda: None
-        srv = socket.socket(socket.AF_UNIX)
-        srv.bind(self.h.HELPER)
-        srv.listen(1)
-        self.addCleanup(srv.close)
+        _write(self.status, json.dumps({"txid": "old", "engine_state": "IDLE", "stage": "success"}))
 
-        def serve():
-            try:
-                conn, _ = srv.accept()
-            except OSError:
-                return
-            conn.recv(4096)
-            self.on_apply()
-            conn.sendall(self.reply)
-            conn.close()
-        threading.Thread(target=serve, daemon=True).start()
-        self.status({"txid": "old", "engine_state": "IDLE", "stage": "success"})
-
-    def status(self, st):
-        _write(self.h.STATUS, json.dumps(st))
+    def handoff(self, reply='{"ok": true}', new_status=None, timeout=10):
+        server = subprocess.Popen([sys.executable, "-I", "-c", HELPER_SERVER, self.sock, reply, self.status,
+                                   json.dumps(new_status) if new_status else ""],
+                                  stdout=subprocess.PIPE, text=True)
+        self.addCleanup(server.kill)
+        self.assertEqual(server.stdout.readline().strip(), "ready")
+        env = dict(os.environ, ATLAS_UPDATE_STATUS=self.status, ATLAS_HELPER_SOCKET=self.sock)
+        start = time.monotonic()
+        r = subprocess.run([sys.executable, "-I", os.path.join(REPO, "tools", "release", "handoff.py"),
+                            self.release, "--state", self.state, "--timeout", str(timeout)],
+                           capture_output=True, text=True, env=env, timeout=60)
+        r.elapsed = time.monotonic() - start
+        return r
 
     def test_success_waits_for_this_updates_own_result(self):
-        self.on_apply = lambda: self.status({"txid": "new", "engine_state": "IDLE", "stage": "success"})
-        rc = self.h.main([self.release, "--state", self.state, "--timeout", "10"])
-        self.assertEqual(rc, 0)
+        r = self.handoff(new_status={"txid": "new", "engine_state": "IDLE", "stage": "success"})
+        self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(sorted(os.listdir(os.path.join(self.state, "updates", "ready"))),
                          ["atlas-1.tar.xz", "atlas-release.json", "atlas-release.json.sig"])
 
     def test_a_rollback_is_a_failure(self):
-        self.on_apply = lambda: self.status({"txid": "new", "engine_state": "IDLE", "stage": "rolled_back",
-                                             "message": "restored"})
-        self.assertEqual(self.h.main([self.release, "--state", self.state, "--timeout", "10"]), 1)
+        r = self.handoff(new_status={"txid": "new", "engine_state": "IDLE", "stage": "rolled_back",
+                                     "message": "restored"})
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("not installed (rolled_back): restored", r.stderr)
 
     def test_a_refusal_fails_at_once(self):
-        self.reply = b'{"ok": false, "error": "not allowed"}\n'
-        start = time.monotonic()
-        with self.assertRaises(SystemExit) as cm:
-            self.h.main([self.release, "--state", self.state, "--timeout", "600"])
-        self.assertIn("refused", str(cm.exception))
-        self.assertLess(time.monotonic() - start, 5)
+        r = self.handoff(reply='{"ok": false, "error": "not allowed"}', timeout=600)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("refused", r.stderr)
+        self.assertLess(r.elapsed, 10)
 
-    def test_timeout(self):
-        with self.assertRaises(SystemExit) as cm:
-            self.h.main([self.release, "--state", self.state, "--timeout", "1"])
-        self.assertIn("timed out", str(cm.exception))
+    def test_the_previous_result_does_not_count(self):
+        r = self.handoff(timeout=2)            # status still shows the old txid's success
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("timed out", r.stderr)
 
 
 class KitSysfileTests(unittest.TestCase):
