@@ -265,8 +265,42 @@ class UpdateManagerTests(unittest.TestCase):
         json.dump({"engine_state": "IDLE", "stage": "rolled_back"}, open(update_manager.ENGINE_STATUS, "w"))
         json.dump({"result": "rolled_back"}, open(update_manager.ENGINE_RESULT, "w"))
         self.um.reconcile_after_restart()
-        self.assertEqual(self.um.state["message"], update_manager.MSG_ROLLED_BACK)
         self.assertEqual(self.um.state["result"], "rolled_back")
+        msg = self.um.state["message"]
+        # Which version the owner still has, and what to do next.
+        self.assertIn("could not be completed, so Atlas went back to", msg)
+        self.assertIn("2.0.0", msg)
+        self.assertIn(update_manager.MSG_NEXT_STEP, msg)
+        self.assertIsNone(self.um.snapshot()["updated"])
+
+    def test_success_shows_the_installed_version_and_its_notes(self):
+        self.um.check()
+        notes = self.um.state["manifest"].get("notes", [])
+        self.um.state.update(state="installing")
+        json.dump({"engine_state": "IDLE", "stage": "success"}, open(update_manager.ENGINE_STATUS, "w"))
+        json.dump({"result": "success"}, open(update_manager.ENGINE_RESULT, "w"))
+        self.um.reconcile_after_restart()
+        snap = self.um.snapshot()
+        self.assertEqual(snap["state"], "up_to_date")
+        running = update_manager.atlas_version.version()
+        self.assertEqual(snap["message"], f"Updated to Atlas {running}.")
+        self.assertEqual(snap["updated"]["version"], running)
+        self.assertEqual(snap["updated"]["notes"], notes)
+        # Still shown after a check that finds nothing newer; restarts keep it.
+        self.um.state["result"] = "success"
+        self.assertEqual(self.make().snapshot()["updated"]["version"], running)
+
+    def test_failure_says_what_is_still_installed(self):
+        self.um.check()
+        self.um.state.update(state="installing")
+        json.dump({"engine_state": "IDLE", "stage": "failed"}, open(update_manager.ENGINE_STATUS, "w"))
+        json.dump({"result": "failed", "message": "Update could not be verified."},
+                  open(update_manager.ENGINE_RESULT, "w"))
+        self.um.reconcile_after_restart()
+        running = update_manager.atlas_version.version()
+        self.assertEqual(self.um.state["message"],
+                         f"Update could not be verified. Atlas {running} is still installed. "
+                         f"{update_manager.MSG_NEXT_STEP}")
 
     def test_https_is_required_outside_developer_mode(self):
         os.unlink(update_manager.DEV_MODE)

@@ -54,6 +54,9 @@ MSG_PAUSED = "Download paused — waiting for Internet connection."
 MSG_NOT_VERIFIED = "Update could not be verified."
 MSG_NO_SPACE = "There is not enough free storage for this update."
 MSG_ROLLED_BACK = "The update could not be completed. Atlas has restored the previous version."
+# Shown after the outcome: what is running now and what the owner can do.
+MSG_NEXT_STEP = ("Your maps, conversations and settings are unchanged. Try again later; "
+                 "if it happens again, free some storage first.")
 
 # Customer-facing names for every stage (the UI shows these as a checklist).
 STAGES = [
@@ -166,6 +169,9 @@ class UpdateManager:
             "can_cancel": state in ("checking", "downloading", "paused", "verifying", "ready"),
             "last_check": st.get("last_check"),
             "result": st.get("result"),
+            # The update just installed (version and notes), until another
+            # release is found or installed.
+            "updated": st.get("installed_update") if st.get("result") == "success" else None,
         }
         if state == "installing":
             engine = _read_json(ENGINE_STATUS, {}) or {}
@@ -274,7 +280,7 @@ class UpdateManager:
         self._write(MANIFEST, mbytes)
         self._write(SIGNATURE, sig)
         self._set(state="available", stage=None, manifest=manifest, bundle_url=bundle_url,
-                  release_dir=rel, last_check=self.clock(),
+                  release_dir=rel, last_check=self.clock(), result=None, installed_update=None,
                   message=f"Atlas {manifest['version']} is available.")
         return self.snapshot()
 
@@ -525,12 +531,17 @@ class UpdateManager:
             return                             # engine still working; keep relaying
         outcome = result.get("result")
         version = (self.state.get("manifest") or {}).get("version")
+        running = atlas_version.version()
         if outcome == "success":
-            self._finish("success", f"Atlas {atlas_version.version()} — Atlas is up to date.")
+            self._finish("success", f"Updated to Atlas {running}.")
         elif outcome == "rolled_back":
-            self._finish("rolled_back", MSG_ROLLED_BACK)
-        elif outcome in ("failed", "interrupted", "cancelled"):
-            self._finish(outcome, result.get("message") or "The update was not installed.")
+            self._finish("rolled_back", f"The update to Atlas {version or 'the new version'} could not be "
+                                        f"completed, so Atlas went back to {running}. {MSG_NEXT_STEP}")
+        elif outcome == "cancelled":
+            self._finish(outcome, f"The update was cancelled. Atlas {running} is still installed.")
+        elif outcome in ("failed", "interrupted"):
+            self._finish(outcome, f"{result.get('message') or 'The update was not installed.'} "
+                                  f"Atlas {running} is still installed. {MSG_NEXT_STEP}")
         else:
             self._finish("unknown", f"Atlas {version or ''} installation status is unknown.")
 
@@ -538,10 +549,13 @@ class UpdateManager:
         self.audit({"success": "update_installed", "rolled_back": "update_rolled_back"}.get(result, "update_failed"),
                    version=str((self.state.get("manifest") or {}).get("version", "")), result=str(result))
         keep_manifest = result != "success"
+        manifest = self.state.get("manifest") or {}
+        installed = {"version": atlas_version.version(), "notes": manifest.get("notes", []),
+                     "at": self.clock()} if result == "success" else None
         self._set(state="up_to_date" if result == "success" else ("available" if keep_manifest and
                                                                     self.state.get("manifest") else "idle"),
                   stage="complete" if result == "success" else None,
-                  result=result, message=message, downloaded_bytes=0,
+                  result=result, message=message, downloaded_bytes=0, installed_update=installed,
                   manifest=None if result == "success" else self.state.get("manifest"))
         if result == "success":
             shutil.rmtree(self.dir, ignore_errors=True)

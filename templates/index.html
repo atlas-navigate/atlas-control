@@ -6746,6 +6746,12 @@ function SystemPage() {
                   <Bar pct={stats.nvme_pct}/>
                 </div>
               )}
+              {stats.low_storage && (
+                <div style={{fontSize:12,color:'var(--accent-amber)'}}>
+                  Storage is almost full ({stats.data_free_gb} GB free). Atlas needs free space to install
+                  updates and keep its backups.
+                </div>
+              )}
               {(stats.disk_read_mbps != null || stats.disk_write_mbps != null) && (
                 <div className="settings-grid-2" style={{marginTop:2}}>
                   <div style={{background:'var(--bg-input)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:'8px 10px'}}>
@@ -7396,7 +7402,7 @@ function SoftwareUpdateSection() {
   else if (state === 'ready') title = `Atlas ${u.version} is ready to install`;
   else if (state === 'installing') title = u.stage_label || 'Installing update…';
   else if (state === 'available') title = `Atlas ${u.version} is available`;
-  else if (state === 'up_to_date') title = 'Atlas is up to date';
+  else if (state === 'up_to_date') title = u.updated ? `Updated to Atlas ${u.updated.version}` : 'Atlas is up to date';
   else if (state === 'checking') title = 'Checking for updates…';
 
   return (
@@ -7421,6 +7427,15 @@ function SoftwareUpdateSection() {
       {title && (
         <div style={{fontSize:14,fontWeight:600,marginBottom:8,color: state === 'up_to_date' ? 'var(--accent-green)' : 'var(--text-primary)'}}>
           {state === 'up_to_date' ? '✓ ' : ''}{title}
+        </div>
+      )}
+
+      {state === 'up_to_date' && (u.updated?.notes || []).length > 0 && (
+        <div style={{marginBottom:8}}>
+          <div style={{fontSize:12,fontWeight:600,color:'var(--text-secondary)',marginBottom:4}}>What's new</div>
+          <ul style={{margin:'0 0 4px 18px',padding:0}}>
+            {u.updated.notes.map((n, i) => <li key={i} style={{fontSize:13,color:'var(--text-secondary)'}}>{n}</li>)}
+          </ul>
         </div>
       )}
 

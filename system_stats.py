@@ -17,6 +17,8 @@ _lock = threading.Lock()
 CACHE_TTL = 5  # seconds
 
 _disk_io_prev = {"data": None, "ts": 0.0}
+LOW_STORAGE_FREE_GB = 5
+LOW_STORAGE_PCT = 95
 _smart_cache = {"data": {}, "ts": 0.0}
 SMART_TTL = 600  # seconds — drive health changes slowly; each read wakes the root helper
 
@@ -270,13 +272,20 @@ def get_stats():
         tegra['disk_pct'] = round(disk.percent, 1)
 
         # NVMe data drive at /atlas_data
+        data_disk = disk
         try:
             nvme_disk = psutil.disk_usage('/atlas_data')
             tegra['nvme_used_gb'] = round(nvme_disk.used / (1024**3), 1)
             tegra['nvme_total_gb'] = round(nvme_disk.total / (1024**3), 1)
             tegra['nvme_pct'] = round(nvme_disk.percent, 1)
+            data_disk = nvme_disk
         except Exception:
             pass
+        # Updates (download + unpack), database backups and logs stop fitting
+        # well before the drive is full.
+        tegra['data_free_gb'] = round(data_disk.free / (1024**3), 1)
+        tegra['low_storage'] = (data_disk.free / (1024**3) < LOW_STORAGE_FREE_GB
+                                or data_disk.percent > LOW_STORAGE_PCT)
 
         # Extended NVMe: I/O speeds, SMART health, temperature
         tegra.update(_get_disk_extended())
