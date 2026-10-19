@@ -186,7 +186,7 @@ ATLAS_DATA="/atlas_data"
 # mount. (Earlier builds put the OS on a microSD card and Atlas data on a
 # SEPARATE NVMe mounted at /atlas_data; those installs keep working unchanged
 # because we honor an existing mount and never reformat anything.)
-RECOMMENDED_FREE_GB=350
+RECOMMENDED_FREE_GB=250
 
 if mountpoint -q "$ATLAS_DATA" 2>/dev/null; then
     ATLAS_DEV=$(findmnt -n -o SOURCE "$ATLAS_DATA")
@@ -196,9 +196,10 @@ else
     log "Using $ATLAS_DATA on the root filesystem ($(findmnt -n -o SOURCE / 2>/dev/null || echo '/'))"
 fi
 
-# Free-space advisory only (never blocks): the full dataset — basemap + all-state
-# OSRM + topo/DBs + scratch — is large, but a partial state selection needs far
-# less, so we warn rather than refuse.
+# Free-space advisory only (never blocks): the full dataset — US basemap + all-state
+# OSRM + topo/DBs, ~150 GB once built — plus the 32 GB swapfile and build scratch
+# is large, but a partial state selection needs far less, so we warn rather
+# than refuse.
 FREE_GB=$(df -BG --output=avail "$ATLAS_DATA" 2>/dev/null | tail -1 | tr -dc '0-9')
 if [[ -n "$FREE_GB" && "$FREE_GB" -lt "$RECOMMENDED_FREE_GB" ]]; then
     warn "Only ${FREE_GB} GB free on $ATLAS_DATA (~${RECOMMENDED_FREE_GB} GB recommended for the full basemap + all 50 states)."
@@ -939,7 +940,7 @@ _process_state() {
 
 echo ""
 echo -e "  Atlas Control supports offline routing for all 50 US states."
-echo -e "  Processing all states takes ${YLW}many hours${NC} and ~220 GB of storage."
+echo -e "  Processing all states takes ${YLW}many hours${NC} and ~110 GB of storage."
 echo ""
 echo -e "  Options:"
 echo -e "    ${BLD}all${NC}    — All 50 states + DC (full national coverage)"
@@ -1009,7 +1010,7 @@ fi
 # Build static/data/places.db from the state .osm.pbf extracts just downloaded,
 # so users can type a store / street address / POI name and route to it
 # (Google-Maps-style). build_places_index.py reads osrm-data/*.osm.pbf — the same
-# files OSRM routes on; _process_state keeps the originals. build_places_safe.sh
+# files OSRM routes on; _process_state keeps them for this. build_places_safe.sh
 # makes the heavy build safe on 8 GB: it adds swap, pauses Ray (ollama), and
 # memory-caps the build so it can't freeze the box. Idempotent + non-fatal, so a
 # long or interrupted build never aborts the install.
@@ -1027,6 +1028,12 @@ else
     else
         warn "Places index build did not finish — resume later: sudo bash $APP_DIR/build_places_safe.sh --resume"
     fi
+fi
+# Only the builders above (OSRM, trails, places) read the state extracts
+# (~11 GB); nothing at runtime does. Kept while the places build still needs
+# them for --resume; a state added later downloads its extract again.
+if [[ -s "$PLACES_DB" ]]; then
+    rm -f "$OSRM_DIR"/*.osm.pbf
 fi
 
 

@@ -12,7 +12,7 @@
 # ║                          SSH) — never for units that are sold            ║
 # ║                                                                          ║
 # ║  What it does:                                                           ║
-# ║    1. Copy payload/ -> /atlas_data   (~324 GB, no downloads)             ║
+# ║    1. Copy payload/ -> /atlas_data   (~150 GB, no downloads)             ║
 # ║    2. Install the staged ollama + OSRM binaries                          ║
 # ║    3. Run the kit's install.sh with the staged signed release: system    ║
 # ║       setup, the Atlas software through its update engine, this unit's   ║
@@ -24,7 +24,7 @@ BACKUP_LABEL="atlas-backup"
 BACKUP_UUID="9b6fe19b-34c1-434f-8e6e-c87cb1f370c4"
 BACKUP_MNT="/mnt/atlas-backup"
 ATLAS_DATA="/atlas_data"
-NEED_GB=380          # payload (~324) + 32 GB swapfile it will create + headroom
+NEED_GB=200          # payload (~150) + 32 GB swapfile it will create + headroom
 
 ASSUME_YES=0; RUN_INSTALL=1; DEV_KEY=""
 while [[ $# -gt 0 ]]; do
@@ -114,14 +114,14 @@ fi
 if (( ! ASSUME_YES )); then
     echo
     echo -e "${BLD}About to provision this device:${NC}"
-    echo "  payload  $PAYLOAD  ->  $ATLAS_DATA   (~324 GB, 45-60 min)"
+    echo "  payload  $PAYLOAD  ->  $ATLAS_DATA   (~150 GB, 20-30 min)"
     (( RUN_INSTALL )) && echo "  then install Atlas $(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$STAGE/release/atlas-release.json") and give this unit its identity"
     read -rp "Proceed? [y/N] " ans
     [[ "$ans" =~ ^[Yy]$ ]] || die "Aborted by user."
 fi
 
 # ════════════════════════════════════════════════════════════════════════════
-section "Copying payload  (~324 GB — expect 45-60 min)"
+section "Copying payload  (~150 GB — expect 20-30 min)"
 # ════════════════════════════════════════════════════════════════════════════
 mkdir -p "$ATLAS_DATA"
 # No --delete: this is an additive seed onto a fresh box, and we must never

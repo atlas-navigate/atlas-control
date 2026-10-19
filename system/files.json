@@ -145,6 +145,12 @@
       "mode": "0644",
       "kind": "avahi",
       "template": true
+    },
+    {
+      "src": "journald/atlas-size.conf",
+      "dst": "/etc/systemd/journald.conf.d/atlas-size.conf",
+      "mode": "0644",
+      "kind": "journald"
     }
   ],
   "symlinks": [

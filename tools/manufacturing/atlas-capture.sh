@@ -7,7 +7,7 @@
 # ║                  the bundle), checked against this unit's trusted keys   ║
 # ║                                                                          ║
 # ║  Produces on the backup drive:                                           ║
-# ║    payload/            ~324 GB of /atlas_data, device secrets stripped   ║
+# ║    payload/            ~150 GB of /atlas_data, device secrets stripped   ║
 # ║    payload/osrm-native-bin/   OSRM binaries (install.sh prebuilt hatch)  ║
 # ║    stage/ollama        the ollama binary (lives outside /atlas_data)     ║
 # ║    stage/ollama-lib/   its GPU runners (/usr/local/lib/ollama)           ║
@@ -24,7 +24,7 @@ BACKUP_UUID="9b6fe19b-34c1-434f-8e6e-c87cb1f370c4"
 BACKUP_MNT="/mnt/atlas-backup"   # fallback only; an existing mount wins
 ATLAS_DATA="/atlas_data"
 APP_DIR="$ATLAS_DATA/atlas-control"
-MIN_FREE_GB=400
+MIN_FREE_GB=200
 # PAYLOAD and STAGE are derived after the mountpoint is resolved below.
 
 RED=$'\033[0;31m'; GRN=$'\033[0;32m'; YLW=$'\033[0;33m'; BLU=$'\033[0;34m'; BLD=$'\033[1m'; NC=$'\033[0m'
@@ -128,7 +128,7 @@ done
 sync
 
 # ════════════════════════════════════════════════════════════════════════════
-section "Copying payload  (~324 GB — expect 45-60 min on the USB HDD)"
+section "Copying payload  (~150 GB — expect 20-30 min on the USB HDD)"
 # ════════════════════════════════════════════════════════════════════════════
 # Exclusions serve two purposes:
 #   1. bulk we never want    — the 33 GB swapfile, caches, logs, source trees

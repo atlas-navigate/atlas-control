@@ -32,6 +32,19 @@ class ReleaseContentsTests(unittest.TestCase):
         for entry in spec["files"]:
             self.assertIn(f"system/{entry['src']}", self.tracked, entry["src"])
 
+    def test_every_system_file_kind_is_applied(self):
+        # A kind the engine has no reload for would be written but never take
+        # effect until the next boot.
+        import sys
+        system = os.path.join(REPO, "system")
+        if system not in sys.path:
+            sys.path.insert(0, system)
+        from atlas_engine import sysfiles
+        spec = json.load(open(os.path.join(REPO, "system", "files.json")))
+        for entry in spec["files"]:
+            kind = entry.get("kind", "plain")
+            self.assertTrue(kind == "plain" or kind in sysfiles.KINDS_RELOAD, f"{entry['src']}: {kind}")
+
     def test_every_engine_module_is_tracked(self):
         engine = os.path.join(REPO, "system", "atlas_engine")
         for name in os.listdir(engine):

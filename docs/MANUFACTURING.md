@@ -23,7 +23,7 @@ Capture refuses a release this unit's update engine does not trust
 
 | Path | Contents |
 |---|---|
-| `payload/` | `/atlas_data`: maps, routing graphs, datasets, Ray's models (~330 GB) |
+| `payload/` | `/atlas_data`: maps, routing graphs, datasets, Ray's models (~150 GB) |
 | `payload/osrm-native-bin/` | prebuilt OSRM binaries |
 | `stage/ollama` | the Ollama binary |
 | `stage/ollama-lib/` | its GPU runners (`/usr/local/lib/ollama`, ~2 GB) — without them Ray runs on the CPU |

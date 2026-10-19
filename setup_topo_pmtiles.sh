@@ -199,13 +199,13 @@ tile_type = int(sys.argv[2])
 tile_label = sys.argv[3]
 with open(path, 'r+b') as f:
     hdr = bytearray(f.read(127))
-    # PMTiles v3 header byte offsets:
-    #   88: clustered   89: internal_compression   90: tile_compression
-    #   91: tile_type   92: min_zoom   93: max_zoom
-    hdr[91] = tile_type
-    hdr[90] = 1   # tile_compression = none (PNGs/JPEGs are already compressed)
+    # PMTiles v3 header byte offsets (88–95 is the tile contents count):
+    #   96: clustered   97: internal_compression   98: tile_compression
+    #   99: tile_type   100: min_zoom   101: max_zoom
+    hdr[99] = tile_type
+    hdr[98] = 1   # tile_compression = none (PNGs/JPEGs are already compressed)
     # Derive zoom range from existing tiles; only update if header values look wrong
-    if hdr[92] == 0 and hdr[93] == 0:
+    if hdr[100] == 0 and hdr[101] == 0:
         import os, re
         tile_dir = os.path.join(os.path.dirname(path), 'topo')
         zooms = set()
@@ -214,8 +214,8 @@ with open(path, 'r+b') as f:
                 if entry.is_dir() and entry.name.isdigit():
                     zooms.add(int(entry.name))
         if zooms:
-            hdr[92] = min(zooms)
-            hdr[93] = max(zooms)
+            hdr[100] = min(zooms)
+            hdr[101] = max(zooms)
             print(f"  zoom range patched: {min(zooms)}–{max(zooms)}")
     f.seek(0)
     f.write(bytes(hdr))

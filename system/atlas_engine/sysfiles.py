@@ -30,6 +30,9 @@ KINDS_RELOAD = {
     # systemd and restart Ollama so its runners pick the settings up. Runs
     # before the app restarts, which then loads Ray's models again.
     "ollama": [["systemctl", "daemon-reload"], ["systemctl", "try-restart", "ollama.service"]],
+    # journald only reads its config at start; a restart keeps services' log
+    # streams (systemd holds them for it) and applies the size cap at once.
+    "journald": [["systemctl", "restart", "systemd-journald"]],
 }
 
 
