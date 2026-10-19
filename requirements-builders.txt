@@ -1,0 +1,4 @@
+# The dataset builders install.sh runs (download_topo.py; the others need only
+# the standard library). Atlas itself runs from its release's own environment,
+# built offline from the release's signed wheels (requirements.lock).
+Pillow>=10

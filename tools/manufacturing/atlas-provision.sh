@@ -171,7 +171,9 @@ section "Running install.sh  (configuration only — no map downloads)"
     info "Watch for 'already present — skipping' on the basemap and NO per-state"
     info "OSRM processing. If it starts downloading map data, stop and diagnose."
     echo
-    bash "$STAGE/kit/install.sh" --bundle "$STAGE/release" --labels "$LABELS" ${DEV_KEY:+--dev-key "$DEV_KEY"}
+    # Unattended: never a prompt, and only the routing states the payload brought.
+    bash "$STAGE/kit/install.sh" --bundle "$STAGE/release" --labels "$LABELS" --yes --states keep \
+        ${DEV_KEY:+--dev-key "$DEV_KEY"}
     log "install.sh finished"
     # Keep a copy of the label on the drive for printing and support, if the
     # drive is writable (a desktop auto-mount is; our own mount is read-only).
@@ -182,7 +184,7 @@ section "Running install.sh  (configuration only — no map downloads)"
     fi
 else
     info "Skipping install.sh (--no-install). Run it yourself with:"
-    echo "    sudo bash $STAGE/kit/install.sh --bundle $STAGE/release --labels $LABELS"
+    echo "    sudo bash $STAGE/kit/install.sh --bundle $STAGE/release --labels $LABELS --yes --states keep"
 fi
 
 # ════════════════════════════════════════════════════════════════════════════

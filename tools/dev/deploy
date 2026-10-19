@@ -33,45 +33,6 @@ as_owner "$PY" "$REPO/tools/release/build_release.py" --version "$VERSION" --ref
       --out "$OUT" --python "$PY" --url-base https://localhost/dev
 as_owner "$PY" "$REPO/tools/release/sign_release.py" "$OUT/$VERSION/atlas-release.json" --key "$KEY" --yes
 
-READY="$STATE/updates/ready"
-rm -f "$READY"/* 2>/dev/null || true
-if [[ $EUID -eq 0 ]]; then
-    install -o atlas -g atlas -m 0640 "$OUT/$VERSION"/* "$READY/"
-else
-    cp "$OUT/$VERSION"/* "$READY/"
-    chmod g+r "$READY"/*
-fi
-
-/usr/bin/python3 -I - <<'PY'
-import json, socket, sys, time
-def status():
-    try:
-        return json.load(open("/run/atlas-update/status.json"))
-    except Exception:
-        return {}
-# The status file still shows the previous update's result until the engine
-# picks this one up: only a result with a new transaction id counts.
-before = status().get("txid")
-s = socket.socket(socket.AF_UNIX)
-s.connect("/run/atlas/helper.sock")
-s.sendall(b'{"verb": "update.apply", "args": {}}\n')
-reply = s.recv(4096).decode().strip()
-print("apply:", reply)
-try:
-    if not json.loads(reply).get("ok"):
-        sys.exit("the helper refused the request (on a retail unit, or not a developer unit): " + reply)
-except ValueError:
-    sys.exit("no answer from atlas-helper: " + reply)
-last = None
-for _ in range(900):
-    st = status()
-    line = f"{st.get('engine_state')} {st.get('stage')} {st.get('message') or ''}"
-    if line != last:
-        print("  ", line)
-        last = line
-    if st.get("txid") != before and st.get("engine_state") == "IDLE" and \
-            st.get("stage") in ("success", "rolled_back", "failed", "cancelled", "interrupted"):
-        sys.exit(0 if st["stage"] == "success" else 1)
-    time.sleep(1)
-sys.exit("timed out waiting for the update engine")
-PY
+# Hand it to the engine and wait for this update's own result (fails at once
+# if atlas-helper refuses, e.g. on a retail unit).
+/usr/bin/python3 -I "$REPO/tools/release/handoff.py" "$OUT/$VERSION" --state "$STATE" --timeout 900
