@@ -37,6 +37,7 @@ class FakeRunner:
     def __init__(self):
         self.calls = []
         self.fail = {}          # first word or "nginx -t" -> returncode
+        self.outputs = {}       # first word, first two, or the whole command -> stdout
         self.on_restart = None  # callback when atlas-control restarts
 
     def run(self, cmd, timeout=120, input=None, check=False, env=None):
@@ -57,7 +58,8 @@ class FakeRunner:
             return FakeResult(r.returncode, r.stdout, r.stderr)
         if check and rc:
             raise RuntimeError(f"{cmd[0]} failed")
-        return FakeResult(rc)
+        out = self.outputs.get(" ".join(cmd), self.outputs.get(key, self.outputs.get(cmd[0], "")))
+        return FakeResult(rc, out(cmd) if callable(out) else out)
 
     def ran(self, *prefix):
         return any(c[:len(prefix)] == list(prefix) for c in self.calls)

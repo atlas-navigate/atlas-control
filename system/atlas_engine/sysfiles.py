@@ -7,11 +7,17 @@ system/files.json in a release lists the files:
     {"files": [{"src": "systemd/atlas-control.service",
                 "dst": "/etc/systemd/system/atlas-control.service",
                 "mode": "0644", "kind": "systemd", "template": false}, …],
+     "settings": [{"file": "/etc/avahi/avahi-daemon.conf", "kind": "avahi-daemon",
+                   "values": {"server": {"use-ipv6": "no", "allow-interfaces": null}}}],
      "symlinks": [{"link": "/etc/nginx/sites-enabled/atlas",
                    "target": "/etc/nginx/sites-available/atlas"}],
-     "enable": ["atlas-helper.socket", …]}
+     "enable": ["atlas-helper.socket", …],
+     "power_mode": "MAXN_SUPER"}
 
-Templates substitute @NAME@ placeholders from template_vars().
+Templates substitute @NAME@ placeholders from template_vars(). "settings"
+edit single keys of a configuration file the distribution owns (a value of
+null comments the key out); the rest of that file is left as it is. The
+power mode is applied by the engine (perf.ensure_power_mode), not here.
 """
 import json
 import os
@@ -33,6 +39,12 @@ KINDS_RELOAD = {
     # journald only reads its config at start; a restart keeps services' log
     # streams (systemd holds them for it) and applies the size cap at once.
     "journald": [["systemctl", "restart", "systemd-journald"]],
+    # Kernel settings: applied at once, and by systemd-sysctl at every boot.
+    "sysctl": [["sysctl", "-q", "--system"]],
+    # avahi-daemon.conf itself (not a service file): only a restart reads it.
+    "avahi-daemon": [["systemctl", "try-restart", "avahi-daemon"]],
+    # A drop-in for nginx's own unit (its sandbox): a restart applies it.
+    "nginx-unit": [["systemctl", "daemon-reload"], ["systemctl", "try-restart", "nginx"]],
 }
 
 
@@ -53,7 +65,27 @@ def template_vars():
         "ATLAS_TLS_KEY": "/etc/atlas/identity/tls/key.pem",
         "ATLAS_PROXY_SECRET_CONF": "/etc/atlas/identity/nginx-proxy-secret.conf",
         "ATLAS_CURRENT": "/opt/atlas/current",
+        "OLLAMA_HOME": _ollama_home(),
     }
+
+
+def _ollama_home():
+    """Home directory of the account the Ollama base unit runs as."""
+    import pwd
+    import re
+    user = "ollama"
+    for unit in ("/etc/systemd/system/ollama.service", "/usr/lib/systemd/system/ollama.service"):
+        try:
+            m = re.search(r"^User=(\S+)", open(paths.p(unit), encoding="utf-8").read(), re.M)
+        except OSError:
+            continue
+        if m:
+            user = m.group(1)
+            break
+    try:
+        return pwd.getpwnam(user).pw_dir
+    except KeyError:
+        return "/usr/share/ollama"
 
 
 def _xml_safe(value):
@@ -133,6 +165,23 @@ def install(release_dir, backup_dir, runner):
         fsutil.atomic_write_json(record_path, record, mode=0o600)
         os.unlink(dst)
         changed.add("avahi" if "/avahi/" in dst else "nginx" if "/nginx/" in dst else "plain")
+    for i, setting in enumerate(spec.get("settings", [])):
+        dst = paths.p(setting["file"])
+        if not os.path.isfile(dst):
+            continue                      # the package is not installed: nothing to configure
+        with open(dst, encoding="utf-8") as f:
+            old = f.read()
+        new = edit_ini(old, setting["values"])
+        if new == old:
+            continue
+        if dst not in done:
+            saved = os.path.join(backup_dir, f"setting-{i}")
+            shutil.copy2(dst, saved, follow_symlinks=False)
+            record["files"].append({"dst": dst, "existed": True, "saved": saved,
+                                    "mode": os.lstat(dst).st_mode & 0o7777, "kind": setting.get("kind")})
+            fsutil.atomic_write_json(record_path, record, mode=0o600)
+        fsutil.atomic_write_bytes(dst, new.encode("utf-8"), mode=os.lstat(dst).st_mode & 0o7777)
+        changed.add(setting.get("kind") or "plain")
     for link in spec.get("symlinks", []):
         dst = paths.p(link["link"])
         target = link["target"]
@@ -149,6 +198,43 @@ def install(release_dir, backup_dir, runner):
         restore(backup_dir)
         raise
     return sorted(changed)
+
+
+def edit_ini(text, values):
+    """Set keys in an INI-style file: {"section": {"key": "value" | None}}.
+
+    A key keeps its place: the first line for it in its section, active or
+    commented out, becomes `key=value` (None: `#key=`), and any further
+    active lines for it are commented out. A missing key goes right after its
+    section header, a missing section at the end. Everything else (comments,
+    other keys, order) is left untouched, so the edit is idempotent."""
+    lines = text.splitlines()
+    for section, keys in values.items():
+        start = next((i for i, ln in enumerate(lines) if ln.strip() == f"[{section}]"), None)
+        if start is None:
+            if lines and lines[-1].strip():
+                lines.append("")
+            lines.append(f"[{section}]")
+            start = len(lines) - 1
+        for key, value in keys.items():
+            want = f"#{key}=" if value is None else f"{key}={value}"
+            end = next((i for i in range(start + 1, len(lines)) if lines[i].lstrip().startswith("[")),
+                       len(lines))
+            hits = [i for i in range(start + 1, end)
+                    if lines[i].lstrip("#; \t").split("=", 1)[0].strip() == key and "=" in lines[i]]
+            active = [i for i in hits if not lines[i].lstrip().startswith(("#", ";"))]
+            first = (active or hits or [None])[0]
+            if first is None:
+                lines.insert(start + 1, want)
+                continue
+            if value is None and not active:
+                continue                  # already commented out, whatever it says
+            lines[first] = want
+            for i in active:
+                if i != first:
+                    lines[i] = "#" + lines[i].lstrip()
+    out = "\n".join(lines)
+    return out + "\n" if text.endswith("\n") or not text else out
 
 
 def validate(spec, changed, runner):
@@ -179,6 +265,10 @@ def validate(spec, changed, runner):
             r = runner.run(["udevadm", "verify", dst], timeout=60)
             if r.returncode != 0:
                 raise SystemFilesError("udev rules invalid: " + (r.stderr or r.stdout).strip()[-400:])
+        elif kind == "nginx-unit":
+            r = runner.run(["systemd-analyze", "verify", "--man=no", "nginx.service"], timeout=60)
+            if r.returncode != 0:
+                raise SystemFilesError("nginx sandbox invalid: " + (r.stderr or r.stdout).strip()[-400:])
         elif kind == "ollama":
             if os.path.exists(paths.p("/etc/systemd/system/ollama.service")) or \
                     os.path.exists(paths.p("/usr/lib/systemd/system/ollama.service")):
@@ -190,6 +280,21 @@ def validate(spec, changed, runner):
                 ET.parse(dst)
             except ET.ParseError as exc:
                 raise SystemFilesError(f"avahi service file invalid: {exc}")
+        elif kind == "sysctl":
+            with open(dst, encoding="utf-8") as f:
+                for n, line in enumerate(f, 1):
+                    line = line.strip()
+                    if line and not line.startswith(("#", ";")) and "=" not in line:
+                        raise SystemFilesError(f"{os.path.basename(dst)}:{n}: not key = value")
+    for setting in spec.get("settings", []):
+        if (setting.get("kind") or "plain") not in changed:
+            continue
+        import configparser
+        try:
+            configparser.ConfigParser(strict=False, interpolation=None).read_string(
+                open(paths.p(setting["file"]), encoding="utf-8").read())
+        except configparser.Error as exc:
+            raise SystemFilesError(f"{setting['file']} invalid after edit: {exc}")
 
 
 def restore(backup_dir):

@@ -3,6 +3,11 @@ Move an existing (pre-release) Atlas onto the hardened layout — or back.
 
     sudo tools/migrate/atlas-migrate apply  --bundle DIR [--dev-key PUB] [--rotate-hotspot] [--provision]
     sudo tools/migrate/atlas-migrate rollback
+         tools/migrate/atlas-migrate check  --bundle DIR [--dev-key PUB]
+
+check changes nothing: this platform can run the release, and the bundle is
+signed by a trusted key and matches its manifest. install.sh runs it first,
+before hours of dataset work.
 
 --provision is for a new unit on the production line (install.sh runs it):
 a brand-new identity — its own hostname, hotspot name and password, setup
@@ -110,15 +115,46 @@ def as_user(user, cmd):
 
 
 # ── steps ────────────────────────────────────────────────────────────────
-def step_preflight(state, args):
+def check_platform():
     import platform
     import tarfile
-    if os.geteuid() != 0:
-        raise SystemExit("run with sudo")
     if platform.machine() != "aarch64":
         raise SystemExit("not an aarch64 Atlas")
     if sys.version_info[:2] != (3, 12) or not hasattr(tarfile, "data_filter"):
-        raise SystemExit("needs the system Python 3.12")
+        raise SystemExit("needs the system Python 3.12 (Ubuntu 24.04 / JetPack 7)")
+
+
+def verify_bundle(bundle_dir, dev_key=None):
+    """The release in bundle_dir, signed by a key this kit trusts (plus the
+    developer key) and matching its manifest. Returns (manifest, key id, bundle path)."""
+    keys = verify.load_keyring(os.path.join(REPO, "system", "keys", "keyring.json"))
+    if dev_key:
+        import base64
+        raw = base64.b64decode(open(dev_key).read().strip())
+        keys[verify.key_id(raw)] = raw
+    mbytes = open(os.path.join(bundle_dir, engine.MANIFEST_NAME), "rb").read()
+    sig = open(os.path.join(bundle_dir, engine.SIG_NAME), "rb").read()
+    manifest, kid = verify.verify_manifest(mbytes, sig, keys, arch="aarch64")
+    bundle_path = os.path.join(bundle_dir, manifest["bundle"]["name"])
+    if verify.verify_bundle_file(bundle_path, manifest["bundle"]) is not None:
+        raise SystemExit("release bundle does not match its signed manifest")
+    return manifest, kid, bundle_path
+
+
+def check(args):
+    check_platform()
+    try:
+        manifest, kid, _ = verify_bundle(args.bundle, args.dev_key)
+    except verify.VerifyError as exc:
+        raise SystemExit(f"release not trusted: {exc}")
+    say(f"release {manifest['version']} (seq {manifest['seq']}) signed by {kid}: OK; platform OK")
+    return 0
+
+
+def step_preflight(state, args):
+    if os.geteuid() != 0:
+        raise SystemExit("run with sudo")
+    check_platform()
     st = os.statvfs(P("/opt") if os.path.exists(P("/opt")) else P("/"))
     if st.f_bavail * st.f_frsize < 3 * 1024 ** 3:
         raise SystemExit("need at least 3 GB free")
@@ -131,17 +167,7 @@ def step_preflight(state, args):
                 ".execute('PRAGMA quick_check').fetchone()[0])", db]))
         if r.stdout.strip() != "ok":
             raise SystemExit(f"database integrity check failed: {r.stdout.strip()}")
-    keys = verify.load_keyring(os.path.join(REPO, "system", "keys", "keyring.json"))
-    if args.dev_key:
-        import base64
-        raw = base64.b64decode(open(args.dev_key).read().strip())
-        keys[verify.key_id(raw)] = raw
-    mbytes = open(os.path.join(args.bundle, engine.MANIFEST_NAME), "rb").read()
-    sig = open(os.path.join(args.bundle, engine.SIG_NAME), "rb").read()
-    manifest, kid = verify.verify_manifest(mbytes, sig, keys, arch="aarch64")
-    bundle_path = os.path.join(args.bundle, manifest["bundle"]["name"])
-    if verify.verify_bundle_file(bundle_path, manifest["bundle"]) is not None:
-        raise SystemExit("release bundle does not match its signed manifest")
+    manifest, kid, bundle_path = verify_bundle(args.bundle, args.dev_key)
     say(f"release {manifest['version']} (seq {manifest['seq']}) signed by {kid}: OK")
     preflight_firewall(bundle_path)
     mark(state, "preflight", manifest=manifest, bundle=bundle_path, legacy_owner=legacy_owner())
@@ -379,6 +405,7 @@ def step_cutover(state, args):
     RUNNER.run(["systemctl", "daemon-reload"])
     spec = sysfiles.load_spec(target)
     sysfiles.reload_changed(changed, spec, RUNNER)
+    engine.apply_power_mode(spec, RUNNER, say)
     RUNNER.run(["systemctl", "enable", "--now", "atlas-helper.socket"])
     RUNNER.run(["systemctl", "start", "atlas-firewall.service"], timeout=60)   # enabled above; on now, not at next boot
     RUNNER.run(["systemctl", "start", "atlas-control.service"])
@@ -491,7 +518,12 @@ def main():
                    help="new unit on the production line: fresh identity, nothing per-device kept")
     r = sub.add_parser("rollback")
     r.add_argument("--purge", action="store_true")
+    c = sub.add_parser("check", help="platform and release signature only; changes nothing")
+    c.add_argument("--bundle", required=True)
+    c.add_argument("--dev-key")
     args = ap.parse_args()
+    if args.cmd == "check":
+        return check(args)
     if os.geteuid() != 0:
         raise SystemExit("run with sudo")
     return apply(args) if args.cmd == "apply" else rollback(args)

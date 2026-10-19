@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.join(REPO, "tools", "migrate"))
 LEGACY_UNIT = "[Service]\nUser=admin\nExecStart=/atlas_data/atlas-control/venv/bin/python3 app.py --host 0.0.0.0\n"
 LEGACY_SITE = "# legacy nginx site\n"
 
-PwEntry = collections.namedtuple("PwEntry", "pw_name pw_uid pw_gid")
+PwEntry = collections.namedtuple("PwEntry", "pw_name pw_uid pw_gid pw_dir", defaults=("/nonexistent",))
 GrEntry = collections.namedtuple("GrEntry", "gr_name gr_gid")
 
 

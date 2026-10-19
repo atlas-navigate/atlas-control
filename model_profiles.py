@@ -277,6 +277,11 @@ def min_ollama():
     return max((m.get("min_ollama", "0") for m in models()), key=version_tuple)
 
 
+def tested_ollama():
+    """The Ollama version Ray's figures were measured on (what install.sh installs)."""
+    return (catalog().get("ollama") or {}).get("tested") or min_ollama()
+
+
 def preinstall_tags(hw=None):
     """What a new unit must carry: every offered model's build for this
     hardware, and the embedder."""
@@ -290,12 +295,14 @@ def _main(argv):
         print("\n".join(preinstall_tags()))
     elif argv[:1] == ["--min-ollama"]:
         print(min_ollama())
+    elif argv[:1] == ["--tested-ollama"]:
+        print(tested_ollama())
     elif argv[:1] == ["--summary"]:
         for m in models():
             p = resolve({}, m["id"])
             print(f"{m['label']:<12} {p['tag']:<18} {p['quant']:<7} ctx {p['options']['num_ctx']}")
     else:
-        print("usage: model_profiles.py --preinstall | --min-ollama | --summary", file=sys.stderr)
+        print("usage: model_profiles.py --preinstall | --min-ollama | --tested-ollama | --summary", file=sys.stderr)
         return 2
     return 0
 

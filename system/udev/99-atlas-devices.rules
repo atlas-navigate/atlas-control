@@ -1,13 +1,15 @@
 # Managed by the Atlas updater.
 # Persistent names for Atlas's radios. Access is limited to the dialout group
 # (the Atlas service account), not every local user (was MODE="0666").
+# ID_MM_DEVICE_IGNORE keeps ModemManager from probing them with AT commands
+# when they appear (it can wedge the radio's serial link for seconds).
 
 # Heltec WiFi LoRa 32 v4 (ESP32-S3) over USB-C: ROM USB-Serial/JTAG and TinyUSB CDC.
-SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="1001", SYMLINK+="meshtastic", GROUP="dialout", MODE="0660"
-SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="4001", SYMLINK+="meshtastic", GROUP="dialout", MODE="0660"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="1001", SYMLINK+="meshtastic", GROUP="dialout", MODE="0660", ENV{ID_MM_DEVICE_IGNORE}="1"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="4001", SYMLINK+="meshtastic", GROUP="dialout", MODE="0660", ENV{ID_MM_DEVICE_IGNORE}="1"
 
 # u-blox NEO-M8U / M9N GPS over USB.
-SUBSYSTEM=="tty", ATTRS{idVendor}=="1546", ATTRS{idProduct}=="01a8", SYMLINK+="gps", GROUP="dialout", MODE="0660"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1546", ATTRS{idProduct}=="01a8", SYMLINK+="gps", GROUP="dialout", MODE="0660", ENV{ID_MM_DEVICE_IGNORE}="1"
 
 # The RTC (see atlas-clock.service): when it registers, make sure its 1970
 # reading did not move the clock back after boot.

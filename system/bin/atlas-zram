@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Atlas zram swap manager — installed by install.sh to /usr/local/sbin/atlas-zram
-# and driven by zram-swap.service. Sizes zram0 to 50% of RAM with zstd and turns
-# it on as high-priority swap (preferred over the default-priority disk swapfiles
-# that setup_native_osrm.sh / build_places_safe.sh add for real extra capacity).
+# Atlas zram swap manager — shipped with every release as
+# /usr/local/lib/atlas/bin/atlas-zram (install.sh puts the kit's copy there
+# early, for the dataset builds) and driven by zram-swap.service. Sizes zram0
+# to 50% of RAM with zstd and turns it on as high-priority swap (preferred
+# over the default-priority disk swapfiles that setup_native_osrm.sh /
+# build_places_safe.sh add for real extra capacity).
 #
 # `start` is idempotent: it tears down and re-initialises zram0, so re-running it
 # (service restart, install re-run) never fails with "device busy".
@@ -19,8 +21,8 @@ reset_zram0() {
 
 case "${1:-start}" in
     start)
-        # Already swapping on zram0 (e.g. an install --update re-run on a live
-        # box)? Leave it be. Tearing it down would swapoff active pages back into
+        # Already swapping on zram0 (e.g. an install.sh re-run on a live box)?
+        # Leave it be. Tearing it down would swapoff active pages back into
         # RAM and could OOM a loaded box; a resize needs an explicit stop/start.
         if swapon --show=NAME --noheadings 2>/dev/null | grep -qx /dev/zram0; then
             sysctl -q -w vm.swappiness=100 vm.vfs_cache_pressure=200 || true
@@ -38,7 +40,7 @@ case "${1:-start}" in
         mkswap /dev/zram0 >/dev/null
         swapon --priority 100 /dev/zram0
         # Swap aggressively to (fast) zram, keep the filesystem cache lean.
-        # Best-effort: /etc/sysctl.d/99-zram.conf also persists these at boot.
+        # Best-effort: /etc/sysctl.d/99-atlas-memory.conf also persists these at boot.
         sysctl -q -w vm.swappiness=100 vm.vfs_cache_pressure=200 || true
         ;;
     stop)

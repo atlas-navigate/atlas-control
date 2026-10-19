@@ -34,7 +34,7 @@ import sys
 import time
 import uuid
 
-from . import ENGINE_VERSION, extract, fsutil, health, paths, sysfiles, venvs, verify
+from . import ENGINE_VERSION, extract, fsutil, health, paths, perf, sysfiles, venvs, verify
 from .runner import DEFAULT as DEFAULT_RUNNER
 
 ORDER = ["ACCEPTED", "VERIFIED", "STAGING", "ENGINE_SWITCH", "VENV", "STAGED",
@@ -65,6 +65,7 @@ MSG_NO_SPACE = "There is not enough free storage to install this update."
 
 MANIFEST_NAME = "atlas-release.json"
 SIG_NAME = "atlas-release.json.sig"
+DIAG_KEPT = 20
 VENV_ESTIMATE = 600 * 1024 * 1024
 SPACE_MARGIN = 512 * 1024 * 1024
 
@@ -460,6 +461,7 @@ class Engine:
         fsutil.atomic_symlink(os.path.relpath(target, paths.OPT), paths.CURRENT)
         spec = sysfiles.load_spec(target)
         sysfiles.reload_changed(changed, spec, self.runner)
+        apply_power_mode(spec, self.runner, self.log)
         self.runner.run(["systemctl", "daemon-reload"], timeout=60)
         self._restart_app()
         self.runner.run(["systemctl", "reload-or-restart", "nginx"], timeout=60)
@@ -759,6 +761,63 @@ def prune(runner=None):
                 shutil.rmtree(os.path.join(paths.VENVS, key), ignore_errors=True)
     for d in (paths.TX, paths.SYSBACKUP):
         if os.path.isdir(d):
-            entries = sorted(os.listdir(d))
+            # By age, not name: SYSBACKUP holds reapply-<time> next to update ids.
+            entries = sorted((os.path.join(d, e) for e in os.listdir(d)), key=os.path.getmtime)
             for old in entries[:-3]:
-                shutil.rmtree(os.path.join(d, old), ignore_errors=True)
+                shutil.rmtree(old, ignore_errors=True)
+    # One diagnostic log per update: keep the most recent ones for support.
+    if os.path.isdir(paths.DIAG):
+        logs = sorted((os.path.join(paths.DIAG, f) for f in os.listdir(paths.DIAG)), key=os.path.getmtime)
+        for old in logs[:-DIAG_KEPT]:
+            try:
+                os.unlink(old)
+            except OSError:
+                pass
+
+
+def apply_power_mode(spec, runner, log):
+    """The release's power mode (perf.ensure_power_mode); never fails an install."""
+    try:
+        result = perf.ensure_power_mode((spec or {}).get("power_mode"), runner)
+    except Exception as exc:
+        result = {"changed": False, "reason": f"{type(exc).__name__}: {exc}"}
+    if (spec or {}).get("power_mode"):
+        log(f"power mode {spec['power_mode']}: {result.get('reason')}")
+    return result
+
+
+def reapply(runner=None, log=print):
+    """Install the current release's system files again and reload what
+    changed — for a unit whose configuration drifted (edited by hand, or set
+    up by an older installer) while no newer release is available. Same
+    validation and all-or-nothing restore as an update; only while no update
+    is in progress."""
+    runner = runner or DEFAULT_RUNNER
+    os.makedirs(paths.RUN, mode=0o755, exist_ok=True)
+    with open(paths.LOCK, "w") as lockf:
+        try:
+            fcntl.flock(lockf, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise EngineError("an update is in progress")
+        journal = fsutil.read_json(paths.JOURNAL, {}) or {}
+        if journal.get("state") not in (None, "IDLE"):
+            raise EngineError(f"an update is in progress ({journal.get('state')})")
+        current = os.path.realpath(paths.CURRENT)
+        if not os.path.exists(os.path.join(current, ".complete")) and \
+                not os.path.exists(os.path.join(current, ".dev-link")):
+            raise EngineError("no complete release is installed")
+        backup = os.path.join(paths.SYSBACKUP, f"reapply-{int(time.time())}")
+        try:
+            changed = sysfiles.install(current, backup, runner)
+        except sysfiles.SystemFilesError as exc:
+            raise EngineError(str(exc))
+        spec = sysfiles.load_spec(current)
+        sysfiles.reload_changed(changed, spec, runner)
+        power = apply_power_mode(spec, runner, log)
+        if changed:
+            runner.run(["systemctl", "daemon-reload"], timeout=60)
+            log(f"reapplied: {', '.join(changed)}")
+        else:
+            shutil.rmtree(backup, ignore_errors=True)
+            log("system files already match the installed release")
+        return {"changed": changed, "power": power}

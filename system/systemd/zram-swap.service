@@ -1,0 +1,26 @@
+# Managed by the Atlas updater (install.sh installs the kit's copy early, for
+# the dataset builds).
+#
+# zram-backed compressed swap for the 8 GB shared-RAM Jetson Orin Nano. Ollama
+# (chat + embed models) + OSRM + the Flask app can push the box into the OOM
+# killer under load; zram gives roughly 2x effective memory headroom by holding
+# swapped pages compressed in RAM (zstd) instead of writing them to the NVMe.
+#
+# All the real work lives in /usr/local/lib/atlas/bin/atlas-zram (shipped
+# alongside this unit). Keeping the shell out of ExecStart avoids systemd's own
+# $-variable expansion mangling the command before bash ever sees it.
+#
+# Up before Ollama and Atlas: Ray's boot warm-up loads its models then, and is
+# the moment the headroom matters most.
+[Unit]
+Description=zram-backed swap (Atlas / Jetson)
+Before=ollama.service atlas-control.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/lib/atlas/bin/atlas-zram start
+ExecStop=/usr/local/lib/atlas/bin/atlas-zram stop
+
+[Install]
+WantedBy=multi-user.target

@@ -2,6 +2,7 @@
   "schema": 1,
   "about": "Ray's chat models. Read by model_profiles.py (the app) and install.sh. Sizes in MB. measured_mb is Ollama's resident size per context window, fully on the GPU of an 8 GB Jetson Orin Nano with Ollama 0.32 (tools/bench/models.py, docs/AI_MODELS.md).",
   "default": "qwen2.5:3b",
+  "ollama": {"tested": "0.32.1", "about": "The Ollama release the figures in docs/AI_MODELS.md were measured on. install.sh installs exactly this version when a unit has none, or one too old for a model below; atlas-engine check warns when a unit runs another."},
   "embedder": {"id": "qwen3-embedding:0.6b", "num_ctx": 1024, "size_mb": 639, "memory_mb": 1290},
   "models": [
     {

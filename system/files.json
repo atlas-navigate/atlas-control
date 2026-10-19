@@ -72,6 +72,12 @@
       "kind": "systemd"
     },
     {
+      "src": "systemd/zram-swap.service",
+      "dst": "/etc/systemd/system/zram-swap.service",
+      "mode": "0644",
+      "kind": "systemd"
+    },
+    {
       "src": "nginx/atlas-proxy.conf",
       "dst": "/etc/nginx/snippets/atlas-proxy.conf",
       "mode": "0644",
@@ -90,6 +96,12 @@
       "mode": "0644",
       "kind": "nginx",
       "template": true
+    },
+    {
+      "src": "nginx/nginx-service.conf",
+      "dst": "/etc/systemd/system/nginx.service.d/atlas.conf",
+      "mode": "0644",
+      "kind": "nginx-unit"
     },
     {
       "src": "www/updating.html",
@@ -134,10 +146,17 @@
       "kind": "plain"
     },
     {
+      "src": "bin/atlas-zram",
+      "dst": "/usr/local/lib/atlas/bin/atlas-zram",
+      "mode": "0755",
+      "kind": "plain"
+    },
+    {
       "src": "ollama/atlas.conf",
       "dst": "/etc/systemd/system/ollama.service.d/atlas.conf",
       "mode": "0644",
-      "kind": "ollama"
+      "kind": "ollama",
+      "template": true
     },
     {
       "src": "avahi/atlas.service",
@@ -151,6 +170,31 @@
       "dst": "/etc/systemd/journald.conf.d/atlas-size.conf",
       "mode": "0644",
       "kind": "journald"
+    },
+    {
+      "src": "sysctl/99-atlas-memory.conf",
+      "dst": "/etc/sysctl.d/99-atlas-memory.conf",
+      "mode": "0644",
+      "kind": "sysctl"
+    }
+  ],
+  "settings": [
+    {
+      "file": "/etc/avahi/avahi-daemon.conf",
+      "kind": "avahi-daemon",
+      "comment": "Discovery on every interface but the container bridge (pinning one Wi-Fi name silently stops discovery on a unit whose module enumerates differently); IPv4 addresses only, so clients don't latch onto a rotating privacy address and avahi doesn't re-register into a name conflict (atlas-xxxx-2.local); no host details published.",
+      "values": {
+        "server": {
+          "use-ipv6": "no",
+          "allow-interfaces": null,
+          "deny-interfaces": "docker0"
+        },
+        "publish": {
+          "publish-aaaa-on-ipv4": "no",
+          "publish-hinfo": "no",
+          "publish-workstation": "no"
+        }
+      }
     }
   ],
   "symlinks": [
@@ -165,10 +209,15 @@
     "atlas-update-recover.service",
     "atlas-firstboot.service",
     "atlas-firewall.service",
-    "atlas-control.service"
+    "atlas-control.service",
+    "zram-swap.service"
   ],
   "remove": [
     "/etc/avahi/services/atlas-http.service",
-    "/etc/nginx/sites-enabled/default"
-  ]
+    "/etc/nginx/sites-enabled/default",
+    "/etc/sysctl.d/99-zram.conf",
+    "/usr/local/sbin/atlas-zram"
+  ],
+  "power_mode": "MAXN_SUPER",
+  "power_mode_comment": "Jetson power mode Atlas is tuned and measured in (perf.ensure_power_mode); skipped on modules that have no mode of this name."
 }

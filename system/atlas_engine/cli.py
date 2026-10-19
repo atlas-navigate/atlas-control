@@ -31,9 +31,19 @@ def engine_main(argv):
         return perf.main(argv[1:])
     elif cmd == "verify" and len(argv) == 2:
         return verify_release_dir(argv[1])
+    elif cmd == "check":
+        from . import conform
+        return conform.main(argv[1:])
+    elif cmd == "reapply":
+        try:
+            engine.reapply(log=lambda msg: print(f"[atlas-engine] {msg}", flush=True))
+        except engine.EngineError as exc:
+            print(f"atlas-engine: {exc}", file=sys.stderr)
+            return 1
+        return 0
     else:
-        print("usage: atlas-engine run|recover|prune|version|verify RELEASE_DIR|clock boot|rtc|status",
-              file=sys.stderr)
+        print("usage: atlas-engine run|recover|prune|version|verify RELEASE_DIR|check [--json] [--infer]|reapply|"
+              "clock boot|rtc|status|perf release|status", file=sys.stderr)
         return 2
     print(result)
     return 0 if result not in ("failed", "recovery_failed") else 1

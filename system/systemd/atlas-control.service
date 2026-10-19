@@ -30,7 +30,17 @@ PrivateTmp=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
+ProtectKernelLogs=yes
 LockPersonality=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+# Bluetooth (the phone bridge, BLE radios) goes through D-Bus; netlink for the
+# interface list. Not used: ProtectClock and PrivateDevices (they close the
+# radio, GPS, I2C and GPIO device nodes), ProtectHostname (Atlas must see a new
+# .local name without a restart), MemoryDenyWriteExecute (cffi callbacks).
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK AF_BLUETOOTH
 
 [Install]
 WantedBy=multi-user.target

@@ -59,6 +59,7 @@ DEVFREQ = p("sys/class/devfreq")
 CPUFREQ = p("sys/devices/system/cpu/cpufreq")
 THERMAL = p("sys/class/thermal")
 PERF_RUN = p("run/atlas-perf")
+NVPMODEL_CONF = p("etc/nvpmodel.conf")
 
 # The app's state directory; downloads are handed over from here.
 APP_STATE = os.path.abspath(os.environ.get("ATLAS_STATE_DIR") or p("atlas_data/atlas-control"))
