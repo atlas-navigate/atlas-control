@@ -227,4 +227,3 @@ echo -e "${GREEN}✓ topo.pmtiles created ($SIZE) → static/tiles/topo.pmtiles$
 echo ""
 echo "Restart atlas-control for the change to take effect:"
 echo "  sudo systemctl restart atlas-control"
-echo "  # or: bash run.sh"

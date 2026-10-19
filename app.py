@@ -539,15 +539,6 @@ def _sanitize_text(s, max_len=None):
 # ------------------------------------------------------------------ tile cache
 _TILE_DIR = atlas_paths.TILES_DIR
 
-# Pre-decoded 1×1 transparent PNG — returned for any missing topo tile so
-# Leaflet shows the base map cleanly instead of broken-tile icons.
-# Decoding at import time avoids a base64 decode on every missing-tile request.
-import base64 as _b64
-_TRANSPARENT_PNG = _b64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQ"
-    "AABjkB6QAAAABJRU5ErkJggg=="
-)
-
 _FONTS_DIR = atlas_paths.FONTS_DIR
 
 @app.route("/fonts/<path:fontstack>/<range>.pbf")
@@ -619,20 +610,6 @@ def serve_tile(z, x, y):
     """Serve offline raster map tiles from the local z/x/y.png directory."""
     tile_dir = os.path.join(_TILE_DIR, str(z), str(x))
     return send_from_directory(tile_dir, f"{y}.png", conditional=True)
-
-@app.route("/tiles/topo/<int:z>/<int:x>/<int:y>.png")
-def serve_topo_tile(z, x, y):
-    """Serve offline topo overlay tiles; return transparent PNG for missing tiles
-    so Leaflet shows the base map cleanly instead of broken-tile icons."""
-    tile_dir = os.path.join(_TILE_DIR, "topo", str(z), str(x))
-    for ext in ("png", "jpg", "jpeg"):
-        tile_name = f"{y}.{ext}"
-        tile_path = os.path.join(tile_dir, tile_name)
-        if os.path.exists(tile_path):
-            return send_from_directory(tile_dir, tile_name, conditional=True)
-    # 1×1 transparent PNG — lets the base layer show through
-    return Response(_TRANSPARENT_PNG, mimetype="image/png",
-                    headers={"Cache-Control": "public, max-age=86400"})
 
 
 # ------------------------------------------------------------------ JSX pre-compilation
@@ -2790,7 +2767,7 @@ def api_routing_status():
     return jsonify({
         "initialized": True,
         "native": routing_node.use_native,
-        "engine": "native osrm-routed" if routing_node.use_native else "docker",
+        "engine": "native osrm-routed" if routing_node.use_native else "unavailable (osrm-routed not installed)",
         "active": routing_node.get_active_map(),
     })
 

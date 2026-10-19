@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
 Routing Node — OSRM process manager for Atlas offline cyberdeck.
-Ground-up rewrite of the inline Docker routing in app.py.
 
 Features:
-  - Prefers native osrm-routed binary (no Docker overhead, less RAM, faster startup)
-  - Falls back to Docker if native binary is not installed
+  - Runs the native osrm-routed binary install.sh provides (stage 60); without
+    it routing reports itself unavailable (the unprivileged atlas account
+    cannot use Docker, so the old container fallback could never start)
   - LRU pool with configurable memory caps (default: 4 car + 2 other profiles)
   - On-demand loading: loads state only when a route request needs it
   - Geographic prewarm: auto-loads car + hiking routing for current GPS state
@@ -31,9 +31,8 @@ logger = logging.getLogger("routing-node")
 
 # Routing prewarm/startup runs from real OS threads. gevent's patched subprocess
 # layer can fail there with "child watchers are only available on the default
-# loop", so use the original stdlib subprocess functions for OSRM lifecycle.
+# loop", so use the original stdlib Popen for the OSRM lifecycle.
 _STD_POPEN = _gevent_monkey.get_original("subprocess", "Popen")
-_STD_RUN = _gevent_monkey.get_original("subprocess", "run")
 
 # ── State bounding boxes: (lon_min, lat_min, lon_max, lat_max) ───────────────
 
@@ -108,7 +107,7 @@ _MAX_OTHER = 3   # hiking ~200 MB each
 # How long a concurrent caller will wait for another in-flight start of the
 # *same* (state, profile) to finish before giving up. Must stay comfortably
 # above the _port_ready(..., timeout=120.0) readiness wait below (plus
-# Popen/docker-run launch overhead) so a waiter never times out before the
+# Popen launch overhead) so a waiter never times out before the
 # owner's own attempt would have.
 _START_WAIT_TIMEOUT_S = 130.0
 
@@ -117,10 +116,6 @@ _SNAP = {
     "car":     "25;25",
     "hiking":  "-1;-1",
 }
-
-# Docker OSRM image (multi-arch, supports ARM64 for Jetson)
-_OSRM_IMAGE = "ghcr.io/project-osrm/osrm-backend"
-
 
 def _haversine_m(lat1, lon1, lat2, lon2):
     R = 6_371_000.0
@@ -214,7 +209,7 @@ def _unreadable_parts(osrm_file: str) -> list:
 
 class RoutingNode:
     """
-    Manages a pool of OSRM server processes (native or Docker) for offline routing.
+    Manages a pool of native osrm-routed processes for offline routing.
 
     Usage::
 
@@ -457,8 +452,7 @@ class RoutingNode:
             if key in self._pool:
                 proc, port = self._pool[key]
                 alive = (proc is None or
-                         (hasattr(proc, "poll") and proc.poll() is None) or
-                         (isinstance(proc, str)))  # Docker container name
+                         (hasattr(proc, "poll") and proc.poll() is None))
                 if alive and _port_ready(port, timeout=0.3):
                     self._lru[key] = time.time()
                     return port
@@ -557,14 +551,16 @@ class RoutingNode:
                     self._starting[key] = (port, done_event)
 
             # Start outside lock to avoid blocking other threads during ~15-120s startup
-            proc = (self._start_native(osrm_file, port)
-                    if self.use_native
-                    else self._start_docker(state, profile, port))
+            if not self.use_native:
+                logger.error(f"OSRM {state}/{profile}: osrm-routed is not installed — routing is "
+                             f"unavailable until install.sh installs it")
+                return None
+            proc = self._start_native(osrm_file, port)
 
             if not proc:
                 return None
 
-            if not _port_ready(port, timeout=120.0, proc=None if isinstance(proc, str) else proc):
+            if not _port_ready(port, timeout=120.0, proc=proc):
                 code = proc.poll() if hasattr(proc, "poll") else None
                 if code is not None:
                     unreadable = _unreadable_parts(osrm_file)
@@ -581,8 +577,7 @@ class RoutingNode:
                 self._lru[(state, profile)]  = time.time()
 
             self._write_active_json()
-            logger.info(f"OSRM {state}/{profile} ready on port {port} "
-                        f"({'native' if self.use_native else 'docker'})")
+            logger.info(f"OSRM {state}/{profile} ready on port {port}")
             return port
         finally:
             with self._lock:
@@ -626,44 +621,10 @@ class RoutingNode:
             logger.error(f"Failed to start native OSRM: {e}")
             return None
 
-    def _start_docker(self, state: str, profile: str, port: int):
-        """Launch Docker OSRM container. Returns container name or None."""
-        pdir  = os.path.join(self.states_dir, state, profile)
-        cname = f"atlas-osrm-{state}-{profile}"
-        # Remove any stale container with the same name
-        _STD_RUN(["docker", "rm", "-f", cname],
-                 capture_output=True, timeout=10)
-        cmd = ["docker", "run", "-d",
-               "--name", cname, "--restart", "unless-stopped",
-               "-p", f"127.0.0.1:{port}:5000",
-               "-v", f"{pdir}:/data:ro",
-               _OSRM_IMAGE,
-               "osrm-routed", "--algorithm", "mld",
-               # See _start_native for why this is "=1" and what it saves.
-               "--max-table-size", "1000", "--mmap=1", "/data/region.osrm"]
-        try:
-            _STD_RUN(cmd, check=True, capture_output=True, timeout=30)
-            logger.info(f"Docker OSRM started: {cname} → port {port}")
-            return cname   # store container name as "process" sentinel
-        except subprocess.CalledProcessError as e:
-            stderr = e.stderr.decode()[:300] if e.stderr else ""
-            if "already in use" in stderr or "Conflict" in stderr:
-                # Race condition: another thread started it already
-                return cname
-            logger.error(f"docker run {cname}: {stderr}")
-            return None
-        except Exception as e:
-            logger.error(f"Failed to start Docker OSRM {cname}: {e}")
-            return None
-
     def _stop_process(self, proc, key):
-        """Stop a native subprocess or Docker container."""
+        """Stop a native osrm-routed subprocess."""
         try:
-            if isinstance(proc, str):
-                # Docker container name
-                _STD_RUN(["docker", "stop", proc], capture_output=True, timeout=15)
-                _STD_RUN(["docker", "rm",   proc], capture_output=True, timeout=10)
-            elif proc and hasattr(proc, "terminate"):
+            if proc and hasattr(proc, "terminate"):
                 import signal as _sig
                 try:
                     os.killpg(os.getpgid(proc.pid), _sig.SIGTERM)
