@@ -58,3 +58,20 @@ tools/dev/deploy            # build this checkout, sign with the dev key, instal
 ```
 
 Only on developer units, which also keep SSH and trust the developer key.
+
+To update developer units from Settings → Software Update instead, publish a
+developer release. Pushing to `main` alone never reaches the button: it only
+sees releases.
+
+```bash
+V=$(cat VERSION)-dev.$(date -u +%Y%m%d%H%M%S)
+tools/release/build_release.py --version "$V" --ref main --channel dev --out dist --notes notes.txt
+tools/release/sign_release.py dist/$V/atlas-release.json --key ~/.config/atlas-dev/dev-release.key --yes
+tools/release/publish.sh dist/$V --dev-key /etc/atlas/dev-keys/dev.pub
+```
+
+It becomes `…/releases/latest` for every unit. Units without the developer key
+report "Update could not be verified". That is harmless while no production
+release exists, but once one does, a developer release published there would
+hide it from retail units. From then on, publish developer releases to a
+separate repo (`--repo`, with `--url-base` and `ATLAS_RELEASES_URL` pointing at it).
