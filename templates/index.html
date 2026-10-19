@@ -2137,6 +2137,24 @@ async function apiRequest(url, { method = 'GET', data, timeoutMs, headers = {} }
   }
 }
 
+// Every component that listens to the live connection subscribes through
+// onAtlasSocket — never by reading window._atlasSocket once at mount.
+// App creates the Socket.IO connection in its own effect, which React runs
+// after its children's: a page open from the start (a reload on ?page=ai)
+// mounts before window._atlasSocket exists, and a listener added then is
+// never attached. onAtlasSocket(attach) calls attach(socket) now, or as soon
+// as App announces the socket; attach may return a cleanup.
+function onAtlasSocket(attach) {
+  let detach = null;
+  const run = () => {
+    if (detach || !window._atlasSocket) return;
+    detach = attach(window._atlasSocket) || (() => {});
+  };
+  run();
+  window.addEventListener('atlas-socket', run);
+  return () => { window.removeEventListener('atlas-socket', run); if (detach) detach(); };
+}
+
 const api = {
   get: (url, opts) => apiRequest(url, { ...opts, method: 'GET' }),
   post: (url, data, opts) => apiRequest(url, { ...opts, method: 'POST', data }),
@@ -4382,9 +4400,7 @@ function MapPage({ nodes, trackerDevices = [], onRemoveTracker, device, gpsStatu
 
   // Append live position fixes to trails in real time via the shared socket.
   // Without this, trail polylines are static (loaded once via fetchedRef and never refreshed).
-  useEffect(() => {
-    const socket = window._atlasSocket;
-    if (!socket) return;
+  useEffect(() => onAtlasSocket(socket => {
     const onPos = data => {
       if (!data || !data.node_id || !data.latitude || !data.longitude) return;
       setPositions(prev => ({
@@ -4395,7 +4411,7 @@ function MapPage({ nodes, trackerDevices = [], onRemoveTracker, device, gpsStatu
     socket.on('position_update', onPos);
     socket.on('gps_fix', onPos);            // Atlas's own GPS
     return () => { socket.off('position_update', onPos); socket.off('gps_fix', onPos); };
-  }, []);
+  }), []);
 
   // Node markers — incremental updates
   useEffect(() => {
@@ -5532,22 +5548,6 @@ const SWITCH_STAGE_LABEL = {
 };
 function fmtMB(mb) { return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`; }
 
-// App creates the Socket.IO connection in its own effect, which React runs
-// after its children's: a page open from the start (a reload on ?page=ai)
-// mounts before window._atlasSocket exists, and a listener added then is
-// never attached. onAtlasSocket(attach) calls attach(socket) now, or as soon
-// as App announces the socket; attach may return a cleanup.
-function onAtlasSocket(attach) {
-  let detach = null;
-  const run = () => {
-    if (detach || !window._atlasSocket) return;
-    detach = attach(window._atlasSocket) || (() => {});
-  };
-  run();
-  window.addEventListener('atlas-socket', run);
-  return () => { window.removeEventListener('atlas-socket', run); if (detach) detach(); };
-}
-
 function RayModelPicker({ labelStyle, inputStyle, onChanged }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -6613,14 +6613,16 @@ function SystemPage() {
   const lastPushRef = useRef(0);
   useEffect(() => {
     load();
-    const sock = window._atlasSocket;
     const onStats = (s) => { lastPushRef.current = Date.now(); setStats(s); setError(null); };
-    if (sock) sock.on('system_stats', onStats);
+    const unsubscribe = onAtlasSocket(sock => {
+      sock.on('system_stats', onStats);
+      return () => sock.off('system_stats', onStats);
+    });
     const iv = setInterval(() => {
       if (document.visibilityState === 'hidden') return;
       if (Date.now() - lastPushRef.current > 8000) load();
     }, 3000);
-    return () => { clearInterval(iv); if (sock) sock.off('system_stats', onStats); };
+    return () => { clearInterval(iv); unsubscribe(); };
   }, [load]);
 
   function fmtUptime(s) {
@@ -7342,25 +7344,22 @@ function SoftwareUpdateSection() {
 
   useEffect(() => {
     refresh();
-    const sock = window._atlasSocket;
     const onProgress = (s) => apply(s);
     const onDisconnect = () => { if (installingRef.current) setRestarting(true); };
     const onConnect = () => refresh();
-    if (sock) {
+    const unsubscribe = onAtlasSocket(sock => {
       sock.on('update_progress', onProgress);
       sock.on('disconnect', onDisconnect);
       sock.on('connect', onConnect);
-    }
-    // Slow safety net in case socket events are unavailable.
-    const iv = setInterval(refresh, 15000);
-    return () => {
-      clearInterval(iv);
-      if (sock) {
+      return () => {
         sock.off('update_progress', onProgress);
         sock.off('disconnect', onDisconnect);
         sock.off('connect', onConnect);
-      }
-    };
+      };
+    });
+    // Slow safety net in case socket events are unavailable.
+    const iv = setInterval(refresh, 15000);
+    return () => { clearInterval(iv); unsubscribe(); };
   }, []);
 
   // While Atlas restarts for an update, wait for it to come back.
@@ -11277,25 +11276,22 @@ function LocalDeviceAddressSection() {
   const load = () => api.get('/api/device/local').then(d => { if (d && d.fqdn) setInfo(d); }).catch(() => {});
   useEffect(() => {
     load();
-    const sock = window._atlasSocket;
     const onNet = (d) => { if (d && d.fqdn) setInfo(d); };
     const onClock = (c) => { if (c && c.state) setInfo(p => p ? { ...p, clock: c } : p); };
     const onUp = () => { setConnected(true); load(); };
     const onDown = () => setConnected(false);
-    if (sock) {
+    const unsubscribe = onAtlasSocket(sock => {
       sock.on('device_network', onNet); sock.on('device_clock', onClock);
       sock.on('connect', onUp); sock.on('disconnect', onDown);
       setConnected(!!sock.connected);
-    }
-    // Slow safety net in case socket events are unavailable.
-    const iv = setInterval(load, 60000);
-    return () => {
-      clearInterval(iv);
-      if (sock) {
+      return () => {
         sock.off('device_network', onNet); sock.off('device_clock', onClock);
         sock.off('connect', onUp); sock.off('disconnect', onDown);
-      }
-    };
+      };
+    });
+    // Slow safety net in case socket events are unavailable.
+    const iv = setInterval(load, 60000);
+    return () => { clearInterval(iv); unsubscribe(); };
   }, []);
   const SL = {fontSize:11,fontWeight:700,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:12};
   const label = {fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.06em'};

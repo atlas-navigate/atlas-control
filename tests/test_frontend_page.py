@@ -94,6 +94,15 @@ class RaySettingsTemplateTests(unittest.TestCase):
         # announce it so late subscribers attach.
         self.assertIn("window.dispatchEvent(new Event('atlas-socket'))", self.html)
 
+    def test_live_listeners_attach_even_before_the_socket_exists(self):
+        # App creates the socket after its children mount, so a page opened
+        # directly would subscribe to nothing if it read window._atlasSocket
+        # once at mount (Ray's header, Settings showing "Disconnected").
+        self.assertEqual(re.findall(r".{0,60}=\s*window\._atlasSocket\s*;", self.html), [])
+        for event in ("'ai_model'", "'position_update'", "'system_stats'", "'update_progress'", "'device_network'"):
+            self.assertIn(f"on({event}", self.html)
+        self.assertGreaterEqual(self.html.count("onAtlasSocket("), 6)
+
     def test_no_global_inference_fields_remain(self):
         # Low-level values live per model, behind "Expert overrides".
         for field in ("settings.num_ctx", "settings.num_gpu", "settings.num_thread", "settings.num_batch",
