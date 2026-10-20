@@ -2,7 +2,7 @@
 """Build an Atlas release bundle and its (unsigned) manifest.
 
     tools/release/build_release.py --version 1.2.0 [--ref v1.2.0] [--out dist]
-        [--channel stable] [--notes notes.txt] [--url-base https://…]
+        [--channel stable] [--notes notes.txt] [--url-base https://… | ""]
 
 Run on an aarch64 machine with Python 3.12 and node (a Jetson works). The
 bundle is the git tree at --ref (minus export-ignore paths) plus:
@@ -58,9 +58,15 @@ def schema_facts(tree_dir):
 def export_tree(ref, dest):
     """git archive of `ref`; a dirty working tree can be captured with ref=WORKTREE."""
     if ref == "WORKTREE":
-        stash = subprocess.run(["git", "-C", _common.REPO, "stash", "create"],
-                               capture_output=True, text=True, check=True).stdout.strip()
-        ref = stash or "HEAD"
+        # Refresh git's stat cache first: once every file's ctime has changed
+        # (install.sh's chown -R of a developer checkout does that), the next
+        # `git stash create` exits 1 without a message while it rewrites the
+        # index.
+        subprocess.run(["git", "-C", _common.REPO, "update-index", "-q", "--refresh"], capture_output=True)
+        stash = subprocess.run(["git", "-C", _common.REPO, "stash", "create"], capture_output=True, text=True)
+        if stash.returncode:
+            sys.exit(f"git stash create failed: {stash.stderr.strip() or f'exit status {stash.returncode}'}")
+        ref = stash.stdout.strip() or "HEAD"
     sha = subprocess.run(["git", "-C", _common.REPO, "rev-parse", ref],
                          capture_output=True, text=True, check=True).stdout.strip()
     archive = subprocess.run(["git", "-C", _common.REPO, "archive", "--format=tar", sha],
@@ -152,7 +158,8 @@ def main():
     ap.add_argument("--out", default=os.path.join(_common.REPO, "dist"))
     ap.add_argument("--channel", default="stable")
     ap.add_argument("--notes", help="text file, one bullet per line")
-    ap.add_argument("--url-base", default=_common.DEFAULT_URL_BASE)
+    ap.add_argument("--url-base", default=_common.DEFAULT_URL_BASE,
+                    help='https only; "" leaves the bundle URL out, so it is fetched from beside the manifest')
     ap.add_argument("--python", default=sys.executable, help="pip used to fetch wheels")
     ap.add_argument("--seq", type=int, help="override (default: now, UTC epoch seconds)")
     args = ap.parse_args()
@@ -203,7 +210,7 @@ def main():
         "notes": notes,
         "bundle": {
             "name": bundle_name,
-            "url": f"{args.url_base.rstrip('/')}/v{args.version}/{bundle_name}",
+            "url": f"{args.url_base.rstrip('/')}/v{args.version}/{bundle_name}" if args.url_base else "",
             "size": os.path.getsize(bundle_path),
             "sha256": data_hash.hexdigest(),
             "chunk_size": CHUNK,

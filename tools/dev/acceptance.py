@@ -252,7 +252,9 @@ class Builder:
         print(f"  building {version} …", flush=True)
         as_owner([BUILD_PY, os.path.join(repo, "tools/release/build_release.py"), "--version", version,
                   "--ref", "WORKTREE", "--channel", "dev", "--out", self.out, "--python", BUILD_PY,
-                  "--url-base", f"http://127.0.0.1:{PORT}"], check=True, timeout=1800)
+                  # No bundle URL (manifests may only name https ones): the app
+                  # fetches the bundle from beside the manifest, on ReleaseServer.
+                  "--url-base", ""], check=True, timeout=1800)
         as_owner([BUILD_PY, os.path.join(repo, "tools/release/sign_release.py"),
                   os.path.join(self.out, version, "atlas-release.json"), "--key", self.key, "--yes"],
                  check=True)
@@ -724,10 +726,18 @@ def cmd_run(args):
             except Exception as e:
                 rep.check("models", "section finished", False, f"{type(e).__name__}: {e}")
                 traceback.print_exc()
-        if only & {"download", "forged", "rollback"}:
-            ctx["r1"] = ctx["builder"].build("download")
-            ctx["r_bad"] = ctx["builder"].build_unhealthy() if "rollback" in only else None
-            ctx["r_next"] = ctx["builder"].build("forged") if "forged" in only else None
+        releases = only & {"download", "forged", "rollback"}
+        if releases:
+            try:
+                ctx["r1"] = ctx["builder"].build("download")
+                ctx["r_bad"] = ctx["builder"].build_unhealthy() if "rollback" in only else None
+                ctx["r_next"] = ctx["builder"].build("forged") if "forged" in only else None
+            except Exception as e:
+                for name in sorted(releases):
+                    rep.check(name, "test releases built", False, f"{type(e).__name__}: {e}")
+                traceback.print_exc()
+                releases = set()
+        if releases:
             server = ReleaseServer()
             ctx["server"] = server
             dropin("atlas-control.service", "acceptance-releases",
@@ -735,7 +745,7 @@ def cmd_run(args):
             sh(["systemctl", "restart", "atlas-control.service"], check=True)
             wait(health, 120, 1, "app with the test release server")
             for name, fn in (("download", section_download), ("forged", section_forged), ("rollback", section_rollback)):
-                if name in only:
+                if name in releases:
                     try:
                         fn(rep, ctx)
                     except Exception as e:

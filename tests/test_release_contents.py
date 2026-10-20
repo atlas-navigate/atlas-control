@@ -6,8 +6,13 @@ the app fails on import only on the device."""
 import json
 import os
 import re
+import shutil
 import subprocess
+import sys
+import tempfile
+import time
 import unittest
+from unittest import mock
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -61,3 +66,63 @@ class ReleaseContentsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WorktreeExportTests(unittest.TestCase):
+    """build_release.py --ref WORKTREE, as tools/dev/deploy and the acceptance
+    harness use it, right after something touched every file in the checkout
+    (install.sh's chown -R on a developer unit changes every ctime)."""
+
+    FILES = ("a.py", "b.txt")
+
+    def setUp(self):
+        self.repo = tempfile.mkdtemp(prefix="atlas-export-")
+        self.addCleanup(shutil.rmtree, self.repo, True)
+        for name in self.FILES:
+            self.write(name, name)
+        self.git("init", "-q")
+        self.git("add", ".")
+        self.git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init")
+        self.head = self.git("rev-parse", "HEAD")
+        tools = os.path.join(REPO, "tools", "release")
+        if tools not in sys.path:
+            sys.path.insert(0, tools)
+        import build_release
+        self.build_release = build_release
+        pt = mock.patch.object(build_release._common, "REPO", self.repo)
+        pt.start()
+        self.addCleanup(pt.stop)
+
+    def git(self, *args):
+        return subprocess.run(["git", "-C", self.repo, *args], check=True, capture_output=True,
+                              text=True).stdout.strip()
+
+    def write(self, name, text):
+        with open(os.path.join(self.repo, name), "w") as f:
+            f.write(text)
+
+    def touch_every_file(self):
+        time.sleep(1.05 - time.time() % 1)     # git compares whole seconds of ctime
+        for name in self.FILES:
+            path = os.path.join(self.repo, name)
+            os.chmod(path, os.stat(path).st_mode)          # same mode, new ctime
+
+    def export(self):
+        dest = tempfile.mkdtemp(prefix="atlas-export-out-")
+        self.addCleanup(shutil.rmtree, dest, True)
+        sha, _ = self.build_release.export_tree("WORKTREE", dest)
+        return sha, dest
+
+    def test_a_clean_tree_exports_head(self):
+        self.touch_every_file()
+        sha, dest = self.export()
+        self.assertEqual(sha, self.head)
+        self.assertEqual(sorted(os.listdir(dest)), sorted(self.FILES))
+
+    def test_uncommitted_changes_are_exported(self):
+        self.write("a.py", "changed")
+        self.touch_every_file()
+        sha, dest = self.export()
+        self.assertNotEqual(sha, self.head)
+        self.assertEqual(open(os.path.join(dest, "a.py")).read(), "changed")
+        self.assertEqual(self.git("status", "--porcelain"), "M a.py")     # the checkout is untouched
