@@ -168,11 +168,18 @@ tokens, in MAXN_SUPER. The files are
   --inproc`) and `models.py` were not re-run, because no baseline was taken
   for them. Of the things measured, nothing in Ray's pipeline changed apart
   from the GPU fit and the Ollama sandbox.
+- **Power mode, run by the owner** (`install-25w-direct-qwen3.5.json`, the
+  same benchmark at 25W): generation 13.4 tok/s, prompt processing 423
+  tok/s, whole request 25.9 s. The GPU averaged 879 MHz and the board drew
+  15.5 W. MAXN_SUPER is 8% faster at generating (14.5 tok/s), 5% faster
+  at prompts and 7% quicker per request, with the GPU at 1,020 MHz, for
+  about 1.2 W more. This is what the release's `power_mode` gives a unit
+  that JetPack left at its 25W default.
 - **Qwen2.5 3B** was not re-benchmarked. It was already 100% on the GPU, so
   the margin setting doesn't change its placement. Loading it would have
   evicted Ray's current model.
 
-## 6. Acceptance run on this unit (2026-10-19)
+## 6. Acceptance runs on this unit (2026-10-19)
 
 The owner ran `sudo tools/dev/acceptance run` after a real `sudo ./install.sh
 --bundle … --dev-key … --yes --states keep` re-run. After that re-run,
@@ -180,8 +187,23 @@ The owner ran `sudo tools/dev/acceptance run` after a real `sudo ./install.sh
 The second restart was expected: the checkout's Ollama drop-in was one
 comment newer than the release that was running.
 
-The report is `/var/log/atlas-acceptance/20261019-220936.txt`: **57 passed, 3
-failed.**
+**Second run, after the fixes below:**
+`/var/log/atlas-acceptance/20261019-223514.txt`: **63 passed, 0 failed.**
+
+- The checks that had failed now pass. The tool sees "Updated to Atlas …"
+  and the rollback message with both versions.
+- Crash recovery at HEALTH_CHECK and COMMITTING now runs and passes. Each
+  finished the install (`success`).
+- The unit was left on `1.0.0-dev.20261020023355.final`, built from this
+  checkout.
+- The model section ran on the release the first run had left installed,
+  which predates 8042646. So its stored speeds (Qwen2.5 24.6, Qwen3.5 24.3
+  tokens/s) are still timed from a one-word answer and are wrong for
+  Qwen3.5 (14.5 measured). The installed release has the fix. A model
+  switch on it has not been observed yet.
+
+**First run:** `/var/log/atlas-acceptance/20261019-220936.txt`: **57 passed,
+3 failed.**
 
 - **Passed:**
   - **Security:** the app's exposure scored 3.8.
@@ -223,9 +245,8 @@ These were not run, so none of them counts as a pass.
 
 | Item | Why | How to validate |
 |---|---|---|
-| Power mode A/B (25W vs MAXN_SUPER) | Needs `sudo nvpmodel` | `sudo nvpmodel -m 1`, then the same `direct decode` run, then `sudo nvpmodel -m 2` (or `atlas-engine reapply`) |
-| `install.sh` re-run over this working unit, for real | Needs root | `sudo ./install.sh --bundle ~/atlas-releases/<new> --dev-key … --yes --states keep`. Expected: every stage skips, `reapply`, check passes, Ollama not restarted |
-| A complete `tools/dev/acceptance run`; the reboot test | First run 2026-10-19 (owner, sudo): 57 passed, 3 failed. All 3 were the tool's own faults, fixed in 959fc7d and the commit after it: success and rollback wording out of date, and fault-release tags that are not valid versions. The fault states after SWITCHED did not run. See [Acceptance run](#6-acceptance-run-on-this-unit-2026-10-19) | `sudo tools/dev/acceptance run` again, then `reboot-test` / `after-reboot`, then `atlas-engine check` after a plain reboot |
+| That an `install.sh` re-run skips every stage | The owner ran it (2026-10-19, before the acceptance runs). Afterwards `atlas-engine check` showed 30 ok and 0 failed. Ollama restarted twice, which was expected (§6). The per-stage output is in the root-only `/var/log/atlas-install/` log, which was not read | Re-run after a deploy, so that the checkout and the release match, and read the log |
+| The power-loss reboot test | `acceptance run` passed (63 of 63, [§6](#6-acceptance-runs-on-this-unit-2026-10-19)). The reboot test needs a reboot | `sudo tools/dev/acceptance reboot-test`, then `after-reboot`, then `atlas-engine check` after a plain reboot |
 | A fresh flash on a new Orin Nano | Hardware | Follow MANUFACTURING.md on a blank unit. `install.sh` ends with `atlas-engine check` |
 | Retail lock-down effects (headless boot, masked services) | Only on a non-dev unit | Covered by sandbox tests and `finalize-retail.sh --check` logic. Not run on hardware |
 | Factory reset | Sandbox only, by decision (a real one would unpair this unit) | Existing privacy and pairing tests |
