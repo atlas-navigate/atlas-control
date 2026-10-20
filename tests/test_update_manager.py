@@ -2,6 +2,7 @@
 time, and surviving page refreshes / app restarts."""
 import base64
 import http.server
+import importlib.util
 import json
 import os
 import threading
@@ -256,7 +257,7 @@ class UpdateManagerTests(unittest.TestCase):
         self.um.audit = lambda action, **d: audits.append(action)
         self.um.check()
         self.um.start(install=True)
-        self.um._finish("rolled_back", update_manager.MSG_ROLLED_BACK)
+        self.um._finish("rolled_back", "The update could not be completed.")
         self.assertEqual(audits, ["update_verified", "update_install_started", "update_rolled_back"])
 
     def test_result_after_restart_is_reported(self):
@@ -289,6 +290,22 @@ class UpdateManagerTests(unittest.TestCase):
         # Still shown after a check that finds nothing newer; restarts keep it.
         self.um.state["result"] = "success"
         self.assertEqual(self.make().snapshot()["updated"]["version"], running)
+
+    def test_the_acceptance_harness_expects_these_messages(self):
+        spec = importlib.util.spec_from_file_location(
+            "acceptance", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                       "tools", "dev", "acceptance.py"))
+        acceptance = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(acceptance)
+        running = update_manager.atlas_version.version()
+        for result, expected in (("success", acceptance.msg_updated(running)),
+                                 ("rolled_back", acceptance.msg_rolled_back("2.0.0", running))):
+            self.um.check()
+            self.um.state.update(state="installing")
+            json.dump({"engine_state": "IDLE", "stage": result}, open(update_manager.ENGINE_STATUS, "w"))
+            json.dump({"result": result}, open(update_manager.ENGINE_RESULT, "w"))
+            self.um.reconcile_after_restart()
+            self.assertTrue(self.um.state["message"].startswith(expected), (result, self.um.state["message"]))
 
     def test_failure_says_what_is_still_installed(self):
         self.um.check()

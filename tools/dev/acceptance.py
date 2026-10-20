@@ -64,10 +64,19 @@ REBOOT_STATE = "/var/lib/atlas-acceptance-reboot.json"
 BUILD_PY = os.environ.get("ATLAS_BUILD_PYTHON", "/atlas_data/atlas-control/venv/bin/python3")
 MSG_PAUSED = "Download paused — waiting for Internet connection."
 MSG_NOT_VERIFIED = "Update could not be verified."
-MSG_ROLLED_BACK = "The update could not be completed. Atlas has restored the previous version."
 FAULT_STATES = ["ACCEPTED", "VERIFIED", "STAGING", "ENGINE_SWITCH", "VENV", "STAGED",
                 "APPLYING_SYSTEM", "SWITCHED", "HEALTH_CHECK", "COMMITTING"]
 CTX = ssl._create_unverified_context()      # loopback to this unit's own nginx
+
+
+def msg_updated(version):
+    """update_manager's message once `version` is installed."""
+    return f"Updated to Atlas {version}."
+
+
+def msg_rolled_back(version, running):
+    """The start of update_manager's message after a rollback (its advice follows)."""
+    return f"The update to Atlas {version} could not be completed, so Atlas went back to {running}."
 
 
 # ── report ───────────────────────────────────────────────────────────────
@@ -248,6 +257,9 @@ class Builder:
 
     def build(self, tag, repo=REPO):
         time.sleep(1.1)                                    # seq is epoch seconds: strictly increasing
+        # After the base version, a version allows 40 letters, digits, "." and
+        # "-": "dev.<time>." leaves 21 for the tag ("faults-health-check").
+        tag = tag.replace("_", "-")[:21]
         version = f"{self.base}-dev.{time.strftime('%Y%m%d%H%M%S', time.gmtime())}.{tag}"
         print(f"  building {version} …", flush=True)
         as_owner([BUILD_PY, os.path.join(repo, "tools/release/build_release.py"), "--version", version,
@@ -595,7 +607,8 @@ def section_download(rep, ctx):
     rep.check(S, "engine verified and installed it", result.get("result") == "success", result.get("result"))
     wait(lambda: (health() or {}).get("version") == m["version"], 300, 2, "new version serving")
     st = wait_update(token, lambda s: s.get("state") in ("up_to_date", "failed", "available", "idle"), 120, "result")
-    rep.check(S, "installed, restarted, reconnected", "is up to date" in (st.get("message") or ""),
+    rep.check(S, "installed, restarted, reconnected",
+              st.get("message") == msg_updated(m["version"]) and (st.get("updated") or {}).get("version") == m["version"],
               f"{st.get('message')} ({time.time() - t:.0f}s)")
     ok, inv = invariant()
     rep.check(S, "consistent afterwards", ok, inv)
@@ -634,7 +647,8 @@ def section_rollback(rep, ctx):
               f"{result.get('result')} after {time.time() - t:.0f}s")
     rep.check(S, "previous version serving again", (health() or {}).get("version") == before, before)
     st = wait_update(token, lambda s: s.get("state") != "installing", 120, "app result")
-    rep.check(S, "owner sees the rollback message", st.get("message") == MSG_ROLLED_BACK, st.get("message"))
+    rep.check(S, "owner sees the rollback message",
+              (st.get("message") or "").startswith(msg_rolled_back(manifest(bad)["version"], before)), st.get("message"))
     ok, inv = invariant()
     rep.check(S, "consistent afterwards", ok, inv)
 

@@ -172,6 +172,51 @@ tokens, in MAXN_SUPER. The files are
   the margin setting doesn't change its placement. Loading it would have
   evicted Ray's current model.
 
+## 6. Acceptance run on this unit (2026-10-19)
+
+The owner ran `sudo tools/dev/acceptance run` after a real `sudo ./install.sh
+--bundle … --dev-key … --yes --states keep` re-run. After that re-run,
+`atlas-engine check` showed 30 ok and 0 failed, and Ollama restarted twice.
+The second restart was expected: the checkout's Ollama drop-in was one
+comment newer than the release that was running.
+
+The report is `/var/log/atlas-acceptance/20261019-220936.txt`: **57 passed, 3
+failed.**
+
+- **Passed:**
+  - **Security:** the app's exposure scored 3.8.
+  - **Function:** the GPS answered, without a fix indoors. The radio was not
+    connected.
+  - **Models:** both models are installed with a 4,096-token context.
+  - **Download:** a resumed download completed, and the engine verified and
+    installed it.
+  - **Forged release:** it was refused ("Update could not be verified.").
+  - **Unhealthy release:** it rolled back automatically after 254 s, and the
+    previous version was serving again in a consistent state.
+  - **Faults:** a crash at each state from ACCEPTED through SWITCHED was
+    recovered.
+  - Pairing, key and AI model survived every scenario, and the unit ended on
+    a fresh release.
+- **Failed, all in the tool rather than in Atlas:**
+  - The download and rollback checks still expected the update messages
+    from before b88c7a8. Atlas showed the new ones: "Updated to Atlas …" and
+    "The update to Atlas … could not be completed, so Atlas went back to …".
+  - The fault section stopped at HEALTH_CHECK. Its release tag
+    (`faults-health_check`) is not a valid version, so HEALTH_CHECK and
+    COMMITTING did not run.
+
+  The tool now builds its expected messages with functions that a test checks
+  against update_manager's real output. Tags are cleaned up and capped so
+  they are always valid versions, and a test covers every fault state.
+
+An earlier attempt the same evening had stopped before any release section.
+That was caused by two other faults in the tool, both dating from 2026-09-25
+and fixed in 959fc7d:
+
+- `git stash create` fails once after `install.sh` touches every file in the
+  checkout.
+- The tool used an `http://` bundle URL, which the engine refuses.
+
 ## Not validated
 
 These were not run, so none of them counts as a pass.
@@ -180,7 +225,7 @@ These were not run, so none of them counts as a pass.
 |---|---|---|
 | Power mode A/B (25W vs MAXN_SUPER) | Needs `sudo nvpmodel` | `sudo nvpmodel -m 1`, then the same `direct decode` run, then `sudo nvpmodel -m 2` (or `atlas-engine reapply`) |
 | `install.sh` re-run over this working unit, for real | Needs root | `sudo ./install.sh --bundle ~/atlas-releases/<new> --dev-key … --yes --states keep`. Expected: every stage skips, `reapply`, check passes, Ollama not restarted |
-| `tools/dev/acceptance run`, reboot test | Needs root and a reboot | `sudo tools/dev/acceptance run`, then `reboot-test` / `after-reboot`, then `atlas-engine check` after a plain reboot |
+| A complete `tools/dev/acceptance run`; the reboot test | First run 2026-10-19 (owner, sudo): 57 passed, 3 failed. All 3 were the tool's own faults, fixed in 959fc7d and the commit after it: success and rollback wording out of date, and fault-release tags that are not valid versions. The fault states after SWITCHED did not run. See [Acceptance run](#6-acceptance-run-on-this-unit-2026-10-19) | `sudo tools/dev/acceptance run` again, then `reboot-test` / `after-reboot`, then `atlas-engine check` after a plain reboot |
 | A fresh flash on a new Orin Nano | Hardware | Follow MANUFACTURING.md on a blank unit. `install.sh` ends with `atlas-engine check` |
 | Retail lock-down effects (headless boot, masked services) | Only on a non-dev unit | Covered by sandbox tests and `finalize-retail.sh --check` logic. Not run on hardware |
 | Factory reset | Sandbox only, by decision (a real one would unpair this unit) | Existing privacy and pairing tests |

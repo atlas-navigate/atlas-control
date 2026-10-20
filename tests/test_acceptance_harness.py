@@ -71,6 +71,20 @@ class HarnessServerTests(unittest.TestCase):
 
 
 class HarnessLogicTests(unittest.TestCase):
+    def test_every_test_release_has_a_valid_version(self):
+        from atlas_engine import verify
+        built = []
+        with mock.patch.object(acceptance, "as_owner", lambda cmd, **kw: built.append(cmd) or
+                               mock.Mock(stdout="/tmp/x\n")), \
+             mock.patch.object(acceptance.time, "sleep", lambda s: None):
+            builder = acceptance.Builder()
+            for state in acceptance.FAULT_STATES:
+                builder.build(f"faults-{state.lower()}")
+        versions = [cmd[cmd.index("--version") + 1] for cmd in built if "--version" in cmd]
+        self.assertEqual(len(versions), len(acceptance.FAULT_STATES))
+        for v in versions:
+            self.assertTrue(verify._VERSION.match(v), v)
+
     def test_report_marks_failures_and_writes_readable_files(self):
         d = tempfile.mkdtemp()
         with mock.patch.object(acceptance, "REPORT_DIR", d):

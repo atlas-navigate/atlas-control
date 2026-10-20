@@ -53,7 +53,6 @@ MSG_NO_TIME = "Waiting for Atlas's clock to synchronise before checking for upda
 MSG_PAUSED = "Download paused — waiting for Internet connection."
 MSG_NOT_VERIFIED = "Update could not be verified."
 MSG_NO_SPACE = "There is not enough free storage for this update."
-MSG_ROLLED_BACK = "The update could not be completed. Atlas has restored the previous version."
 # Shown after the outcome: what is running now and what the owner can do.
 MSG_NEXT_STEP = ("Your maps, conversations and settings are unchanged. Try again later; "
                  "if it happens again, free some storage first.")
