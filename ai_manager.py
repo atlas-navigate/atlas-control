@@ -567,6 +567,8 @@ _EMBED_CONCURRENT_MIN_FREE_MB = 600
 _MODEL_LIST_TTL_S = 60
 # Memory left free for the rest of Atlas when checking whether a model fits.
 _SWITCH_RESERVE_MB = 300
+# Fewest generated tokens a switch's test answer needs before its rate is stored.
+_SPEED_MIN_TOKENS = 24
 # switch_model(overrides=…) default: keep the model's saved overrides.
 _UNCHANGED = object()
 
@@ -5922,13 +5924,17 @@ class AIManager:
             raise ModelSwitchError(f"{prof['label']} did not finish downloading.")
 
     def _test_generation(self, settings):
-        """A short real answer: proves the model works and measures its speed."""
+        """A short real answer: proves the model works and measures its speed.
+
+        Counting gives enough tokens for a rate (~3 s). A one-word reply is 1–2
+        tokens, and their rate is noise: 3.4 and 23.6 tokens/s were stored for
+        models that generate ~20 and ~15."""
         payload = json.dumps(self._finalize_payload({
             "model": settings["model"],
-            "messages": [{"role": "user", "content": "Reply with the single word: ready"}],
+            "messages": [{"role": "user", "content": "Count from 1 to 40, separated by commas."}],
             "keep_alive": settings["_profile"]["keep_alive"],
             "stream": False,
-            "options": dict(self._chat_options(settings), num_predict=16),
+            "options": dict(self._chat_options(settings), num_predict=48),
         })).encode()
         req = urllib.request.Request(f"{self.ollama_base}/api/chat", data=payload,
                                      headers={"Content-Type": "application/json"}, method="POST")
@@ -5936,7 +5942,7 @@ class AIManager:
             reply = json.loads(resp.read() or b"{}")
         if not (reply.get("message", {}).get("content") or "").strip():
             raise ModelSwitchError(f"{settings['_profile']['label']} loaded but gave no answer.")
-        if reply.get("eval_count") and reply.get("eval_duration"):
+        if (reply.get("eval_count") or 0) >= _SPEED_MIN_TOKENS and reply.get("eval_duration"):
             return round(reply["eval_count"] / (reply["eval_duration"] / 1e9), 1)
         return None
 

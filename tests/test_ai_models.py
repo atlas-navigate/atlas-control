@@ -154,6 +154,7 @@ class FakeOllama:
         self.installed = {"qwen2.5:3b", "qwen3-embedding:0.6b"}
         self.loaded = {}                      # name -> options
         self.fail_load = set()
+        self.eval_count = 48                  # tokens per answer, at 12 tokens/s
         self.pull_lines = None                # None = succeeds
         self.calls = []
         self.order = []                       # ("chat"|"embed", model, options) as loaded
@@ -190,8 +191,8 @@ class FakeOllama:
                 raise urllib.error.HTTPError(url, 500, "model requires more system memory", {}, None)
             self.loaded[model] = body.get("options")
             self.order.append(("chat", model, body.get("options")))
-            return _Resp(json.dumps({"message": {"content": "ready"}, "eval_count": 12,
-                                     "eval_duration": 1_000_000_000}).encode())
+            return _Resp(json.dumps({"message": {"content": "1, 2, 3"}, "eval_count": self.eval_count,
+                                     "eval_duration": self.eval_count / 12 * 1e9}).encode())
         if path == "/api/pull":
             lines = self.pull_lines
             if lines is None:
@@ -250,6 +251,14 @@ class SwitchTests(unittest.TestCase):
         loads = [(kind, model) for kind, model, _ in self.ollama.order[1:]]
         self.assertLess(loads.index(("chat", "qwen3.5:4b")), loads.index(("embed", "qwen3-embedding:0.6b")))
         self.assertEqual(self.ollama.loaded["qwen3-embedding:0.6b"], {"num_ctx": 1024, "num_gpu": 0})
+
+    def test_a_reply_too_short_to_time_stores_no_speed(self):
+        # One or two tokens gave 3.4 tokens/s for a model that runs at ~20.
+        self.ollama.installed.add("qwen3.5:4b")
+        self.ollama.eval_count = 2
+        self.mgr.switch_model("qwen3.5:4b")
+        self.assertEqual(self.wait()["result"], "success")
+        self.assertIsNone(json.loads(database.ai_get_settings()["measured:qwen3.5:4b"])["tok_s"])
 
     def test_switching_back_puts_the_embedder_on_the_gpu_first(self):
         self.ollama.installed.add("qwen3.5:4b")
