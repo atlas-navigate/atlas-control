@@ -102,6 +102,32 @@ read, reboot/shutdown, update apply/cancel/status. Wi-Fi passwords are
 written by root into NetworkManager keyfiles — never on a command line,
 never in `sudo` logs. There are no `/etc/sudoers.d/atlas-*` files.
 
+## Service sandboxes
+
+Every network-facing service runs in a systemd sandbox that ships with the
+release, so updates keep it current and `atlas-engine check` reports drift.
+`systemd-analyze security` scores, scored offline the same way before and
+after (lower is better):
+
+| Service | Before | After | What it may still do |
+|---|---|---|---|
+| `atlas-control` (the app) | 7.4 | 3.8 | No capabilities (`CapabilityBoundingSet=`). Only UNIX, IP, netlink and Bluetooth sockets. It can't load kernel modules, change kernel tunables, read kernel logs or create namespaces, and runs native syscalls only. |
+| `nginx` | 9.4 | 5.7 | Its root master binds 80/443 and reads the TLS key. `/usr`, `/boot` and `/etc` are read-only, and `/home` is hidden. No new privileges, no W^X memory (PCRE JIT is off), no kernel or clock changes. |
+| `ollama` | 9.0 | 6.1 | Writes only its models and its own home. `/home` is read-only, `/tmp` is private, and no new privileges. |
+
+Settings left out on purpose, so features keep working:
+
+- The app keeps its devices. `PrivateDevices` and `ProtectClock` would close
+  the radio, GPS, I²C and GPIO nodes. `ProtectHostname` would hide a new
+  `.local` name until a restart. `MemoryDenyWriteExecute` would break cffi
+  callbacks.
+- Ollama keeps its GPU. `PrivateDevices` and `DeviceAllow` would close the
+  GPU nodes, and `MemoryDenyWriteExecute` would stop CUDA compiling kernels
+  at run time.
+
+The radio and GPS udev rules also carry `ID_MM_DEVICE_IGNORE`, so
+ModemManager never probes them with AT commands.
+
 ## Code integrity and updates
 
 Code lives in root-owned, read-only release directories under
@@ -154,7 +180,9 @@ only on units with `/etc/atlas/dev-mode`. See [UPDATES.md](UPDATES.md) and
 
 Each unit gets its own identity at provisioning; the payload drive never
 carries a database, hotspot password, Wi-Fi list, secret key or identity.
-Retail units have setup-account passwords locked and SSH masked. See
+Retail units have setup-account passwords locked and SSH masked. They boot
+headless, with Docker, containerd, snapd and ModemManager masked: nothing
+listens or runs that Atlas does not use. See
 [MANUFACTURING.md](MANUFACTURING.md).
 
 ## Known limits

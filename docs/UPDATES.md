@@ -13,8 +13,9 @@ wrong is either retried, reported in plain words, or undone automatically.
 | Connection drops mid-download | Download paused — waiting for Internet connection. (resumes by itself) |
 | Download fails verification | Update could not be verified. |
 | Not enough storage | There is not enough free storage for this update. |
-| Install fails its health check | The update could not be completed. Atlas has restored the previous version. |
-| Success | Atlas X — Atlas is up to date. |
+| Install fails its health check | The update to Atlas Y could not be completed, so Atlas went back to X. Your maps, conversations and settings are unchanged. Try again later; if it happens again, free some storage first. |
+| Install refused (e.g. verification) | *(the reason)* Atlas X is still installed. *(same next step)* |
+| Success | ✓ Updated to Atlas Y — with that release's "What's new" notes, until another release is found |
 
 While installing, the page (and the phone apps) show "Atlas is installing an
 update and restarting." Browsers are served a static status page by nginx
@@ -54,11 +55,53 @@ an fsynced journal (`/var/lib/atlas-update/journal.json`):
 | STAGING | safe extraction: regular files and directories only, no `..`, no links, no setuid, size/count caps |
 | VENV | Python environment reused or built offline from the release's wheels |
 | STAGED | byte-compiled, `.complete` marker, renamed to `releases/<version>` |
-| APPLYING_SYSTEM | app stopped; database probed as `atlas`; units/nginx/firewall/udev/avahi installed and validated (`nginx -t`, `systemd-analyze verify`, firewall loaded in a probe chain, `udevadm verify`) — restored at once on failure |
+| APPLYING_SYSTEM | app stopped; database probed as `atlas`; the release's system files installed and validated (see below) — restored at once on failure; then the release's power mode |
 | SWITCHED | `current` → new release, app started, nginx reloaded |
 | HEALTH_CHECK | loopback and through nginx with the pinned certificate: version, release path of the running process, database, schema window, 30 s of stability; 180 s budget |
 | COMMITTING | `installed.json`, `previous`, keyring upgrade, prune (keeps current, previous, factory) |
 | ROLLING_BACK | system files restored, `current` → previous, database restored if the old release cannot read it, restart, re-check |
+
+## The release's system files
+
+`system/files.json` lists everything outside `/opt/atlas` a release owns.
+Every update installs it with a backup of what it replaces, validates it, and
+restores all of it if anything fails. Only what changed is reloaded.
+
+| Entry | Example | Validated by | Applied by |
+|---|---|---|---|
+| `files`, kind `systemd` | Atlas's units, `zram-swap.service` | `systemd-analyze verify` | daemon-reload |
+| `nginx` | site, snippets | `nginx -t` | reload |
+| `nginx-unit` | nginx's sandbox drop-in | `systemd-analyze verify nginx.service` | restart nginx |
+| `ollama` | Ollama drop-in: tuning, llama-server limits, sandbox | `systemd-analyze verify ollama.service` | restart Ollama (only if it changed) |
+| `firewall` | policy | loaded into an unhooked probe chain | reload |
+| `udev` | radio/GPS rules | `udevadm verify` | reload + trigger |
+| `avahi` | `_atlas._tcp` advert | XML parse | reload avahi |
+| `journald` | log size cap | — | restart journald |
+| `sysctl` | `99-atlas-memory.conf` | every line `key = value` | `sysctl --system` |
+| `plain` | helper shims, `atlas-zram` | — | — |
+| `settings` | keys in `/etc/avahi/avahi-daemon.conf` | parses as INI | restart avahi |
+| `remove` | files from older installs (`99-zram.conf`, `/usr/local/sbin/atlas-zram`) | — | backed up, then removed |
+| `enable` | units to enable | — | `systemctl enable` |
+| `power_mode` | `MAXN_SUPER` | found by name in `/etc/nvpmodel.conf` | `nvpmodel -m <id>` when different; skipped on modules without it; never fails an update |
+
+`settings` edits single keys in place and leaves the rest of a file that
+belongs to its package alone. A key keeps its line; duplicates are commented
+out. The edit is idempotent, and a missing package is skipped.
+
+Engine 4 is the first to understand `settings`, `sysctl`, `nginx-unit` and
+`power_mode`. Older engines install engine 4 first (ENGINE_SWITCH), so a
+release that uses them updates any unit.
+
+Two commands work outside an update:
+
+- `atlas-engine check [--json] [--infer]` reports, read-only, whether the
+  unit matches its release ([INSTALL.md](INSTALL.md#atlas-engine-check)).
+- `atlas-engine reapply` installs the current release's system files again,
+  for a unit that drifted. It uses the same validation and restore as an
+  update, and refuses while one is running.
+
+Diagnostic logs (`/var/lib/atlas-update/diag`) are pruned to the newest 20.
+System-file backups and transaction records are pruned to the newest 3.
 
 ## Power loss and crashes
 

@@ -19,7 +19,7 @@ Runs 100% offline — no internet required after installation.
 
 ## Hardware
 
-- Jetson Orin Nano (ARM64, Ubuntu 22.04 / JetPack 6 or Ubuntu 24.04 / JetPack 7)
+- Jetson Orin Nano (ARM64, Ubuntu 24.04 / JetPack 7; installs refuse anything else)
 - NVMe drive (500 GB+ recommended — maps + routing data is large)
 - u-blox GPS receiver
 - Heltec V4 Meshtastic radio
@@ -80,6 +80,12 @@ system packages, the Atlas software through its update engine (no git, no
 sudo rules), the unit's own identity and label, and retail lock-down.
 Building the datasets from scratch (a golden unit) runs the same
 `install.sh` with no payload and needs Internet for a day or two.
+
+`install.sh` runs in ordered stages, each skipping what is already in place,
+so it can be re-run at any time (after a failure, or to repair a working
+unit), unattended with `--yes`. It ends with `atlas-engine check`, the same
+read-only report that tells whether any unit matches its release. Options,
+stages, logs and recovery: [docs/INSTALL.md](docs/INSTALL.md).
 
 A unit installed the old way moves to the new layout with
 `sudo tools/migrate/atlas-migrate apply --bundle <release>` (and back with

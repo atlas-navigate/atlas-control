@@ -43,6 +43,35 @@ turns "the owner chose Qwen3.5 4B" into Ollama options for this unit:
   - Loaded first, Qwen3.5 fits wholly on the GPU, and the embedder then runs
     on the CPU. The profile encodes this (`embedder.load_first`, `on_gpu`).
   - Qwen2.5 keeps today's embedder-first, all-GPU arrangement.
+  - **The margin itself** (fixed 2026-10-19). Even loaded first, a Qwen3.5
+    load can come up a few MiB short of llama-server's 1 GiB free-memory
+    margin. One load missed it by 6 MiB and put 33 of 34 layers on the GPU.
+    On unified memory a layer on the CPU frees nothing, so the release's
+    Ollama drop-in sets `LLAMA_ARG_FIT_TARGET=256` (MiB). The journal shows
+    the same buffers either way, except that the one layer (66 MiB) moves to
+    the GPU. Measured before and after (`ray_bench.py direct decode --runs 5`,
+    `install-before/after-direct-qwen3.5.json`):
+
+    | Qwen3.5 4B, ~2.3–3.2k-token prompts | 33/34 layers (before) | 34/34 (after) |
+    |---|---|---|
+    | Share on the GPU (`/api/ps`) | 82–83% | 100% |
+    | Generation (median of 5) | 13.0 tok/s | 14.5 tok/s (+11.5%) |
+    | Prompt processing | 435 tok/s | 445 tok/s (+2%, noise) |
+    | Prompt time (first token at Ollama) | 5.51 s | 5.38 s |
+    | Whole request (256 tokens) | 26.3 s | 24.2 s (−8%) |
+    | GPU load / CPU while answering | 78% / 14% | 87% / 7.5% |
+    | Board power (VDD_IN) | 16.0 W | 16.7 W |
+    | Hottest zone | 62.5 °C | 63.0 °C |
+
+    Lowest MemAvailable during the run was 705 MB before and 509 MB after.
+    The load allocates the same memory both times, so this is not the
+    setting. The runner before had been up for five hours and was partly
+    swapped out, while the one after had just loaded; this was not isolated.
+    The table below has a 1,270 tok/s prompt rate for Qwen3.5. That figure
+    comes from `models.py`, which divides Ollama's `prompt_eval_count` (it
+    includes cached tokens) by the prompt time, so it is not comparable with
+    the rates here. llama-server's own count on Ray-sized prompts puts
+    Qwen3.5 at 445–460 tok/s.
 
 | Qwen3.5 4B on 8 GB (ctx 4096) | GPU share | Generation | Prompt | Free after |
 |---|---|---|---|---|

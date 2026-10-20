@@ -52,7 +52,10 @@ Capture checks each one is in `payload/ollama/models`, and fails otherwise.
 A unit sold off-grid can't download one later. Capture on a unit of the same
 memory class as the units being built (8 GB Orin Nano → Q4_K_M builds).
 Ollama must be recent enough for every model (`model_profiles.py --min-ollama`,
-0.17.1 for Qwen3.5); `install.sh` upgrades an older staged one when online.
+0.17.1 for Qwen3.5). Capture the version Ray was measured on
+(`model_profiles.py --tested-ollama`, 0.32.1): a unit whose Ollama is missing
+or too old gets exactly that version from `install.sh` when online, and
+`atlas-engine check` warns about any other.
 
 `atlas-mirror.sh` is a separate full-rootfs backup of the golden unit for
 disaster recovery — it contains that unit's own secrets and is never used to
@@ -69,7 +72,12 @@ build units.
    ```
 
    It copies the payload (45–60 min), installs the staged binaries and runs
-   the kit's `install.sh --bundle stage/release`, which:
+   the kit's `install.sh --bundle stage/release --yes --states keep`
+   (unattended: no prompts, only the routing states the payload brought),
+   which:
+   - checks first, in seconds, that this is an Orin on Ubuntu 24.04 with
+     Python 3.12 and that the release is signed by a trusted key — nothing
+     is changed otherwise;
    - installs system packages and skips every dataset already present;
    - installs the Atlas release through its update engine: the `atlas`
      service account, root helper, units, nginx, firewall, udev and mDNS
@@ -85,9 +93,20 @@ build units.
      and address;
    - **locks the unit down for retail** (`finalize-retail.sh`): setup-account
      passwords locked, SSH disabled and masked, the setup account removed
-     from the `atlas` group, mDNS unpinned from one interface name; then it
-     checks there are no sudo rules, the firewall is on and the app is on
-     loopback only.
+     from the `atlas` group, boots headless (`multi-user.target`, from the
+     next boot), Docker, containerd, snapd and ModemManager disabled and
+     masked; then it checks there are no sudo rules, the firewall is on, the
+     app is on loopback only and the release's mDNS settings are in place;
+   - **verifies** the unit with `atlas-engine check`: system files and
+     settings match the release, services running, power mode MAXN_SUPER,
+     kernel settings, swap, Ollama's settings and every model, the firewall
+     and open ports, lock-down, identity, storage. Any `[FAIL]` ends the run
+     with exit status 1 and "installed but NOT ready".
+
+   Everything on screen is also in `/var/log/atlas-install/install-<time>.log`
+   (root only; the last 10 are kept). A run that stops can be re-run as it
+   is: finished steps are skipped. [INSTALL.md](INSTALL.md) has the stages
+   and options.
 3. Print the label and attach it to the unit; the label files hold the setup
    code and hotspot password (mode 0600). Reboot.
 
@@ -95,8 +114,9 @@ build units.
 
 - The log shows "already present — skipping" for every dataset and no
   per-state OSRM processing.
-- `systemctl is-active atlas-control nginx ollama avahi-daemon atlas-firewall`
-  → all active; `sudo finalize-retail.sh --check` → "Ready for retail."
+- `sudo /usr/local/lib/atlas/bin/atlas-engine check` → no `[FAIL]` (install.sh
+  ends with it; after the first reboot, `--infer` also has Ray answer once and
+  reports its speed); `sudo finalize-retail.sh --check` → "Ready for retail."
 - From a phone: scan the label's app QR code in the Atlas app → paired, map
   loads, a cross-state route returns (following roads, not a straight line),
   Ray answers.
