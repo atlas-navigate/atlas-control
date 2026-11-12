@@ -113,6 +113,15 @@ class WorktreeExportTests(unittest.TestCase):
         sha, _ = self.build_release.export_tree("WORKTREE", dest)
         return sha, dest
 
+    def test_an_annotated_release_tag_exports_its_commit(self):
+        self.git("-c", "user.name=t", "-c", "user.email=t@t", "tag", "-a", "v0.1.0", "-m", "Atlas 0.1.0")
+        dest = tempfile.mkdtemp(prefix="atlas-export-out-")
+        self.addCleanup(shutil.rmtree, dest, True)
+        sha, commit_time = self.build_release.export_tree("v0.1.0", dest)
+        self.assertEqual(sha, self.head)
+        self.assertEqual(commit_time, int(self.git("show", "-s", "--format=%ct", "HEAD")))
+        self.assertEqual(sorted(os.listdir(dest)), sorted(self.FILES))
+
     def test_a_clean_tree_exports_head(self):
         self.touch_every_file()
         sha, dest = self.export()

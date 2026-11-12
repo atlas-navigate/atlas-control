@@ -67,7 +67,8 @@ def export_tree(ref, dest):
         if stash.returncode:
             sys.exit(f"git stash create failed: {stash.stderr.strip() or f'exit status {stash.returncode}'}")
         ref = stash.stdout.strip() or "HEAD"
-    sha = subprocess.run(["git", "-C", _common.REPO, "rev-parse", ref],
+    # ^{commit}: an annotated tag (v0.1.0) names a tag object, not the commit.
+    sha = subprocess.run(["git", "-C", _common.REPO, "rev-parse", f"{ref}^{{commit}}"],
                          capture_output=True, text=True, check=True).stdout.strip()
     archive = subprocess.run(["git", "-C", _common.REPO, "archive", "--format=tar", sha],
                              capture_output=True, check=True).stdout
