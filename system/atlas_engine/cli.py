@@ -85,9 +85,10 @@ def identity_main(argv):
         device = identity.ensure()
         # The advert carries the id, key pin and host name: after a cloned
         # disk got a new identity, or a legacy unit its own name, it must not
-        # keep announcing the old ones until the next update.
+        # keep announcing the old ones until the next update. The hotspot's
+        # DNS entry names the host too.
         from . import sysfiles
-        sysfiles.rerender_installed(kinds=("avahi",))
+        sysfiles.rerender_installed(kinds=("avahi", "hotspot-dns"))
     elif cmd == "show":
         device = identity.load() or {}
     elif cmd == "label-json":

@@ -166,6 +166,13 @@
       "template": true
     },
     {
+      "src": "networkmanager/atlas-hotspot-dns.conf",
+      "dst": "/etc/NetworkManager/dnsmasq-shared.d/atlas.conf",
+      "mode": "0644",
+      "kind": "hotspot-dns",
+      "template": true
+    },
+    {
       "src": "journald/atlas-size.conf",
       "dst": "/etc/systemd/journald.conf.d/atlas-size.conf",
       "mode": "0644",

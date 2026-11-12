@@ -96,6 +96,69 @@ def derive_short(serial, salt=0, n=NAME_LEN):
     return "".join(out)
 
 
+# Units made from 2026-11 on: 9 characters, a keyed permutation of the module
+# serial. A permutation can't map two serials to one name, so no two Atlases
+# ever share a name, .local address or Wi-Fi name, however many are made.
+# Jetson module serials are 13 decimal digits (< 10^13 < 29^9). The key is
+# public (it is in this file), so the name does not hide the serial; the
+# serial is printed on the module and is not a secret.
+NAME_LEN_V2 = 9
+_NAME_KEY_V2 = b"atlas-device-name-v2"
+_V2_SPACE = len(ALPHABET) ** NAME_LEN_V2
+_V2_LEFT = len(ALPHABET) ** 4                       # value = left * right_size + right
+_V2_RIGHT = len(ALPHABET) ** (NAME_LEN_V2 - 4)
+_V2_ROUNDS = 10
+
+
+def _v2_round(i, half):
+    digest = hmac.new(_NAME_KEY_V2, f"{i}:{half}".encode(), hashlib.sha256).digest()
+    return int.from_bytes(digest[:8], "big")
+
+
+def _v2_permute(value):
+    """Bijection on [0, 29^9): alternating Feistel rounds over the
+    (29^4, 29^5) split; each round adds a keyed function of one half to the
+    other, so every round, and the whole, can be undone."""
+    left, right = divmod(value, _V2_RIGHT)
+    for i in range(_V2_ROUNDS):
+        if i % 2 == 0:
+            left = (left + _v2_round(i, right)) % _V2_LEFT
+        else:
+            right = (right + _v2_round(i, left)) % _V2_RIGHT
+    return left * _V2_RIGHT + right
+
+
+def _v2_unpermute(value):
+    left, right = divmod(value, _V2_RIGHT)
+    for i in reversed(range(_V2_ROUNDS)):
+        if i % 2 == 0:
+            left = (left - _v2_round(i, right)) % _V2_LEFT
+        else:
+            right = (right - _v2_round(i, left)) % _V2_RIGHT
+    return left * _V2_RIGHT + right
+
+
+def _v2_encode(value):
+    out = []
+    for _ in range(NAME_LEN_V2):
+        value, digit = divmod(value, len(ALPHABET))
+        out.append(ALPHABET[digit])
+    return "".join(reversed(out))
+
+
+def derive_name_v2(serial):
+    """(short, scheme) for a new unit: 9 characters of ALPHABET.
+
+    A numeric serial below 29^9 goes through the permutation ("serial-v2":
+    unique by construction). Anything else falls back to 9 HMAC characters
+    ("hmac9": 29^9 ≈ 1.5e13 values, so a clash is vanishingly unlikely but
+    not impossible)."""
+    serial = str(serial or "").strip()
+    if serial.isdigit() and int(serial) < _V2_SPACE:
+        return _v2_encode(_v2_permute(int(serial))), "serial-v2"
+    return derive_short(serial, 0, NAME_LEN_V2), "hmac9"
+
+
 HOSTNAME_RE = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
 
 
@@ -183,7 +246,12 @@ def load():
 def create(hotspot_password=None, legacy_alias=None, reason="new", salt=0):
     """Generate a complete identity. Returns device.json contents."""
     serial = module_serial()
-    short = derive_short(serial, salt) if serial else _code(NAME_LEN)
+    if not serial:
+        short, scheme = _code(NAME_LEN_V2), "random"
+    elif salt:
+        short, scheme = derive_short(serial, salt, NAME_LEN_V2), "hmac9"
+    else:
+        short, scheme = derive_name_v2(serial)
     name = f"Atlas-{short}"
     host = f"atlas-{short.lower()}"
     aliases = [legacy_alias] if legacy_alias and legacy_alias != host else []
@@ -195,8 +263,10 @@ def create(hotspot_password=None, legacy_alias=None, reason="new", salt=0):
     fsutil.atomic_write_bytes(_d("tls", "key.pem"), key_pem, mode=0o600)
     fsutil.atomic_write_bytes(_d("tls", "cert.pem"), cert_pem, mode=0o644)
 
+    # Atlas's own Wi-Fi is named after the address the owner opens next.
     password = hotspot_password or FACTORY_HOTSPOT_PASSWORD
-    _write_hotspot({"ssid": name, "password": password, "shared": password == FACTORY_HOTSPOT_PASSWORD})
+    _write_hotspot({"ssid": f"{host}.local", "password": password,
+                    "shared": password == FACTORY_HOTSPOT_PASSWORD})
 
     _write_setup_code(_grouped())
 
@@ -212,6 +282,7 @@ def create(hotspot_password=None, legacy_alias=None, reason="new", salt=0):
         "name": name,
         "short": short,
         "name_salt": int(salt),
+        "name_scheme": scheme,
         "hostname": host,
         "aliases": aliases,
         "serial": serial,
@@ -254,6 +325,7 @@ def ensure(adopt_hotspot_password=None, legacy_alias=None):
             return device
         device = migrate_legacy_hostname(device)
         reconcile_hostname(device)
+        migrate_factory_ssid(device)
         return device
     pw = adopt_hotspot_password
     if pw in DEFAULT_HOTSPOT_PASSWORDS:
@@ -281,6 +353,23 @@ def migrate_legacy_hostname(device):
         pass   # the old certificate still serves; browsers warn either way (self-signed)
     fsutil.atomic_write_json(_d("device.json"), device, mode=0o644)
     return device
+
+
+def migrate_factory_ssid(device):
+    """Units made before 2026-11 named their Wi-Fi after the device
+    (Atlas-XXXX). Its name is now the .local address (atlas-xxxx.local), so
+    the name on the network list is the one to open. Only the factory name
+    moves; the password, and a name the owner chose in Settings (kept by the
+    app, not here), stay. Returns True when hotspot.json changed."""
+    hotspot = fsutil.read_json(_d("hotspot.json"), None)
+    host = device.get("hostname")
+    if not isinstance(hotspot, dict) or not host:
+        return False
+    if hotspot.get("ssid") not in (device.get("name"), "Atlas-Hotspot"):
+        return False
+    hotspot["ssid"] = f"{host}.local"
+    _write_hotspot(hotspot)
+    return True
 
 
 def reissue_cert(device):
@@ -390,13 +479,16 @@ def label_text(payload=None):
     return "\n".join([
         f"{p['name']}   https://{p['hostname']}.local",
         "",
-        "  Setup code — type this to pair a phone or browser:",
-        f"      {p['setup_code']}",
-        "",
-        "  Atlas's own Wi-Fi (not needed to pair on your network):",
+        "  Atlas's own Wi-Fi (not needed when Atlas is on your network):",
         f"      Name:      {p['hotspot_ssid']}",
         f"      Password:  {p['hotspot_password']}" + ("   (the standard password on every Atlas)"
                                                        if p.get("hotspot_shared") else ""),
+        "",
+        "  To connect the first phone: open the Atlas app, press the button on",
+        "  Atlas and pick the colour its light shows.",
+        "",
+        "  Setup code — the backup when the button can't be used:",
+        f"      {p['setup_code']}",
         "",
     ])
 

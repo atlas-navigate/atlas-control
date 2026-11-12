@@ -45,6 +45,9 @@ KINDS_RELOAD = {
     "avahi-daemon": [["systemctl", "try-restart", "avahi-daemon"]],
     # A drop-in for nginx's own unit (its sandbox): a restart applies it.
     "nginx-unit": [["systemctl", "daemon-reload"], ["systemctl", "try-restart", "nginx"]],
+    # The hotspot's DNS entry (dnsmasq-shared.d): NetworkManager starts that
+    # dnsmasq with the hotspot, which reads it then. Nothing to restart.
+    "hotspot-dns": [],
 }
 
 
@@ -286,6 +289,16 @@ def validate(spec, changed, runner):
                     line = line.strip()
                     if line and not line.startswith(("#", ";")) and "=" not in line:
                         raise SystemFilesError(f"{os.path.basename(dst)}:{n}: not key = value")
+        elif kind == "hotspot-dns":
+            # A bad line stops NetworkManager's dnsmasq, and with it the
+            # hotspot's DHCP: only plain address= entries are allowed.
+            import re
+            with open(dst, encoding="utf-8") as f:
+                for n, line in enumerate(f, 1):
+                    line = line.strip()
+                    if line and not line.startswith("#") and \
+                            not re.fullmatch(r"address=/[a-z0-9.-]+/\d{1,3}(\.\d{1,3}){3}", line):
+                        raise SystemFilesError(f"{os.path.basename(dst)}:{n}: not an address=/name/ip entry")
     for setting in spec.get("settings", []):
         if (setting.get("kind") or "plain") not in changed:
             continue

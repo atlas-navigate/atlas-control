@@ -49,12 +49,33 @@ def device():
 
 
 def hotspot():
-    """{ssid, password} from the label, or None."""
+    """{ssid, password} from the label, or None.
+
+    Atlas's own Wi-Fi is named after its .local address (atlas-xxxx.local),
+    the name the owner then opens. Units made before that still carry their
+    device name (Atlas-XXXX) in hotspot.json until the engine moves it; they
+    get the new name here already."""
     try:
         with open(_path("hotspot.json"), encoding="utf-8") as f:
-            return json.load(f)
+            label = json.load(f)
     except (OSError, ValueError):
         return None
+    if isinstance(label, dict):
+        label["ssid"] = default_ssid(label.get("ssid"))
+    return label
+
+
+def default_ssid(ssid=None):
+    """The factory Wi-Fi name: <hostname>.local. A name that is still an
+    older factory default (the device name, or "Atlas-Hotspot") maps to it;
+    anything else is the owner's choice and is returned unchanged."""
+    dev = device()
+    host = dev.get("hostname") if present() else None
+    if not host:
+        return ssid or "Atlas-Hotspot"
+    if not ssid or ssid in (dev.get("name"), "Atlas-Hotspot"):
+        return f"{host}.local"
+    return ssid
 
 
 def normalize_setup_code(code):

@@ -234,8 +234,56 @@ class IdentityTests(unittest.TestCase):
         self.assertEqual((a["name"], a["hostname"]), (b["name"], b["hostname"]))
         self.assertEqual(a["hostname"], "atlas-" + a["short"].lower())
         self.assertEqual(a["name"], "Atlas-" + a["short"])
-        self.assertEqual(len(a["short"]), 6)
+        self.assertEqual(len(a["short"]), 9)
+        self.assertEqual(a["name_scheme"], "serial-v2")
         self.assertNotEqual(a["tls_spki_sha256"], b["tls_spki_sha256"])   # secrets are never derived
+
+    def test_names_can_never_collide(self):
+        # A permutation of the serial: undoable, so two serials never share a name.
+        import random
+        ident = self.identity
+        rng = random.Random(7)
+        for value in [0, 1, ident._V2_SPACE - 1] + [rng.randrange(ident._V2_SPACE) for _ in range(500)]:
+            self.assertEqual(ident._v2_unpermute(ident._v2_permute(value)), value)
+        base = 1423425090000
+        names = {ident.derive_name_v2(str(base + i))[0] for i in range(20000)}
+        self.assertEqual(len(names), 20000)                     # neighbouring serials: all different
+        for name in list(names)[:200]:
+            self.assertRegex(name, rf"^[{ident.ALPHABET}]{{9}}$")
+        self.assertEqual(ident.derive_name_v2("NVME-SN-1")[1], "hmac9")   # not a module serial
+
+    def test_wifi_is_named_after_the_local_address(self):
+        d = self.sb.paths.IDENTITY
+        with mock.patch.object(self.identity, "module_serial", return_value="1423425090328"):
+            device = self.identity.ensure()
+        hotspot = json.load(open(os.path.join(d, "hotspot.json")))
+        self.assertEqual(hotspot["ssid"], device["hostname"] + ".local")
+        self.assertLessEqual(len(hotspot["ssid"]), 32)
+
+    def test_older_units_wifi_moves_to_the_local_address_but_keeps_its_password(self):
+        d = self.sb.paths.IDENTITY
+        device = self.identity.ensure()
+        path = os.path.join(d, "hotspot.json")
+        hotspot = json.load(open(path))
+        json.dump(dict(hotspot, ssid=device["name"], password="kept-password-1"), open(path, "w"))
+        self.identity.ensure()
+        moved = json.load(open(path))
+        self.assertEqual(moved["ssid"], device["hostname"] + ".local")
+        self.assertEqual(moved["password"], "kept-password-1")
+        json.dump(dict(moved, ssid="Cabin Wi-Fi"), open(path, "w"))
+        self.identity.ensure()
+        self.assertEqual(json.load(open(path))["ssid"], "Cabin Wi-Fi")      # not a factory name: left alone
+
+    def test_app_sees_the_new_wifi_name_before_the_engine_moves_it(self):
+        import device_identity
+        d = self.sb.paths.IDENTITY
+        device = self.identity.ensure()
+        path = os.path.join(d, "hotspot.json")
+        json.dump(dict(json.load(open(path)), ssid=device["name"]), open(path, "w"))
+        with mock.patch.object(device_identity, "IDENTITY_DIR", d):
+            self.assertEqual(device_identity.hotspot()["ssid"], device["hostname"] + ".local")
+            self.assertEqual(device_identity.default_ssid("Atlas-Hotspot"), device["hostname"] + ".local")
+            self.assertEqual(device_identity.default_ssid("Owner-Net"), "Owner-Net")
 
     def test_no_serial_falls_back_to_a_random_code(self):
         with mock.patch.object(self.identity, "module_serial", return_value=None):
@@ -291,8 +339,9 @@ class IdentityTests(unittest.TestCase):
         self.assertRegex(code, r"^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$")
         self.assertRegex(pw, r"^[a-z0-9]{4}(-[a-z0-9]{4}){3}$")
         text = self.identity.label_text()
-        self.assertIn("Setup code — type this to pair", text)
-        self.assertLess(text.index(code), text.index(pw))
+        self.assertIn("Setup code — the backup", text)
+        self.assertIn("press the button", text)
+        self.assertLess(text.index(pw), text.index(code))
         self.assertIsNone(re.search(r"setup code", text.split(code)[1], re.I))   # the code is the only "setup code"
 
     def test_setup_code_check_and_replacement(self):
@@ -482,6 +531,26 @@ class DiscoveryFilesTests(unittest.TestCase):
         self.assertIn(f"id={clone['device_id']}", text)
         self.assertIn(f"fp={clone['tls_spki_sha256']}", text)
         self.assertEqual(sysfiles.rerender_installed(), [])          # unchanged: nothing written
+
+
+    def test_hotspot_dns_names_this_atlas_and_is_checked(self):
+        sb = Sandbox()
+        self.addCleanup(sb.cleanup)
+        from atlas_engine import identity, sysfiles
+        device = identity.ensure()
+        release = os.path.join(sb.root, "rel")
+        shutil.copytree(os.path.join(REPO, "system"), os.path.join(release, "system"))
+        with mock.patch("atlas_engine.firewall.check", return_value=mock.Mock(returncode=0)):
+            sysfiles.install(release, os.path.join(sb.root, "bk"), sb.runner)
+        dns = sb.paths.p("/etc/NetworkManager/dnsmasq-shared.d/atlas.conf")
+        lines = [l for l in open(dns).read().splitlines() if l and not l.startswith("#")]
+        self.assertEqual(lines, [f"address=/{device['hostname']}.local/10.42.0.1"])
+        spec = {"files": [{"src": "x", "dst": "/etc/NetworkManager/dnsmasq-shared.d/atlas.conf",
+                           "kind": "hotspot-dns"}]}
+        sysfiles.validate(spec, {"hotspot-dns"}, sb.runner)
+        open(dns, "a").write("server=8.8.8.8\n")
+        with self.assertRaises(sysfiles.SystemFilesError):
+            sysfiles.validate(spec, {"hotspot-dns"}, sb.runner)
 
 
 class OllamaDropInTests(unittest.TestCase):

@@ -11,8 +11,9 @@ hold the setup code and hotspot password). The label carries:
   - a standard Wi-Fi QR code — any phone camera joins Atlas's own network
   - the Atlas app QR code (ATLAS1:…): the app pairs with no typing and
     trusts this unit's TLS key from the very first connection
-  - the name, the hotspot name and password, the setup code, and the
-    address to open in a browser
+  - the name, the hotspot name (which is also the address to open,
+    atlas-xxxx.local) and password, how to connect (press the Atlas button,
+    pick the colour it shows) and the setup code, the backup for that
 """
 import argparse
 import json
@@ -46,8 +47,10 @@ def svg_qr(m, x, y, size):
 
 
 def lines_for(label):
-    return [("Wi-Fi", label["hotspot_ssid"]), ("Password", label["hotspot_password"]),
-            ("Setup code", label["setup_code"]), ("Open", f"https://{label['hostname']}.local")]
+    # The Wi-Fi name is the .local address the owner opens next, so it is
+    # printed once; the setup code is only the backup for the button.
+    return [("Wi-Fi name = address", label["hotspot_ssid"]), ("Password", label["hotspot_password"]),
+            ("Then", "press button, pick colour"), ("Setup code (backup)", label["setup_code"])]
 
 
 def render_svg(label):
@@ -120,8 +123,8 @@ def main():
     os.makedirs(args.out, mode=0o700, exist_ok=True)
     base = os.path.join(args.out, label["name"])
     write_private(base + ".svg", render_svg(label).encode())
-    write_private(base + ".txt", ("\n".join(f"{k}: {v}" for k, v in [("Name", label["name"])] + lines_for(label))
-                                  + "\n").encode())
+    facts = [("Name", label["name"])] + lines_for(label) + [("Open", f"https://{label['hostname']}.local")]
+    write_private(base + ".txt", ("\n".join(f"{k}: {v}" for k, v in facts) + "\n").encode())
     written = [base + ".svg", base + ".txt"]
     if not args.no_png:
         write_private(base + ".png", b"")
