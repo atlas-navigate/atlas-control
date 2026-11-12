@@ -275,13 +275,24 @@ class UpdateManager:
                       message="Atlas is up to date.")
             return self.snapshot()
         bundle_url = manifest["bundle"].get("url") or f"{rel}/{manifest['bundle']['name']}"
-        os.makedirs(self.dir, exist_ok=True)
+        self._make_dir()
         self._write(MANIFEST, mbytes)
         self._write(SIGNATURE, sig)
         self._set(state="available", stage=None, manifest=manifest, bundle_url=bundle_url,
                   release_dir=rel, last_check=self.clock(), result=None, installed_update=None,
                   message=f"Atlas {manifest['version']} is available.")
         return self.snapshot()
+
+    def _make_dir(self):
+        """The hand-off folder, writable by the atlas group (2770): developer
+        deploys (tools/release/handoff.py) drop releases into it as a group
+        member. The app's umask (0027) would leave it 2750."""
+        os.makedirs(self.dir, exist_ok=True)
+        try:
+            if os.stat(self.dir).st_uid == os.geteuid():
+                os.chmod(self.dir, 0o2770)
+        except OSError:
+            pass
 
     def _write(self, name, data):
         tmp = os.path.join(self.dir, name + ".tmp")

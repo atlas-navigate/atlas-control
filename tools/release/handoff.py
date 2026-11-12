@@ -47,6 +47,15 @@ def stage_files(release_dir, ready):
         os.makedirs(ready, exist_ok=True)
         os.chown(ready, atlas.pw_uid, atlas.pw_gid)
         os.chmod(ready, 0o2770)
+    elif not os.access(ready, os.W_OK):
+        # Left 2750 by an older app (its umask). updates/ is group-writable,
+        # so an empty folder can be replaced by one the group can write to.
+        try:
+            os.rmdir(ready)
+            os.mkdir(ready, 0o2770)
+            os.chmod(ready, 0o2770)
+        except OSError as exc:
+            raise SystemExit(f"cannot write to {ready} ({exc.strerror}); run this with sudo once")
     for old in os.listdir(ready):
         try:
             os.unlink(os.path.join(ready, old))

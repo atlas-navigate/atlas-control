@@ -433,6 +433,18 @@ class HandoffTests(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(os.path.join(self.state, "updates", "ready"))),
                          ["atlas-1.tar.xz", "atlas-release.json", "atlas-release.json.sig"])
 
+    def test_a_hand_off_folder_without_group_write_is_replaced(self):
+        # An older app left it 2750 (its umask): a developer deploy, as a
+        # member of the atlas group, could not drop the release in.
+        ready = os.path.join(self.state, "updates", "ready")
+        os.unlink(os.path.join(ready, "stale"))
+        os.chmod(ready, 0o2550)
+        self.addCleanup(lambda: os.path.isdir(ready) and os.chmod(ready, 0o700))
+        r = self.handoff(new_status={"txid": "new", "engine_state": "IDLE", "stage": "success"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(os.stat(ready).st_mode & 0o7777, 0o2770)
+        self.assertIn("atlas-release.json", os.listdir(ready))
+
     def test_a_rollback_is_a_failure(self):
         r = self.handoff(new_status={"txid": "new", "engine_state": "IDLE", "stage": "rolled_back",
                                      "message": "restored"})
