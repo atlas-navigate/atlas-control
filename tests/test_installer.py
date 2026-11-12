@@ -91,6 +91,13 @@ if [[ "$args" == *"migrate.py apply"* ]]; then
     exit 0
 fi
 if [[ "$args" == *"handoff.py"* ]]; then echo "    success: Atlas is up to date"; exit 0; fi
+if [[ "$args" == *"status_button.py --probe"* ]]; then         # the I2C bus is real hardware: never probed here
+    case "${FAKE_BUTTON:-ok}" in
+        ok) echo '{"found": true, "bus": 1, "addr": "0x2a", "right_pins": true}'; exit 0 ;;
+        wrong_pins) echo '{"found": true, "bus": 7, "addr": "0x2a", "right_pins": false}'; exit 3 ;;
+        *) echo '{"found": false}'; exit 2 ;;
+    esac
+fi
 exec /usr/bin/python3 "$@"
 '''
 
@@ -170,8 +177,8 @@ class Unit:
             f.write(text)
         os.chmod(path, mode)
 
-    def run(self, *args, env=None, dev=True):
-        cmd = ["bash", os.path.join(REPO, "install.sh"), "--bundle", self.bundle, *args]
+    def run(self, *args, env=None, dev=True, bundle=True):
+        cmd = ["bash", os.path.join(REPO, "install.sh"), *(["--bundle", self.bundle] if bundle else []), *args]
         if dev:
             cmd += ["--dev-key", self.dev_key]
         e = {"PATH": f"{self.bin}:/usr/bin:/bin", "HOME": self.tmp, "SUDO_USER": USER, "LANG": "C.UTF-8",
@@ -343,12 +350,112 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("Retail lock-down failed (see above) — this unit must not ship.", r.out)
         self.assertNotIn("is ready", r.out)
 
+    def test_the_atlas_button_is_checked(self):
+        # A developer unit without its button is installed with a warning.
+        r = self.u.run(env={"FAKE_BUTTON": "absent"})
+        self.assertOk(r)
+        self.assertIn("No Atlas button found", r.out)
+        # On the 400 kHz pins it stops responding: never "ready".
+        r = self.u.run("--only", "verify", env={"FAKE_BUTTON": "wrong_pins"})
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("Move its D wire to pin 27 and C to pin 28", r.out)
+        # A retail unit without it must not ship.
+        r = self.u.run("--only", "verify", dev=False, env={"FAKE_BUTTON": "absent"})
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("this unit must not ship without it", r.out)
+        r = self.u.run("--only", "verify")
+        self.assertOk(r)
+        self.assertIn("Atlas button found", r.out)
+
     def test_help(self):
         r = subprocess.run(["bash", os.path.join(REPO, "install.sh"), "--help"], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0)
-        for word in ("--states", "--yes", "98 verify", "55 uart"):
+        for word in ("--states", "--yes", "98 verify", "55 uart", "--from-github"):
             self.assertIn(word, r.stdout)
         self.assertNotIn("╚", r.stdout)
+
+
+class FromGitHubTests(unittest.TestCase):
+    """install.sh --from-github: a signed release from a (local) release server."""
+
+    def setUp(self):
+        import base64
+        import functools
+        import http.server
+        import threading
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+        sys.path.insert(0, os.path.join(REPO, "system"))
+        from atlas_engine import verify
+        self.u = Unit()
+        self.addCleanup(self.u.cleanup)
+        self.key = Ed25519PrivateKey.generate()
+        raw = self.key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+        Unit._write(self.u.dev_key, base64.b64encode(raw).decode() + "\n")
+        self.served = os.path.join(self.u.tmp, "served")
+        self.publish("v1.2.3", self.key, verify)
+        handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=self.served)
+        handler.log_message = lambda *a: None
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.server.shutdown)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}/releases"
+
+    def publish(self, tag, key, verify):
+        rel = os.path.join(self.served, "releases", tag)
+        os.makedirs(rel)
+        data = os.urandom(300 * 1024)
+        with open(os.path.join(rel, "atlas-1.2.3.tar.xz"), "wb") as f:
+            f.write(data)
+        manifest = {"format": 1, "product": "atlas-control", "arch": "aarch64", "version": "1.2.3", "seq": 5,
+                    "min_engine": 1, "engine_version": 5, "notes": ["Test release"],
+                    "bundle": {"name": "atlas-1.2.3.tar.xz", "url": "", "size": len(data),
+                               "sha256": hashlib.sha256(data).hexdigest(), "unpacked_size": 1024 * 1024},
+                    "db": {"schema_target": 5, "compat_floor": 0}}
+        mbytes = json.dumps(manifest).encode()
+        with open(os.path.join(rel, "atlas-release.json"), "wb") as f:
+            f.write(mbytes)
+        with open(os.path.join(rel, "atlas-release.json.sig"), "wb") as f:
+            f.write(verify.sign_manifest(mbytes, key))
+
+    def test_downloads_verifies_and_installs_the_release(self):
+        r = self.u.run("--from-github", "v1.2.3", bundle=False, env={"ATLAS_RELEASES_URL": self.url})
+        self.assertEqual(r.returncode, 0, r.out[-4000:])
+        self.assertIn("Atlas 1.2.3 — signed by key", r.out)
+        got = self.u.p("/atlas_data/release-download")
+        self.assertTrue(os.path.exists(os.path.join(got, "atlas-1.2.3.tar.xz")))
+        log = open(os.path.join(self.u.state, "python.log")).read()
+        # Then installed exactly as a payload drive's release is: verified again, then applied.
+        self.assertIn(f"migrate.py check --bundle {got}", log)
+        self.assertIn(f"migrate.py apply --bundle {got}", log)
+        self.assertIn("Atlas-TEST is ready.", r.out)
+
+    def test_a_release_from_an_untrusted_key_changes_nothing(self):
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        from atlas_engine import verify
+        self.publish("v6.6.6", Ed25519PrivateKey.generate(), verify)
+        r = self.u.run("--from-github", "v6.6.6", bundle=False, env={"ATLAS_RELEASES_URL": self.url})
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("not signed by a key this kit trusts", r.out)
+        self.assertIn("nothing was changed", r.out)
+        # Refused before the bundle was downloaded, and before any stage ran.
+        self.assertFalse(os.path.exists(self.u.p("/atlas_data/release-download/atlas-1.2.3.tar.xz")))
+        self.assertEqual(r.calls, [])
+
+    def test_not_both_and_only_https_for_retail(self):
+        r = self.u.run("--from-github", env={"ATLAS_RELEASES_URL": self.url})
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("not both", r.out)
+        r = self.u.run("--from-github", "v1.2.3", bundle=False, dev=False, env={"ATLAS_RELEASES_URL": self.url})
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("refusing an insecure release address", r.out)
+
+    def test_installs_from_where_atlas_later_updates(self):
+        pattern = r'DEFAULT_RELEASES_URL = "([^"]+)"'
+        fetch = re.search(pattern, open(os.path.join(REPO, "tools", "release", "fetch_release.py")).read())
+        updater = re.search(pattern, open(os.path.join(REPO, "update_manager.py")).read())
+        self.assertEqual(fetch.group(1), updater.group(1))
 
 
 class InstallerSourceTests(unittest.TestCase):

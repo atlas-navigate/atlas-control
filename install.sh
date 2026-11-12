@@ -7,8 +7,12 @@
 # ║  (tools/manufacturing/atlas-provision.sh runs it):                       ║
 # ║                                                                          ║
 # ║  Usage:  sudo ./install.sh --bundle DIR [options]                        ║
+# ║          sudo ./install.sh --from-github [TAG] [options]                 ║
 # ║    --bundle DIR    a signed Atlas release (atlas-release.json, its .sig  ║
 # ║                    and the bundle)                                       ║
+# ║    --from-github [TAG]  download the newest signed release (or TAG)     ║
+# ║                    from GitHub Releases, verify it against this kit's    ║
+# ║                    keys, then install it as --bundle does                ║
 # ║    --labels DIR    where to write this unit's label files                ║
 # ║    --dev-key PUB   developer unit: trust this key, keep SSH, skip retail ║
 # ║                    lock-down (never for sold units)                      ║
@@ -63,6 +67,8 @@ source "$SRC_DIR/tools/install/lib.sh"
 
 # ── Options ─────────────────────────────────────────────────────────────────
 BUNDLE=""
+FROM_GITHUB=""
+GITHUB_TAG=""
 LABELS_DIR=""
 DEV_KEY=""
 STATES=""
@@ -73,6 +79,9 @@ INSTALL_LOG=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --bundle)  BUNDLE="${2:-}"; shift 2 ;;
+        --from-github)
+            FROM_GITHUB=1; shift
+            if [[ $# -gt 0 && "$1" != -* ]]; then GITHUB_TAG="$1"; shift; fi ;;
         --labels)  LABELS_DIR="${2:-}"; shift 2 ;;
         --dev-key) DEV_KEY="${2:-}"; shift 2 ;;
         --states)  STATES="${2:-}"; shift 2 ;;
@@ -85,15 +94,20 @@ while [[ $# -gt 0 ]]; do
             die "Atlas updates itself from signed releases (Settings → Software Update);
     install.sh only sets up units. On a developer unit use tools/dev/deploy." ;;
         -h|--help)
-            sed -n '3,46p' "$SCRIPT_DIR/install.sh" | sed 's/^# ║ \{0,2\}//; s/ *║$//'
+            sed -n '3,50p' "$SCRIPT_DIR/install.sh" | sed 's/^# ║ \{0,2\}//; s/ *║$//'
             exit 0 ;;
         *) die "Unknown option: $1  (try --help)" ;;
     esac
 done
-[[ -n "$BUNDLE" && -f "$BUNDLE/atlas-release.json" ]] \
-    || die "Give the signed Atlas release to install:  sudo ./install.sh --bundle DIR"
-BUNDLE="$(cd "$BUNDLE" && pwd)"
+if [[ -n "$FROM_GITHUB" ]]; then
+    [[ -z "$BUNDLE" ]] || die "Use --bundle DIR or --from-github, not both"
+else
+    [[ -n "$BUNDLE" && -f "$BUNDLE/atlas-release.json" ]] \
+        || die "Give the signed Atlas release to install:  sudo ./install.sh --bundle DIR  (or --from-github)"
+    BUNDLE="$(cd "$BUNDLE" && pwd)"
+fi
 [[ -z "$DEV_KEY" || -f "$DEV_KEY" ]] || die "Developer key not found: $DEV_KEY"
+[[ -z "$DEV_KEY" ]] || DEV_KEY="$(cd "$(dirname "$DEV_KEY")" && pwd)/$(basename "$DEV_KEY")"
 if [[ -n "$STATES" ]]; then
     STATES="$(normalize_states "$STATES")" \
         || die "Unknown state: $STATES (use abbreviations such as MD VA, or all / keep / none)"
@@ -136,6 +150,16 @@ chmod 700 "$LOG_DIR"
 find "$LOG_DIR" -maxdepth 1 -name 'install-*.log' -printf '%T@ %p\n' \
     | sort -rn | tail -n +11 | cut -d' ' -f2- | xargs -r rm -f
 exec > >(tee -a "$INSTALL_LOG") 2>&1
+
+# ── --from-github: the signed release, downloaded and verified first ───────
+if [[ -n "$FROM_GITHUB" ]]; then
+    BUNDLE="$ATLAS_DATA/release-download"
+    info "Downloading the ${GITHUB_TAG:-newest} signed Atlas release ..."
+    "$SYS_PY" -I "$SRC_DIR/tools/release/fetch_release.py" "$BUNDLE" ${GITHUB_TAG:+--tag "$GITHUB_TAG"} \
+        ${DEV_KEY:+--dev-key "$DEV_KEY"} \
+        || die "Could not download a trusted Atlas release (above) — nothing was changed. Re-run to resume,
+    or bring the release on a drive:  sudo ./install.sh --bundle DIR"
+fi
 
 echo -e "${BLD}${CYN}"
 echo "  ╔══════════════════════════════════════════════════════╗"

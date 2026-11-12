@@ -17,3 +17,26 @@ if (( ${#MODELS_MISSING[@]} )); then
     VERIFY_OK=false
     echo -e "${RED}[✗]${NC} Ray is missing: ${MODELS_MISSING[*]} — re-run install.sh online, or from a payload drive that has them." >&2
 fi
+
+# The Atlas button: the first owner pairs with it, and holding it 15 s resets
+# Atlas. A unit without it can't be set up the intended way.
+# (Standard library and python3-smbus only, so the system Python runs it.)
+BUTTON_SRC="$R/opt/atlas/current/status_button.py"
+[[ -f "$BUTTON_SRC" ]] || BUTTON_SRC="$SRC_DIR/status_button.py"
+set +e
+BUTTON_OUT=$("$SYS_PY" -I "$BUTTON_SRC" --probe 2>&1)
+BUTTON_RC=$?
+set -e
+case "$BUTTON_RC" in
+    0) log "Atlas button found ($BUTTON_OUT)" ;;
+    3) VERIFY_OK=false
+       echo -e "${RED}[✗]${NC} The Atlas button is on header pins 3/5 (I2C bus 7, 400 kHz), where it stops responding." >&2
+       echo "    Move its D wire to pin 27 and C to pin 28 (+ to pin 1, − to pin 6), then re-run: sudo ./install.sh --bundle DIR --only verify" >&2 ;;
+    *) if [[ -n "$DEV_KEY" ]]; then
+           warn "No Atlas button found — owners pair with it and hold it to reset Atlas (wiring: docs/MANUFACTURING.md)"
+       else
+           VERIFY_OK=false
+           echo -e "${RED}[✗]${NC} No Atlas button found — this unit must not ship without it (wiring: docs/MANUFACTURING.md)." >&2
+           [[ -n "$BUTTON_OUT" ]] && echo "    $BUTTON_OUT" >&2
+       fi ;;
+esac

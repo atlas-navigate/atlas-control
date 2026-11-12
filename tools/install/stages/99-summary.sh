@@ -15,9 +15,11 @@ echo -e "  ${BLD}Data storage :${NC} ${APP_DIR#$R}  ($USED)"
 echo -e "  ${BLD}Install log  :${NC} ${INSTALL_LOG#$R}"
 echo ""
 if [[ -n "${UNIT_HOST:-}" ]]; then
-    echo -e "  ${CYN}First use (owner):${NC} scan the label's app QR code with the Atlas app,"
-    echo -e "  or join the Wi-Fi printed on the label and open ${BLD}https://$UNIT_HOST.local${NC}"
-    echo -e "  (the browser warns once about Atlas's own certificate)."
+    echo -e "  ${CYN}First use (owner):${NC} join the Wi-Fi ${BLD}$UNIT_HOST.local${NC} (password on the label),"
+    echo -e "  open the Atlas app or ${BLD}https://$UNIT_HOST.local${NC}, press the Atlas button and pick"
+    echo -e "  the colour its light shows. That device becomes the primary user; it allows"
+    echo -e "  every later device. The setup code on the label is the backup."
+    echo -e "  Holding the button for 15 s (light turns red) resets Atlas to factory settings."
     echo ""
 fi
 if [[ -z "$ROUTING_STATES" ]]; then
