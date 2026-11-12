@@ -352,6 +352,7 @@ local_device_state = local_device.LocalDevice(
 # it, or /socket.io/ traffic would bypass every check. See request_guard.py.
 import request_guard
 import pairing
+import status_button
 import device_identity
 import audit_log
 import perf_metrics
@@ -388,6 +389,7 @@ _AUDITED_ROUTES = [(m, re.compile(rf"^{pat}$"), action, keys) for m, pat, action
     ("POST", r"/api/pair/request/[\w-]+/approve", "device_approved", False),
     ("POST", r"/api/pair/request/[\w-]+/deny", "device_denied", False),
     ("DELETE", r"/api/pair/clients/[\w-]+", "device_removed", False),
+    ("POST", r"/api/pair/clients/[\w-]+/primary", "primary_user_changed", False),
     ("POST", r"/api/update/(?:start|install|apply)", "update_requested", False),
     ("POST", r"/api/update/cancel", "update_cancelled", False),
     ("PUT", r"/api/privacy/retention", "retention_changed", True),
@@ -842,9 +844,14 @@ def api_device_info():
     return jsonify({
         "app": "atlas-control",
         "api": 2,
-        # Pairing protocol the apps speak (claim / hotspot / approval, bearer
-        # tokens, SPKI pin). An app that sees a higher number asks to be updated.
-        "pairing": 1,
+        # Pairing protocol the apps speak (button colour / setup code while
+        # unclaimed, primary-user approval after, bearer tokens, SPKI pin).
+        # An app that sees a higher number asks to be updated.
+        "pairing": pairing.VERSION,
+        # "unclaimed": the first device pairs with the button (or the label);
+        # "owned": new devices ask the primary user.
+        "setup_state": "owned" if pairing.claimed() else "unclaimed",
+        "button": _button_present(),
         "device_id": dev.get("device_id"),
         "name": dev.get("name"),
         "hostname": dev.get("hostname"),
@@ -928,14 +935,30 @@ def api_pair_status():
         "paired": client is not None,
         "device": {"name": dev.get("name"), "id": dev.get("device_id"), "hostname": dev.get("hostname")},
         "via_hotspot": bool(hs and request.environ.get("atlas.server_addr") == str(hs.ip)),
+        "setup_state": "owned" if pairing.claimed() else "unclaimed",
+        "button": _button_present(),
     }
     if client is not None:
-        body["client"] = {"id": client["id"], "name": client["name"], "kind": client["kind"]}
+        body["client"] = {"id": client["id"], "name": client["name"], "kind": client["kind"],
+                          "role": client.get("role") or pairing.MEMBER}
         if request.environ.get("atlas.auth") == "cookie":
             body["csrf"] = pairing.csrf_for(client["token_hash"])
     resp = jsonify(body)
     resp.headers["Cache-Control"] = "no-store"
     return resp
+
+
+def _pair_error(exc, status=403):
+    resp = jsonify({"ok": False, "error": str(exc), "code": getattr(exc, "code", "refused")})
+    resp.headers["Cache-Control"] = "no-store"
+    return resp, status
+
+
+def _owner_only():
+    """None when the caller is the primary user (or pairing is off), else a 403."""
+    if not pairing.required() or pairing.is_owner(request.environ.get("atlas.client")):
+        return None
+    return jsonify({"ok": False, "error": "Only the primary user can do this.", "code": "owner_required"}), 403
 
 
 @app.route("/api/pair/claim", methods=["POST"])
@@ -946,37 +969,73 @@ def api_pair_claim():
     try:
         client_id, token = pairing.claim_with_setup_code(data.get("setup_code"), data.get("name"), kind,
                                                          request.remote_addr or "")
-    except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 403
+    except pairing.PairingError as exc:
+        return _pair_error(exc)
     logger.info("Paired a new %s using the setup code", kind)
+    _button_paired()
     return _pair_response(client_id, token, kind)
 
 
 @app.route("/api/pair/hotspot", methods=["POST"])
-@limiter.limit("10 per minute")
 def api_pair_hotspot():
+    # Pairing protocol 1. Joining Atlas's Wi-Fi no longer proves anything (its
+    # password is the same on every unit): apps that still ask must update.
+    return jsonify({"ok": False, "code": "update_app",
+                    "error": "Update the Atlas app, then press the button on your Atlas to connect."}), 410
+
+
+@app.route("/api/pair/color/start", methods=["POST"])
+@limiter.limit("6 per minute")
+def api_pair_color_start():
+    """Begin pairing by button colour (only while Atlas is unclaimed)."""
     data = request.get_json(silent=True) or {}
-    kind = _pair_kind(data)
     try:
-        client_id, token = pairing.claim_via_hotspot(request.environ, data.get("name"), kind,
-                                                     _hotspot_interface())
-    except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 403
-    logger.info("Paired a new %s over Atlas's hotspot", kind)
-    return _pair_response(client_id, token, kind)
+        view = pairing.color_start(data.get("name"), _pair_kind(data))
+    except pairing.PairingError as exc:
+        return _pair_error(exc, 409 if exc.code == "claimed" else 429)
+    if _button_controller is None or _button_controller.snapshot()["state"] not in ("ok", "wrong_pins"):
+        view["button"] = False         # the page offers the setup code instead
+    resp = jsonify(dict(view, ok=True, palette=status_button.palette()))
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.route("/api/pair/color/<request_id>")
+@limiter.limit("120 per minute")
+def api_pair_color_poll(request_id):
+    resp = jsonify(pairing.color_poll(request_id, request.args.get("secret")))
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.route("/api/pair/color/<request_id>/answer", methods=["POST"])
+@limiter.limit("10 per minute")
+def api_pair_color_answer(request_id):
+    data = request.get_json(silent=True) or {}
+    try:
+        client_id, token, kind = pairing.color_answer(request_id, data.get("secret"), data.get("color"))
+    except pairing.PairingError as exc:
+        return _pair_error(exc)
+    logger.info("Paired a new %s with the Atlas button", kind)
+    _button_paired()
+    return _pair_response(client_id, token, kind, {"status": "paired"})
 
 
 @app.route("/api/pair/request", methods=["POST"])
 @limiter.limit("6 per minute")
 def api_pair_request():
     data = request.get_json(silent=True) or {}
+    if pairing.required() and not pairing.claimed():
+        # Nobody could approve it: the first device pairs with the button.
+        return jsonify({"ok": False, "code": "unclaimed",
+                        "error": "This Atlas isn't set up yet. Press the button on it to connect."}), 409
     try:
         req = pairing.create_request(data.get("name"), _pair_kind(data), data.get("client_nonce"))
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 429
     socketio.emit("pair_request", {"request_id": req["request_id"], "name": pairing._clean_name(
         data.get("name"), _pair_kind(data)), "kind": _pair_kind(data), "match_code": req["match_code"]},
-        to="paired", namespace="/")
+        to="owner", namespace="/")
     return jsonify(dict(req, ok=True))
 
 
@@ -994,20 +1053,29 @@ def api_pair_request_poll(request_id):
 
 @app.route("/api/pair/requests")
 def api_pair_requests():
+    refused = _owner_only()
+    if refused:
+        return refused
     return jsonify(pairing.pending_requests())
 
 
 @app.route("/api/pair/request/<request_id>/approve", methods=["POST"])
 def api_pair_approve(request_id):
+    refused = _owner_only()
+    if refused:
+        return refused
     ok = pairing.decide(request_id, True, request.environ["atlas.client"]["id"])
-    socketio.emit("pair_request_decided", {"request_id": request_id, "approved": True}, to="paired", namespace="/")
+    socketio.emit("pair_request_decided", {"request_id": request_id, "approved": True}, to="owner", namespace="/")
     return jsonify({"ok": ok}), (200 if ok else 404)
 
 
 @app.route("/api/pair/request/<request_id>/deny", methods=["POST"])
 def api_pair_deny(request_id):
+    refused = _owner_only()
+    if refused:
+        return refused
     ok = pairing.decide(request_id, False, request.environ["atlas.client"]["id"])
-    socketio.emit("pair_request_decided", {"request_id": request_id, "approved": False}, to="paired", namespace="/")
+    socketio.emit("pair_request_decided", {"request_id": request_id, "approved": False}, to="owner", namespace="/")
     return jsonify({"ok": ok}), (200 if ok else 404)
 
 
@@ -1019,9 +1087,33 @@ def api_pair_clients():
 
 @app.route("/api/pair/clients/<client_id>", methods=["DELETE"])
 def api_pair_revoke(client_id):
+    """The primary user can remove any device (but not itself while others
+    remain: nobody could allow new devices then); others only themselves."""
+    me = request.environ["atlas.client"]
+    if client_id != me["id"]:
+        refused = _owner_only()
+        if refused:
+            return refused
+    elif pairing.is_owner(me) and len(pairing.list_clients()) > 1:
+        return jsonify({"ok": False, "code": "primary_last",
+                        "error": "Make another device the primary user first."}), 409
     ok = pairing.revoke(client_id)
     if ok:
         _disconnect_sockets(client_id)
+    return jsonify({"ok": ok}), (200 if ok else 404)
+
+
+@app.route("/api/pair/clients/<client_id>/primary", methods=["POST"])
+def api_pair_make_primary(client_id):
+    refused = _owner_only()
+    if refused:
+        return refused
+    me = request.environ["atlas.client"]["id"]
+    ok = pairing.make_primary(client_id)
+    if ok:
+        # Both devices reconnect and join the right Socket.IO rooms.
+        _disconnect_sockets(client_id)
+        _disconnect_sockets(me)
     return jsonify({"ok": ok}), (200 if ok else 404)
 
 
@@ -1035,6 +1127,7 @@ def api_device():
     # Without it, a port-5000 fingerprint sweep can't distinguish Atlas
     # from any other HTTP server that happens to 200 on /api/device.
     info["app"] = "atlas-control"
+    info["button"] = _button_status()
     return jsonify(info)
 
 @app.route("/api/health")
@@ -3411,11 +3504,26 @@ def _restart_hotspot_with_label_credentials():
 def api_factory_reset():
     """Return Atlas to how it left the factory, ready for a new owner.
 
-    Requires {"confirm": "RESET"}. Steps:
+    Requires {"confirm": "RESET"}. Holding the Atlas button for 15 seconds
+    does the same (_button_reset). See _run_factory_reset for what is erased
+    and kept, and docs/PAIRING.md, "Factory reset and resale".
+    """
+    if not _confirmed("RESET"):
+        return _needs_confirmation("reset Atlas (type RESET)")
+    body, status = _run_factory_reset(audit_log.actor_from(request.environ))
+    return jsonify(body), status
+
+
+def _run_factory_reset(actor, after=None):
+    """The factory reset itself, for the Settings page and the button.
+    Runs on the gevent hub. Returns (body, http_status).
+
+    Steps:
       1. Ensure a Heltec snapshot exists (capture lazily if missing).
       2. Erase the owner's data (see database.factory_reset_data) and state
          outside the database: saved Wi-Fi networks, hotspot changes,
-         downloads, database copies. Every paired device must pair again.
+         downloads, database copies. Every paired device must pair again,
+         and the next one to pair becomes the primary user.
       3. Re-write the snapshot to the radio.
       4. Reset short_name to the firmware default (last 4 hex of node ID).
     Also erased: Atlas's logs and caches and the system journal, and Ray's
@@ -3423,13 +3531,13 @@ def api_factory_reset():
     Kept: the installed software, offline maps/routing and built-in
     reference, and Atlas's identity — the hardware identity printed on its
     label: name, .local hostname, key, setup code and Wi-Fi password (the
-    hotspot returns to the label's credentials). See docs/PAIRING.md, "Factory
-    reset and resale".
+    hotspot returns to the label's credentials).
+
+    `after` runs once the reset is done, instead of restarting a running
+    hotspot (the button brings the hotspot up for the next owner).
     """
-    if not _confirmed("RESET"):
-        return _needs_confirmation("reset Atlas (type RESET)")
     if updates.state.get("state") == "installing":
-        return jsonify({"ok": False, "error": "Atlas is installing an update. Try again when it has finished."}), 409
+        return {"ok": False, "error": "Atlas is installing an update. Try again when it has finished."}, 409
     snap = db.get_factory_defaults_device()
     if not snap:
         snap, _ = _capture_factory_defaults()
@@ -3450,12 +3558,12 @@ def api_factory_reset():
         db.factory_reset_data()
     except Exception as e:
         logger.error("factory_reset: DB wipe failed: %s", e)
-        return jsonify({"ok": False, "error": f"data wipe failed: {e}"}), 500
+        return {"ok": False, "error": f"data wipe failed: {e}"}, 500
     pairing.revoke_all()
     local_problems = _factory_reset_local_state()
     for problem in local_problems:
         logger.warning("factory_reset: %s", problem)
-    audit_log.record("factory_reset", None)
+    audit_log.record("factory_reset", actor)
 
     device_result = {"applied": False, "reason": "no snapshot or device unavailable", "nodedb": nodedb_result}
     if mesh and mesh.connected and snap:
@@ -3488,9 +3596,120 @@ def api_factory_reset():
         pass
     import gevent
     gevent.spawn_later(1.5, _disconnect_sockets)
-    gevent.spawn(_restart_hotspot_with_label_credentials)
+    gevent.spawn(after or _restart_hotspot_with_label_credentials)
 
-    return jsonify({"ok": True, "device": device_result, "incomplete": local_problems})
+    return {"ok": True, "device": device_result, "incomplete": local_problems}, 200
+
+
+# ------------------------------------------------------------------ Atlas button
+# status_button.ButtonController polls the button on a native thread; what a
+# press or a hold does runs here, on the gevent hub, like a request.
+_button_controller = None
+_MAIN_HUB = None
+BUTTON_RESET_DRYRUN = "ATLAS_BUTTON_RESET_DRYRUN"
+DEV_MODE_FILE = "/etc/atlas/dev-mode"
+
+
+def _button_present():
+    return _button_controller is not None and _button_controller.snapshot()["state"] in ("ok", "wrong_pins")
+
+
+def _button_status():
+    if _button_controller is None:
+        return {"state": "disabled", "bus": None, "addr": None}
+    return _button_controller.snapshot()
+
+
+def _on_hub(fn, *args, **kwargs):
+    """Run fn on the gevent hub from a native thread; returns an Event set
+    when it has finished (fn's result in event.result)."""
+    import gevent
+    done = threading.Event()
+    done.result = None
+
+    def _run():
+        try:
+            done.result = fn(*args, **kwargs)
+        except Exception as exc:
+            logger.error("Atlas button: %s", exc)
+        finally:
+            done.set()
+    _MAIN_HUB.loop.run_callback_threadsafe(gevent.spawn, _run)
+    return done
+
+
+def _button_paired():
+    if _button_controller is not None:
+        _button_controller.flash_success()
+
+
+_button_state_cache = {"at": 0.0, "value": {}}
+
+
+def _button_light_state():
+    """What the light should show (read by the button thread every tick;
+    the database parts are refreshed once a second)."""
+    now = time.monotonic()
+    cached = _button_state_cache
+    if now - cached["at"] >= 1.0:
+        try:
+            cached["value"] = {"unclaimed": pairing.required() and not pairing.claimed(),
+                               "approval_pending": bool(pairing.pending_requests())}
+        except Exception:
+            cached["value"] = {}
+        cached["at"] = now
+    return dict(cached["value"], **pairing.color_state())
+
+
+def _button_pressed():
+    def _press():
+        result = pairing.button_pressed()
+        if result in ("bound", "window", "conflict"):
+            logger.info("Atlas button pressed: %s", result)
+        return result
+    _on_hub(_press)
+
+
+def _button_reset_hotspot():
+    """After a button reset nothing remembers a network: bring Atlas's own
+    Wi-Fi up with the label's name and password for the next owner."""
+    atlas_blocking.sleep(2)
+    try:
+        _defer_auto_hotspot(60)
+        with _WIFI_OPS_LOCK:
+            result = _start_hotspot_with_saved_config()
+        if not result.get("ok"):
+            logger.warning("Button reset: hotspot did not start: %s", result.get("error"))
+    except Exception as exc:
+        logger.warning("Button reset: hotspot did not start: %s", exc)
+
+
+def _button_reset():
+    """Held for 15 seconds. Blocks the button thread (the light stays red)
+    until the reset has finished; False when it was refused."""
+    if os.path.exists(DEV_MODE_FILE) and os.environ.get(BUTTON_RESET_DRYRUN, "1") != "0":
+        # Developer units: exercise the button and the light without erasing
+        # the developer's Atlas, unless a drop-in sets ATLAS_BUTTON_RESET_DRYRUN=0.
+        # Retail units have no dev-mode file: the hold always resets.
+        logger.warning("Button factory reset: dry run (developer unit) - nothing erased")
+        _on_hub(audit_log.record, "factory_reset", "Atlas button", dry_run=True).wait(30)
+        time.sleep(3)
+        return True
+    done = _on_hub(_run_factory_reset, "Atlas button", _button_reset_hotspot)
+    done.wait(600)
+    body, _status = done.result or ({"ok": False}, 500)
+    if not body.get("ok"):
+        logger.warning("Button factory reset refused: %s", body.get("error"))
+    return bool(body.get("ok"))
+
+
+def _start_button():
+    global _button_controller, _MAIN_HUB
+    import gevent
+    _MAIN_HUB = gevent.get_hub()          # captured here, on the hub's own thread
+    _button_controller = status_button.ButtonController(
+        state_fn=_button_light_state, on_press=_button_pressed, on_reset=_button_reset)
+    _button_controller.start()
 
 
 # ------------------------------------------------------------------ API: Privacy
@@ -3553,6 +3772,8 @@ def handle_connect(auth=None):
         return False
     from flask_socketio import join_room
     join_room("paired")
+    if client is None or pairing.is_owner(client):
+        join_room("owner")             # "Allow a new device?" prompts go to the primary user only
     _socket_clients[request.sid] = client["id"] if client else None
     logger.info("WebSocket client connected")
 
@@ -3815,9 +4036,14 @@ def _load_hotspot_cfg():
     a factory reset), the Wi-Fi name and password printed on Atlas's label."""
     try:
         with open(_HOTSPOT_CFG_PATH) as f:
-            return json.load(f)
+            cfg = json.load(f)
     except Exception:
         return dict(device_identity.hotspot() or {})
+    if isinstance(cfg, dict):
+        # Saved by an older release with the old factory name: the Wi-Fi is
+        # now named after the .local address. A name the owner chose stays.
+        cfg["ssid"] = device_identity.default_ssid(cfg.get("ssid"))
+    return cfg
 
 def _save_hotspot_cfg(ssid, password):
     try:
@@ -4081,7 +4307,7 @@ def _start_hotspot_with_saved_config():
     if not iface:
         return {"ok": False, "error": "No WiFi interface found"}
     cfg = _load_hotspot_cfg()
-    ssid = (cfg.get("ssid") or "Atlas-Hotspot").strip()
+    ssid = (cfg.get("ssid") or device_identity.default_ssid()).strip()
     password = (cfg.get("password") or "").strip()
     if not ssid:
         return {"ok": False, "error": "SSID required"}
@@ -4658,7 +4884,7 @@ def api_hotspot_start():
     # Fall back to saved config if caller didn't supply values
     if not ssid or not password:
         cfg = _load_hotspot_cfg()
-        ssid = ssid or cfg.get("ssid", "Atlas-Hotspot")
+        ssid = ssid or cfg.get("ssid") or device_identity.default_ssid()
         password = password or cfg.get("password", "")
     if not ssid:
         return jsonify({"error": "SSID required"}), 400
@@ -4952,6 +5178,13 @@ def main():
         logger.warning("LAN beacon disabled (beacon_disabled or minimal_mode).")
     else:
         lan_beacon.start()
+
+    # The Atlas button: pairing by colour and the 15-second factory reset.
+    # Not gated by bg_disabled — without it nobody could set Atlas up.
+    if _minimal:
+        logger.warning("Atlas button disabled (minimal_mode).")
+    else:
+        _start_button()
 
     def _nightly_prune():
         import time as _time

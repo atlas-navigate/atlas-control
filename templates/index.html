@@ -7622,12 +7622,15 @@ function FactoryResetSection() {
       <div style={{display:'flex',flexDirection:'column',gap:10}}>
         <div style={{fontSize:13,color:'var(--text-primary)',fontWeight:600}}>Factory Reset</div>
         <div style={{fontSize:12,color:'var(--text-muted)',lineHeight:1.45}}>
-          Wipes all messaging history, AI chat history, node directory, telemetry,
-          topology, alerts, and GPS coordinate data (positions, phone trackers,
-          waypoints, routes, hike sessions, nav favorites, scheduled jobs).
+          Returns Atlas to how it left the factory, ready for a new owner. Erases messaging
+          and Ray chat history, documents you added to Ray, the node directory, telemetry,
+          alerts, location data (positions, phone trackers, waypoints, routes, hike sessions,
+          favorites), the calendar, scheduled jobs, settings, saved Wi-Fi networks and every
+          connected device — the next device to connect becomes the primary user.
           The Heltec V4 radio is restored to the factory default snapshot
           captured below — only the <span style={{fontFamily:'var(--font-mono)'}}>short_name</span> resets to the firmware default.
-          The AI knowledge base, calendar, and app settings are preserved.
+          Maps, routing, Ray's models and the details on Atlas's label are kept.
+          Holding the button on Atlas for 15 seconds (until its light turns red) does the same.
         </div>
 
         {/* Snapshot status & metadata */}
@@ -10995,10 +10998,91 @@ async function pairJson(url, data) {
   return body;
 }
 
+// Pairing a browser. While nobody has set this Atlas up, the owner presses
+// the Atlas button and picks the colour its light shows (or types the setup
+// code from the label); once it has a primary user, a new device asks them.
+const COLOR_STEP_TEXT = {
+  press_button: 'Press the button on your Atlas once.',
+  choose_color: 'Which colour is the button showing?',
+  conflict: 'Two devices tried to connect at the same time. Close Atlas on the other one, then start again.',
+  wrong: "That wasn't the colour the light showed. Start again and press the button once more.",
+  expired: 'That took too long. Start again.',
+  unknown: 'That attempt ended. Start again.',
+};
+
+function ColorPairing({ name, onPaired, onUseCode }) {
+  const [view, setView] = useState(null);           // {request_id, secret, state, choices, palette}
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const start = () => {
+    setBusy(true); setError('');
+    pairJson('/api/pair/color/start', { name, kind: 'browser' })
+      .then(r => { setView(r); if (r.button === false) onUseCode(true); })
+      .catch(e => setError(e.message)).finally(() => setBusy(false));
+  };
+  useEffect(() => {
+    if (!view || !['press_button', 'choose_color'].includes(view.state)) return;
+    const iv = setInterval(() => {
+      pairJson(`/api/pair/color/${view.request_id}?secret=${encodeURIComponent(view.secret)}`)
+        .then(r => setView(v => v && v.request_id === view.request_id ? { ...v, ...r } : v)).catch(() => {});
+    }, 1000);
+    return () => clearInterval(iv);
+  }, [view && view.request_id, view && view.state]);
+
+  const pick = (color) => {
+    setBusy(true); setError('');
+    pairJson(`/api/pair/color/${view.request_id}/answer`, { secret: view.secret, color })
+      .then(onPaired)
+      .catch(e => { setView(v => ({ ...v, state: 'wrong' })); setError(e.message); })
+      .finally(() => setBusy(false));
+  };
+
+  const muted = {fontSize:13,color:'var(--text-muted)',lineHeight:1.5};
+  if (!view || !['press_button', 'choose_color'].includes(view.state)) {
+    return (
+      <>
+        {view && <div style={{...muted,marginTop:14}}>
+          {(view.state === 'wrong' && error) || COLOR_STEP_TEXT[view.state] || COLOR_STEP_TEXT.unknown}
+        </div>}
+        <button className="btn btn-primary" style={{width:'100%',marginTop:14,padding:12}} disabled={busy} onClick={start}>
+          {busy ? 'Starting…' : view ? 'Start again' : 'Connect with the Atlas button'}
+        </button>
+        {error && !view && <div style={{color:'var(--accent-red)',fontSize:13,marginTop:10}}>{error}</div>}
+      </>
+    );
+  }
+  const palette = Object.fromEntries((view.palette || []).map(c => [c.id, c]));
+  return (
+    <>
+      <div style={{fontSize:15,fontWeight:600,marginTop:16}}>{COLOR_STEP_TEXT[view.state]}</div>
+      {view.state === 'press_button' && (
+        <div style={{...muted,marginTop:6}}>It's the round button on top of Atlas. Its light will change colour.</div>
+      )}
+      {view.state === 'choose_color' && (
+        <div style={{display:'grid',gridTemplateColumns:'repeat(3, 1fr)',gap:12,marginTop:14}}>
+          {(view.choices || []).map(id => (
+            <button key={id} disabled={busy} onClick={() => pick(id)} aria-label={(palette[id] || {}).label || id}
+              style={{display:'flex',flexDirection:'column',alignItems:'center',gap:6,padding:'12px 4px',borderRadius:12,
+                      border:'1px solid var(--border)',background:'var(--bg-input)',color:'var(--text-primary)',cursor:'pointer'}}>
+              <span style={{width:44,height:44,borderRadius:'50%',background:(palette[id] || {}).swatch || id,
+                            border:'2px solid rgba(0,0,0,0.25)'}}/>
+              <span style={{fontSize:13}}>{(palette[id] || {}).label || id}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <div style={{...muted,marginTop:12}}>Only the person next to this Atlas can see its light. You get one pick.</div>
+    </>
+  );
+}
+
 function PairingScreen({ status }) {
-  const [mode, setMode] = useState(status.via_hotspot ? 'hotspot' : 'choose');
+  const owned = status.setup_state === 'owned';
+  const [mode, setMode] = useState(owned ? 'ask' : 'button');
   const [name, setName] = useState(defaultDeviceName());
   const [code, setCode] = useState('');
+  const [noButton, setNoButton] = useState(status.button === false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [req, setReq] = useState(null);           // pending approval request
@@ -11007,6 +11091,9 @@ function PairingScreen({ status }) {
   const done = () => window.location.reload();
   const run = (fn) => { setBusy(true); setError(''); fn().catch(e => setError(e.message)).finally(() => setBusy(false)); };
   const submitCode = () => run(() => pairJson('/api/pair/claim', { setup_code: code, name, kind: 'browser' }).then(done));
+  const ask = () => run(() =>
+    pairJson('/api/pair/request', { name, kind: 'browser', client_nonce: String(Math.random()).slice(2) })
+      .then(r => { setReq(r); setReqState('pending'); setMode('waiting'); }));
 
   useEffect(() => {
     if (!req) return;
@@ -11025,45 +11112,29 @@ function PairingScreen({ status }) {
   const card = {background:'var(--bg-card)',border:'1px solid var(--border)',borderRadius:12,padding:20,marginTop:16};
   const input = {width:'100%',boxSizing:'border-box',padding:'10px 12px',borderRadius:8,border:'1px solid var(--border)',background:'var(--bg-input)',color:'var(--text-primary)',fontSize:15};
   const muted = {fontSize:13,color:'var(--text-muted)',lineHeight:1.5};
-  const option = {display:'block',width:'100%',textAlign:'left',padding:'14px 16px',marginTop:10,borderRadius:10,border:'1px solid var(--border)',background:'var(--bg-input)',color:'var(--text-primary)',cursor:'pointer',fontSize:14};
 
   return (
     <div style={{minHeight:'100vh',background:'var(--bg-primary)',color:'var(--text-primary)'}}>
       <div style={box}>
         <img src="/static/img/atlas-control-logo.png" alt="" style={{height:44,marginBottom:12}}/>
         <h1 style={{fontSize:22,margin:'0 0 6px'}}>Connect to {status.device?.name || 'Atlas'}</h1>
-        <div style={muted}>This {name.includes('iPhone') || name.includes('Android') ? 'phone' : 'device'} hasn't been connected to this Atlas before. You only need to do this once.</div>
+        <div style={muted}>
+          {owned ? `This ${name.includes('iPhone') || name.includes('Android') ? 'phone' : 'device'} hasn't been connected to this Atlas before. Its primary user decides who can use it.`
+                 : "This Atlas isn't set up yet. The first device you connect becomes its primary user — you only do this once."}
+        </div>
 
         <div style={card}>
           <label style={{...muted,display:'block',marginBottom:6}}>Name for this device</label>
           <input style={input} value={name} maxLength={60} onChange={e => setName(e.target.value)}/>
 
-          {mode === 'hotspot' && (
+          {mode === 'button' && (
             <>
-              <div style={{...muted,marginTop:14}}>You're connected to Atlas's own Wi-Fi.</div>
-              <button className="btn btn-primary" style={{width:'100%',marginTop:12,padding:12}} disabled={busy}
-                onClick={() => run(() => pairJson('/api/pair/hotspot', { name, kind: 'browser' }).then(done))}>
-                {busy ? 'Connecting…' : 'Connect this device'}
+              {noButton
+                ? <div style={{...muted,marginTop:14}}>Atlas can't find its button right now. Use the setup code from the label instead.</div>
+                : <ColorPairing name={name} onPaired={done} onUseCode={() => { setNoButton(true); setMode('code'); }}/>}
+              <button className="btn btn-sm" style={{marginTop:12}} onClick={() => setMode('code')}>
+                {noButton ? 'Enter the setup code' : "Can't use the button? Enter the setup code"}
               </button>
-              <button className="btn btn-sm" style={{marginTop:10}} onClick={() => setMode('choose')}>Other ways to connect</button>
-            </>
-          )}
-
-          {mode === 'choose' && (
-            <>
-              <button style={option} onClick={() => setMode('code')}>
-                <strong>Enter the setup code</strong>
-                <div style={muted}>It's printed on the label on your Atlas.</div>
-              </button>
-              <button style={option} disabled={busy} onClick={() => run(() =>
-                pairJson('/api/pair/request', { name, kind: 'browser', client_nonce: String(Math.random()).slice(2) })
-                  .then(r => { setReq(r); setReqState('pending'); setMode('waiting'); }))}>
-                <strong>Ask a connected phone or computer</strong>
-                <div style={muted}>Someone already using this Atlas taps “Allow”.</div>
-              </button>
-              <div style={{...muted,marginTop:14}}>
-                Or join Atlas's own Wi-Fi network (name and password are on the label), then open Atlas again.
-              </div>
             </>
           )}
 
@@ -11078,20 +11149,32 @@ function PairingScreen({ status }) {
                 onClick={submitCode}>
                 {busy ? 'Connecting…' : 'Connect'}
               </button>
-              <button className="btn btn-sm" style={{marginTop:10}} onClick={() => setMode('choose')}>Back</button>
+              {!noButton && <button className="btn btn-sm" style={{marginTop:10}} onClick={() => setMode('button')}>Back</button>}
+            </>
+          )}
+
+          {mode === 'ask' && (
+            <>
+              <div style={{...muted,marginTop:14}}>Ask Atlas's primary user to allow this device. They'll get a prompt on their phone or computer.</div>
+              <button className="btn btn-primary" style={{width:'100%',marginTop:12,padding:12}} disabled={busy} onClick={ask}>
+                {busy ? 'Asking…' : 'Ask to connect'}
+              </button>
+              <div style={{...muted,marginTop:12}}>
+                Lost access to the primary user's device? Holding the button on Atlas for 15 seconds resets it to factory settings (this erases its data).
+              </div>
             </>
           )}
 
           {mode === 'waiting' && req && (
             <>
-              <div style={{...muted,marginTop:14}}>On a phone or computer that already uses this Atlas, tap <strong>Allow</strong> when it asks. Check both screens show:</div>
+              <div style={{...muted,marginTop:14}}>On the primary user's phone or computer, tap <strong>Allow</strong> when it asks. Check both screens show:</div>
               <div style={{fontSize:34,fontWeight:700,letterSpacing:'0.3em',textAlign:'center',margin:'14px 0',fontFamily:'var(--font-mono)'}}>{req.match_code}</div>
               <div style={{...muted,textAlign:'center'}}>
                 {reqState === 'pending' ? 'Waiting for approval…' : reqState === 'denied' ? 'The request was declined.'
                   : reqState === 'expired' ? 'The request timed out.' : ''}
               </div>
               {reqState !== 'pending' && (
-                <button className="btn btn-sm" style={{marginTop:10}} onClick={() => { setReq(null); setMode('choose'); }}>Try again</button>
+                <button className="btn btn-sm" style={{marginTop:10}} onClick={() => { setReq(null); setMode('ask'); }}>Try again</button>
               )}
             </>
           )}
@@ -11109,6 +11192,7 @@ function AtlasRoot() {
   useEffect(() => {
     pairJson('/api/pair/status').then(s => {
       if (s.csrf) window.__atlasCsrf = s.csrf;
+      window.__atlasRole = s.client ? s.client.role : null;
       setStatus(s);
     }).catch(() => setFailed(true));
   }, []);
@@ -11382,11 +11466,22 @@ function LocalDeviceAddressSection() {
   );
 }
 
+const BUTTON_STATUS_TEXT = {
+  ok: "The Atlas button is working. Hold it for 15 seconds to reset Atlas to factory settings.",
+  wrong_pins: "The Atlas button is plugged into the wrong pins (3/5). Move it to pins 27 and 28.",
+  not_responding: "The Atlas button stopped responding. Unplug it and plug it back in.",
+  absent: "No Atlas button found. Check its cable.",
+};
+
 function ConnectedDevicesSection() {
   const [clients, setClients] = useState(null);
   const [confirm, setConfirm] = useState(null);
+  const [button, setButton] = useState(null);
   const load = () => api.get('/api/pair/clients').then(setClients).catch(() => setClients([]));
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    api.get('/api/device').then(d => setButton(d && d.button ? d.button.state : null)).catch(() => {});
+  }, []);
   const SL = {fontSize:11,fontWeight:700,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:12};
   const muted = {fontSize:12,color:'var(--text-muted)'};
   const kindLabel = { browser: 'Browser', android: 'Android app', ios: 'iPhone app', tracker: 'Location sharing' };
@@ -11394,27 +11489,55 @@ function ConnectedDevicesSection() {
     setConfirm(null);
     if (c.this) window.location.reload(); else load();
   }).catch(() => setConfirm(null));
+  // The page reconnects as a member afterwards: reload so it stops showing the primary user's prompts.
+  const makePrimary = (c) => api.post(`/api/pair/clients/${c.id}/primary`).then(() => window.location.reload()).catch(() => {});
   if (clients === null) return null;
+  const me = clients.find(c => c.this);
+  const amPrimary = me && me.role === 'owner';
   return (
     <div className="card" style={{marginBottom:16}}>
       <div style={SL}>Connected devices</div>
-      <div style={{...muted,marginBottom:10}}>Phones and browsers that can use this Atlas. Remove any you don't recognise.</div>
-      {clients.map(c => (
-        <div key={c.id} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderTop:'1px solid var(--border)'}}>
-          <div style={{flex:1,minWidth:0}}>
-            <div style={{fontSize:13,fontWeight:600}}>{c.name}{c.this ? ' (this device)' : ''}</div>
-            <div style={muted}>{kindLabel[c.kind] || c.kind}{c.last_seen ? ` · last used ${new Date(c.last_seen * 1000).toLocaleDateString()}` : ''}</div>
+      <div style={{...muted,marginBottom:10}}>
+        Phones and browsers that can use this Atlas. {amPrimary
+          ? "You're the primary user: you allow new devices, and can remove any you don't recognise."
+          : "The primary user allows new devices and can remove them."}
+      </div>
+      {clients.map(c => {
+        const canRemove = amPrimary ? !(c.this && clients.length > 1) : c.this;
+        return (
+          <div key={c.id} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderTop:'1px solid var(--border)',flexWrap:'wrap'}}>
+            <div style={{flex:1,minWidth:160}}>
+              <div style={{fontSize:13,fontWeight:600}}>{c.name}{c.this ? ' (this device)' : ''}
+                {c.role === 'owner' && <span style={{marginLeft:8,fontSize:10,fontWeight:700,padding:'2px 6px',borderRadius:6,
+                  border:'1px solid var(--border)',color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Primary user</span>}
+              </div>
+              <div style={muted}>{kindLabel[c.kind] || c.kind}{c.last_seen ? ` · last used ${new Date(c.last_seen * 1000).toLocaleDateString()}` : ''}</div>
+            </div>
+            {confirm === c.id ? (
+              <>
+                <button className="btn btn-sm" onClick={() => setConfirm(null)}>Keep</button>
+                <button className="btn btn-sm" style={{color:'var(--accent-red)'}} onClick={() => remove(c)}>Remove</button>
+              </>
+            ) : (
+              <>
+                {amPrimary && !c.this && c.kind !== 'tracker' && (
+                  <button className="btn btn-sm" onClick={() => makePrimary(c)}>Make primary</button>
+                )}
+                {canRemove && <button className="btn btn-sm" onClick={() => setConfirm(c.id)}>Remove</button>}
+              </>
+            )}
           </div>
-          {confirm === c.id ? (
-            <>
-              <button className="btn btn-sm" onClick={() => setConfirm(null)}>Keep</button>
-              <button className="btn btn-sm" style={{color:'var(--accent-red)'}} onClick={() => remove(c)}>Remove</button>
-            </>
-          ) : (
-            <button className="btn btn-sm" onClick={() => setConfirm(c.id)}>Remove</button>
-          )}
+        );
+      })}
+      {amPrimary && clients.length > 1 && (
+        <div style={{...muted,marginTop:10}}>To remove this device, make another device the primary user first.</div>
+      )}
+      {button && BUTTON_STATUS_TEXT[button] && (
+        <div style={{...muted,marginTop:12,paddingTop:10,borderTop:'1px solid var(--border)',
+                     color: button === 'ok' ? 'var(--text-muted)' : 'var(--accent-amber, var(--accent-red))'}}>
+          {BUTTON_STATUS_TEXT[button]}
         </div>
-      ))}
+      )}
     </div>
   );
 }
@@ -11599,7 +11722,7 @@ function App() {
         socket.emit('join_rooms', { rooms: pageRooms[page] || [] });
         // Requests made while this page was closed (the live event only
         // reaches pages that are open) are still waiting: show them too.
-        api.get('/api/pair/requests').then(list => {
+        if (window.__atlasRole !== 'member') api.get('/api/pair/requests').then(list => {   // primary user only
           if (!Array.isArray(list)) return;
           setPairRequests(prev => {
             const known = new Set(prev.map(r => r.request_id));

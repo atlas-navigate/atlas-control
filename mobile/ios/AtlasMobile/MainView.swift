@@ -21,7 +21,7 @@ struct MainView: View {
             case .notFound:
                 ScrollView {
                     ProblemView(icon: "wifi.slash", title: "Can't find \(model.deviceName)",
-                                body: "Make sure Atlas is switched on and this iPhone is on the same Wi-Fi, or on Atlas's own Wi-Fi (its name and password are on the label). The app keeps looking and connects as soon as Atlas is reachable.",
+                                body: "Make sure Atlas is switched on and this iPhone is on the same Wi-Fi, or on Atlas's own Wi-Fi (named after its .local address; the name and password are on the label). The app keeps looking and connects as soon as Atlas is reachable.",
                                 primary: ("Try again", { model.relocate() }), secondary: nil)
                     VStack(spacing: 12) {
                         if localNetwork.denied { LocalNetworkDeniedCard() }
@@ -39,7 +39,7 @@ struct MainView: View {
             case .unpaired:
                 ProblemView(icon: "link.badge.plus",
                             title: "Connect this iPhone again",
-                            body: "\(model.deviceName) no longer recognises this iPhone — it was removed in Settings → Connected devices, or Atlas was reset. Connecting again takes a moment: the setup code on the label, Atlas's own Wi-Fi, or an Allow from another device.",
+                            body: "\(model.deviceName) no longer recognises this iPhone — it was removed in Settings → Connected devices, or Atlas was reset. Connecting again takes a moment: Atlas's primary user taps Allow, or, after a reset, you press the button on Atlas and pick the colour its light shows.",
                             primary: ("Connect again", { model.reconnectRemoved() }), secondary: nil)
             }
             if let notice = model.notice {

@@ -14,11 +14,36 @@ struct AtlasInfo: Equatable {
     var pairingVersion: Int = 1
     /// Its own .local name, e.g. atlas-7kq3pm.local (nil on older Atlas software).
     var hostname: String? = nil
+    /// "unclaimed": the first phone pairs with the Atlas button (or the label);
+    /// "owned": a new phone asks the primary user.
+    var setupState: String = "owned"
+    /// Atlas found its button (false: offer the setup code instead).
+    var hasButton: Bool = true
 }
 
 struct PairingError: LocalizedError {
     let message: String
+    /// Atlas's reason ("claimed", "wrong", "conflict", …) when it gave one.
+    var code: String? = nil
     var errorDescription: String? { message }
+}
+
+/// One colour the Atlas button can show (from /api/pair/color/start "palette").
+struct ColorChoice: Equatable, Identifiable {
+    let id: String
+    let label: String
+    let swatch: String          // "#rrggbb"
+}
+
+/// A pairing attempt by button colour.
+struct ColorPairing: Equatable {
+    let requestId: String
+    let secret: String
+    /// "press_button" | "choose_color" | "conflict" | "wrong" | "expired" | "unknown"
+    var state: String
+    /// The colours to offer, in Atlas's order (only while choosing).
+    var choices: [String]
+    let palette: [ColorChoice]
 }
 
 struct ApprovalRequest {
@@ -34,7 +59,7 @@ enum HealthResult { case up, restarting, unreachable, wrongKey }
 /// observing) session. Nothing secret is sent over an observing session.
 enum AtlasClient {
     /// The pairing protocol this app speaks. A higher number on Atlas means: update the app.
-    static let pairingVersion = 1
+    static let pairingVersion = 2
 
     static func normalize(_ url: String) -> String {
         var u = url.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -83,7 +108,9 @@ enum AtlasClient {
         return AtlasInfo(baseUrl: base, deviceId: id, name: o["name"] as? String ?? "Atlas",
                          advertisedPin: o["tls_spki_sha256"] as? String, observedPin: pin,
                          version: o["version"] as? String, pairingVersion: o["pairing"] as? Int ?? 1,
-                         hostname: AtlasAddress.fqdn((o["fqdn"] as? String) ?? (o["hostname"] as? String)))
+                         hostname: AtlasAddress.fqdn((o["fqdn"] as? String) ?? (o["hostname"] as? String)),
+                         setupState: o["setup_state"] as? String ?? "owned",
+                         hasButton: o["button"] as? Bool ?? false)
     }
 
     /// The paired Atlas's current .local name (it can change: a legacy unit's
@@ -144,7 +171,7 @@ enum AtlasClient {
         let (data, resp) = try await s.data(for: req)
         let o = object(data)
         guard (resp as? HTTPURLResponse)?.statusCode == 200 else {
-            throw PairingError(message: o["error"] as? String ?? "Atlas said no.")
+            throw PairingError(message: o["error"] as? String ?? "Atlas said no.", code: o["code"] as? String)
         }
         return o
     }
@@ -156,8 +183,42 @@ enum AtlasClient {
         return t
     }
 
-    static func claimViaHotspot(_ baseUrl: String, pin: String, name: String) async throws -> String {
-        let o = try await post("\(normalize(baseUrl))/api/pair/hotspot", pin: pin, body: ["name": name, "kind": "ios"])
+    /// Start pairing by button colour (only while Atlas has no primary user).
+    static func startColorPairing(_ baseUrl: String, pin: String, name: String) async throws -> ColorPairing {
+        let o = try await post("\(normalize(baseUrl))/api/pair/color/start", pin: pin, body: ["name": name, "kind": "ios"])
+        guard let id = o["request_id"] as? String, let secret = o["secret"] as? String else {
+            throw PairingError(message: "Unexpected reply from Atlas")
+        }
+        let palette = (o["palette"] as? [[String: Any]] ?? []).compactMap { c -> ColorChoice? in
+            guard let cid = c["id"] as? String else { return nil }
+            return ColorChoice(id: cid, label: c["label"] as? String ?? cid, swatch: c["swatch"] as? String ?? "#888888")
+        }
+        if o["button"] as? Bool == false {
+            throw PairingError(message: "Atlas can't find its button. Use the setup code on the label.", code: "no_button")
+        }
+        return ColorPairing(requestId: id, secret: secret, state: o["state"] as? String ?? "press_button",
+                            choices: o["choices"] as? [String] ?? [], palette: palette)
+    }
+
+    /// Where a colour pairing stands; "retry" when Atlas could not be asked.
+    static func pollColor(_ baseUrl: String, pin: String, pairing p: ColorPairing) async -> ColorPairing {
+        let (s, _) = session(pin: pin, timeout: 8)
+        defer { s.invalidateAndCancel() }
+        let secret = p.secret.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
+        guard let r = request("\(normalize(baseUrl))/api/pair/color/\(p.requestId)?secret=\(secret)"),
+              let (data, resp) = try? await s.data(for: r),
+              (resp as? HTTPURLResponse)?.statusCode == 200 else { return p }
+        let o = object(data)
+        var next = p
+        next.state = o["state"] as? String ?? "unknown"
+        next.choices = o["choices"] as? [String] ?? []
+        return next
+    }
+
+    /// The colour the user picked. Returns the token; throws with code "wrong" otherwise.
+    static func answerColor(_ baseUrl: String, pin: String, pairing p: ColorPairing, color: String) async throws -> String {
+        let o = try await post("\(normalize(baseUrl))/api/pair/color/\(p.requestId)/answer", pin: pin,
+                               body: ["secret": p.secret, "color": color])
         guard let t = o["token"] as? String, !t.isEmpty else { throw PairingError(message: "Atlas did not return a token") }
         return t
     }

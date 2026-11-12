@@ -6,9 +6,11 @@ import android.content.Context
 import android.content.Intent
 import android.provider.Settings
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -19,7 +21,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -27,17 +32,20 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.atlascontrol.mobile.*
+import com.atlascontrol.mobile.network.ColorPairing
 import com.atlascontrol.mobile.network.QrPayload
 import com.atlascontrol.mobile.network.SetupCode
 
 /**
  * First run: find the Atlas and pair with it once.
  *
- *   Open app → Atlas appears → tap Connect → (one more tap / scan) → Atlas opens.
+ *   Atlas not set up yet: tap Connect → press the Atlas button → pick the
+ *   colour its light shows → Atlas opens (this phone is its primary user).
+ *   Atlas already set up: tap Connect → its primary user taps "Allow".
  *
- * On Atlas's own Wi-Fi a single tap pairs. Elsewhere the owner scans the QR
- * code on the label (or types its setup code), or asks someone already using
- * this Atlas to tap "Allow". Typing an address is an advanced fallback.
+ * The label's QR code or setup code is the backup while Atlas isn't set up
+ * (a broken button, or colours that are hard to tell apart). Typing an
+ * address is an advanced fallback.
  */
 @Composable
 fun OnboardingScreen(vm: ConnectionViewModel) {
@@ -46,6 +54,8 @@ fun OnboardingScreen(vm: ConnectionViewModel) {
     val target by vm.target.collectAsState()
     val error by vm.pairingError.collectAsState()
     val matchCode by vm.matchCode.collectAsState()
+    val color by vm.color.collectAsState()
+    val colorBusy by vm.colorBusy.collectAsState()
     val joinWifi by vm.joinWifi.collectAsState()
     val networkBlocked by vm.localNetworkBlocked.collectAsState()
     var scanning by remember { mutableStateOf(false) }
@@ -85,14 +95,25 @@ fun OnboardingScreen(vm: ConnectionViewModel) {
         when {
             joinWifi != null -> JoinAtlasWifi(joinWifi!!.ssid ?: "Atlas", joinWifi!!.password, context, onCancel = vm::cancelPairing)
             matchCode != null -> ApprovalWait(matchCode!!, onCancel = vm::cancelPairing)
+            color != null -> ColorCard(target?.info?.name ?: "Atlas", color!!, colorBusy, onPick = vm::pickColor,
+                onRestart = vm::startColorPairing, onUseCode = vm::useSetupCode, onCancel = vm::cancelPairing)
             target != null -> {
                 val t = target!!
                 Card(colors = CardDefaults.cardColors(containerColor = AtlasSurface2), shape = RoundedCornerShape(14.dp)) {
                     Column(Modifier.padding(18.dp)) {
                         Text(t.info.name, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AtlasOnBg)
                         Spacer(Modifier.height(10.dp))
-                        if (t.onAtlasHotspot) {
-                            Text("Connecting…", color = AtlasMuted)
+                        if (t.info.setupState == "owned") {
+                            Text("This Atlas already has a primary user. Ask them to allow this phone — they'll get " +
+                                "a prompt on their phone or computer.", color = AtlasOnSurface, fontSize = 14.sp)
+                            Spacer(Modifier.height(10.dp))
+                            Button(onClick = vm::askForApproval, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                                Text("Ask to connect")
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            Text("Lost the primary user's phone? Holding the button on Atlas for 15 seconds, until its " +
+                                "light turns red, resets Atlas to factory settings and erases its data.",
+                                color = AtlasMuted, fontSize = 12.sp)
                         } else {
                             Text("Enter the setup code from the label on your Atlas:", color = AtlasOnSurface, fontSize = 14.sp)
                             Spacer(Modifier.height(8.dp))
@@ -121,7 +142,9 @@ fun OnboardingScreen(vm: ConnectionViewModel) {
                             OutlinedButton(onClick = { scanning = true }, modifier = Modifier.fillMaxWidth()) {
                                 Icon(Icons.Default.QrCodeScanner, null); Spacer(Modifier.width(8.dp)); Text("Scan the label instead")
                             }
-                            TextButton(onClick = vm::askForApproval) { Text("Ask someone using this Atlas to allow this phone") }
+                            if (t.info.hasButton) {
+                                TextButton(onClick = vm::startColorPairing) { Text("Use the Atlas button instead") }
+                            }
                         }
                         TextButton(onClick = vm::cancelPairing) { Text("Back") }
                     }
@@ -141,7 +164,8 @@ fun OnboardingScreen(vm: ConnectionViewModel) {
                 }
                 if (nearby.isEmpty() && !searching) {
                     Text("None found yet. Make sure Atlas is switched on, and that this phone is on the same Wi-Fi " +
-                        "or on Atlas's own Wi-Fi (its name and password are on the label).",
+                        "or on Atlas's own Wi-Fi — it is named after Atlas's address, like atlas-k7m2qx9wp.local " +
+                        "(name and password are on the label).",
                         color = AtlasMuted, fontSize = 13.sp)
                 }
                 nearby.forEach { s ->
@@ -185,10 +209,80 @@ fun OnboardingScreen(vm: ConnectionViewModel) {
     }
 }
 
+private val COLOR_STEP_TEXT = mapOf(
+    "conflict" to "Two devices tried to connect at the same time. Close Atlas on the other one, then start again.",
+    "wrong" to "That wasn't the colour the light showed. Start again and press the button once more.",
+    "expired" to "That took too long. Start again.",
+)
+
+private fun swatch(hex: String): Color =
+    runCatching { Color(android.graphics.Color.parseColor(hex)) }.getOrDefault(Color.Gray)
+
+/** Press the Atlas button, then pick the colour its light shows. */
+@Composable
+private fun ColorCard(
+    name: String, p: ColorPairing, busy: Boolean,
+    onPick: (String) -> Unit, onRestart: () -> Unit, onUseCode: () -> Unit, onCancel: () -> Unit,
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = AtlasSurface2), shape = RoundedCornerShape(14.dp)) {
+        Column(Modifier.padding(18.dp)) {
+            Text(name, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AtlasOnBg)
+            Spacer(Modifier.height(10.dp))
+            when (p.state) {
+                "press_button" -> {
+                    Text("Press the button on your Atlas once.", color = AtlasOnBg, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(6.dp))
+                    Text("It's the round button on top of Atlas. Its light changes colour.", color = AtlasOnSurface, fontSize = 14.sp)
+                    Spacer(Modifier.height(10.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Waiting for the button…", color = AtlasMuted, fontSize = 13.sp)
+                    }
+                }
+                "choose_color" -> {
+                    Text("Which colour is the button showing?", color = AtlasOnBg, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(12.dp))
+                    p.choices.chunked(3).forEach { row ->
+                        Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            row.forEach { id ->
+                                val c = p.palette.firstOrNull { it.id == id }
+                                val label = c?.label ?: id
+                                Column(
+                                    Modifier.weight(1f).background(AtlasSurface, RoundedCornerShape(12.dp))
+                                        .clickable(enabled = !busy) { onPick(id) }.padding(vertical = 10.dp)
+                                        .semantics { contentDescription = label },
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                ) {
+                                    Box(Modifier.size(52.dp).background(swatch(c?.swatch ?: "#888888"), CircleShape)
+                                        .border(2.dp, Color.Black.copy(alpha = 0.25f), CircleShape))
+                                    Spacer(Modifier.height(6.dp))
+                                    Text(label, color = AtlasOnBg, fontSize = 13.sp)
+                                }
+                            }
+                            repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+                        }
+                    }
+                    Text("You get one pick. Only someone next to Atlas can see its light.", color = AtlasMuted, fontSize = 12.sp)
+                }
+                else -> {
+                    Text(COLOR_STEP_TEXT[p.state] ?: "That attempt ended. Start again.", color = AtlasOnSurface, fontSize = 14.sp)
+                    Spacer(Modifier.height(10.dp))
+                    Button(onClick = onRestart, enabled = !busy, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                        Text("Start again")
+                    }
+                }
+            }
+            TextButton(onClick = onUseCode) { Text("Can't use the button? Enter the setup code") }
+            TextButton(onClick = onCancel) { Text("Back") }
+        }
+    }
+}
+
 @Composable
 private fun ApprovalWait(code: String, onCancel: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-        Text("On a phone or computer already using this Atlas, tap Allow. Check both screens show:",
+        Text("On the primary user's phone or computer, tap Allow. Check both screens show:",
             color = AtlasOnSurface, textAlign = TextAlign.Center)
         Spacer(Modifier.height(16.dp))
         Text(code, fontSize = 40.sp, fontWeight = FontWeight.Bold, letterSpacing = 8.sp, color = AtlasOnBg,
@@ -211,6 +305,10 @@ private fun JoinAtlasWifi(ssid: String, password: String?, context: Context, onC
             "Come back here afterwards; Atlas connects automatically.", color = AtlasOnSurface, fontSize = 14.sp)
         Spacer(Modifier.height(12.dp))
         Text(ssid, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = AtlasPrimary)
+        if (ssid.endsWith(".local")) {
+            Text("Atlas's Wi-Fi is named after its address: once joined, Atlas is at $ssid.",
+                color = AtlasMuted, fontSize = 12.sp)
+        }
         LaunchedEffect(password) {
             if (password != null) {
                 val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager

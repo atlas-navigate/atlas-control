@@ -75,7 +75,7 @@ private fun AtlasApp(vm: ConnectionViewModel) {
                         icon = Icons.Default.WifiOff,
                         title = "Can't find ${vm.deviceName}",
                         body = "Make sure Atlas is switched on and this phone is on the same Wi-Fi, " +
-                            "or on Atlas's own Wi-Fi (its name and password are on the label). " +
+                            "or on Atlas's own Wi-Fi (named after its .local address; the name and password are on the label). " +
                             "The app keeps looking and connects as soon as Atlas is reachable.",
                         primary = "Try again" to { vm.relocate() },
                         secondary = null,
@@ -101,7 +101,8 @@ private fun AtlasApp(vm: ConnectionViewModel) {
                         title = "Connect this phone again",
                         body = "${vm.deviceName} no longer recognises this phone — it was removed in " +
                             "Settings → Connected devices, or Atlas was reset. Connecting again takes a moment: " +
-                            "the setup code on the label, Atlas's own Wi-Fi, or an Allow from another device.",
+                            "Atlas's primary user taps Allow, or, after a reset, you press the button on Atlas " +
+                            "and pick the colour its light shows.",
                         primary = "Connect again" to { vm.reconnectRemoved() },
                         secondary = null,
                     )

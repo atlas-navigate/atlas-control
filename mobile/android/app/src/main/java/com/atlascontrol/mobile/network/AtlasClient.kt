@@ -22,16 +22,38 @@ data class AtlasInfo(
     val pairingVersion: Int = 1,
     /** Its own .local name, e.g. atlas-7kq3pm.local (null on older Atlas software). */
     val hostname: String? = null,
+    /**
+     * "unclaimed": the first phone pairs with the Atlas button (or the label);
+     * "owned": a new phone asks the primary user.
+     */
+    val setupState: String = "owned",
+    /** Atlas found its button (false: offer the setup code instead). */
+    val hasButton: Boolean = true,
 )
 
-class PairingException(message: String, val status: Int = 0) : Exception(message)
+/** [code] is Atlas's reason ("claimed", "wrong", "conflict", …) when it gave one. */
+class PairingException(message: String, val status: Int = 0, val code: String? = null) : Exception(message)
+
+/** One colour the Atlas button can show (from /api/pair/color/start "palette"). */
+data class ColorChoice(val id: String, val label: String, val swatch: String)
+
+/** A pairing attempt by button colour. */
+data class ColorPairing(
+    val requestId: String,
+    val secret: String,
+    /** "press_button" | "choose_color" | "conflict" | "wrong" | "expired" | "unknown" */
+    val state: String,
+    /** The colours to offer, in Atlas's order (only while choosing). */
+    val choices: List<String>,
+    val palette: List<ColorChoice>,
+)
 
 /** Plain HTTPS calls to Atlas. All blocking work runs on Dispatchers.IO. */
 object AtlasClient {
     private val JSON = "application/json".toMediaType()
 
     /** The pairing protocol this app speaks. A higher number on Atlas means: update the app. */
-    const val PAIRING_VERSION = 1
+    const val PAIRING_VERSION = 2
 
     fun normalize(url: String): String = url.trim().trimEnd('/')
 
@@ -53,6 +75,8 @@ object AtlasClient {
                     pairingRequired = o.optBoolean("pairing_required", true),
                     pairingVersion = o.optInt("pairing", 1),
                     hostname = AtlasAddress.fqdn(o.optString("fqdn").ifBlank { o.optString("hostname") }.ifBlank { null }),
+                    setupState = o.optString("setup_state", "owned"),
+                    hasButton = o.optBoolean("button", false),
                 )
             }
         }.onFailure { LocalNetwork.noteFailure(it) }.getOrNull()
@@ -125,7 +149,10 @@ object AtlasClient {
         client.newCall(Request.Builder().url(url).post(body.toString().toRequestBody(JSON)).build())
             .execute().use { r ->
                 val o = runCatching { JSONObject(r.body?.string() ?: "{}") }.getOrDefault(JSONObject())
-                if (!r.isSuccessful) throw PairingException(o.optString("error", "Atlas said no (${r.code})"), r.code)
+                if (!r.isSuccessful) {
+                    throw PairingException(o.optString("error", "Atlas said no (${r.code})"), r.code,
+                        o.optString("code").ifBlank { null })
+                }
                 return o
             }
     }
@@ -138,17 +165,54 @@ object AtlasClient {
             o.optString("token").ifBlank { throw PairingException("Atlas did not return a token") }
         }
 
-    /** Pair because this phone is on Atlas's own Wi-Fi. Returns the bearer token. */
-    suspend fun claimViaHotspot(baseUrl: String, pin: String, name: String): String = withContext(Dispatchers.IO) {
-        val o = post(AtlasTrust.pinnedClient(pin, null), "${normalize(baseUrl)}/api/pair/hotspot",
-            JSONObject().put("name", name).put("kind", "android"))
-        o.optString("token").ifBlank { throw PairingException("Atlas did not return a token") }
+    /** Start pairing by button colour (only while Atlas has no primary user). */
+    suspend fun startColorPairing(baseUrl: String, pin: String, name: String): ColorPairing =
+        withContext(Dispatchers.IO) {
+            val o = post(AtlasTrust.pinnedClient(pin, null), "${normalize(baseUrl)}/api/pair/color/start",
+                JSONObject().put("name", name).put("kind", "android"))
+            if (o.has("button") && !o.optBoolean("button", true)) {
+                throw PairingException("Atlas can't find its button. Use the setup code on the label.", 0, "no_button")
+            }
+            val palette = o.optJSONArray("palette")?.let { a ->
+                (0 until a.length()).mapNotNull { i ->
+                    a.optJSONObject(i)?.let { c ->
+                        val id = c.optString("id").ifBlank { return@let null }
+                        ColorChoice(id, c.optString("label", id), c.optString("swatch", "#888888"))
+                    }
+                }
+            } ?: emptyList()
+            ColorPairing(o.getString("request_id"), o.getString("secret"), o.optString("state", "press_button"),
+                choiceIds(o), palette)
+        }
+
+    /** Where a colour pairing stands; unchanged when Atlas could not be asked. */
+    suspend fun pollColor(baseUrl: String, pin: String, p: ColorPairing): ColorPairing = withContext(Dispatchers.IO) {
+        val url = "${normalize(baseUrl)}/api/pair/color/${p.requestId}?secret=" +
+            java.net.URLEncoder.encode(p.secret, "UTF-8")
+        runCatching {
+            AtlasTrust.pinnedClient(pin, null, 8).newCall(Request.Builder().url(url).build()).execute().use { r ->
+                if (!r.isSuccessful) return@use p
+                val o = JSONObject(r.body?.string() ?: "{}")
+                p.copy(state = o.optString("state", "unknown"), choices = choiceIds(o))
+            }
+        }.getOrDefault(p)
     }
+
+    /** The colour the user picked. Returns the token; throws with code "wrong" otherwise. */
+    suspend fun answerColor(baseUrl: String, pin: String, p: ColorPairing, color: String): String =
+        withContext(Dispatchers.IO) {
+            val o = post(AtlasTrust.pinnedClient(pin, null), "${normalize(baseUrl)}/api/pair/color/${p.requestId}/answer",
+                JSONObject().put("secret", p.secret).put("color", color))
+            o.optString("token").ifBlank { throw PairingException("Atlas did not return a token") }
+        }
+
+    private fun choiceIds(o: JSONObject): List<String> =
+        o.optJSONArray("choices")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList()
 
     data class ApprovalRequest(val requestId: String, val secret: String, val serverNonce: String,
                                val clientNonce: String, val matchCode: String)
 
-    /** Ask an already-paired device to allow this phone. */
+    /** Ask Atlas's primary user to allow this phone. */
     suspend fun requestApproval(baseUrl: String, pin: String, name: String): ApprovalRequest =
         withContext(Dispatchers.IO) {
             val nonce = java.util.UUID.randomUUID().toString()

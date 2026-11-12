@@ -14,6 +14,10 @@ Environment=ATLAS_BIND=127.0.0.1
 Environment=PYTHONUNBUFFERED=1
 Environment=ATLAS_UPS_I2C_BUS=7
 Environment=ATLAS_UPS_I2C_ADDR=0x41
+# The Atlas button (pairing, 15 s factory reset): header pins 27/28, the
+# 100 kHz bus. It stops responding on the 400 kHz bus at pins 3/5.
+Environment=ATLAS_BUTTON_I2C_BUS=1
+Environment=ATLAS_BUTTON_I2C_ADDR=0x2a
 ExecStart=/usr/local/lib/atlas/bin/atlas-launch
 Restart=always
 RestartSec=5

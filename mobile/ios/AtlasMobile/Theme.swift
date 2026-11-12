@@ -26,6 +26,15 @@ struct AtlasCardModifier: ViewModifier {
     }
 }
 
+extension Color {
+    /// "#rrggbb" (the Atlas button's colour swatches); grey if it doesn't parse.
+    init(hex: String) {
+        let v = UInt32(hex.trimmingCharacters(in: CharacterSet(charactersIn: "#")), radix: 16) ?? 0x888888
+        self.init(red: Double((v >> 16) & 0xFF) / 255.0, green: Double((v >> 8) & 0xFF) / 255.0,
+                  blue: Double(v & 0xFF) / 255.0)
+    }
+}
+
 extension View {
     func atlasCard(corner: CGFloat = 14) -> some View {
         modifier(AtlasCardModifier(corner: corner))

@@ -12,12 +12,14 @@ import com.atlascontrol.mobile.network.AtlasDiscovery
 import com.atlascontrol.mobile.network.AtlasInfo
 import com.atlascontrol.mobile.network.AtlasLabel
 import com.atlascontrol.mobile.network.AtlasTrust
+import com.atlascontrol.mobile.network.ColorPairing
 import com.atlascontrol.mobile.network.DeviceStore
 import com.atlascontrol.mobile.network.LocalNetwork
 import com.atlascontrol.mobile.network.PairedDevice
 import com.atlascontrol.mobile.network.PairingException
 import com.atlascontrol.mobile.network.Sighting
 import com.atlascontrol.mobile.notifications.AtlasNotificationManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -87,6 +89,12 @@ class ConnectionViewModel(app: Application) : AndroidViewModel(app) {
     val pairingError: StateFlow<String?> = _pairingError.asStateFlow()
     private val _matchCode = MutableStateFlow<String?>(null)
     val matchCode: StateFlow<String?> = _matchCode.asStateFlow()
+    /** Pairing by the Atlas button: press it, then pick the colour its light shows. */
+    private val _color = MutableStateFlow<ColorPairing?>(null)
+    val color: StateFlow<ColorPairing?> = _color.asStateFlow()
+    private val _colorBusy = MutableStateFlow(false)
+    val colorBusy: StateFlow<Boolean> = _colorBusy.asStateFlow()
+    private var colorJob: Job? = null
     private val _joinWifi = MutableStateFlow<AtlasLabel?>(null)
     val joinWifi: StateFlow<AtlasLabel?> = _joinWifi.asStateFlow()
 
@@ -324,7 +332,9 @@ class ConnectionViewModel(app: Application) : AndroidViewModel(app) {
             val onHotspot = AtlasDiscovery.gatewayUrl(getApplication())?.let { AtlasClient.normalize(it) } ==
                 AtlasClient.normalize(info.baseUrl)
             _target.value = PairingTarget(info, onHotspot)
-            if (onHotspot) pairViaHotspot()
+            // Not set up yet: the button proves this phone is next to Atlas.
+            // Set up: only its primary user can let this phone in.
+            if (info.setupState == "unclaimed" && info.hasButton) startColorPairing()
         }
     }
 
@@ -333,9 +343,93 @@ class ConnectionViewModel(app: Application) : AndroidViewModel(app) {
         _matchCode.value = null
         _pairingError.value = null
         _joinWifi.value = null
+        colorJob?.cancel()
+        _color.value = null
+        _colorBusy.value = false
     }
 
-    fun pairViaHotspot() = pair { t -> AtlasClient.claimViaHotspot(t.info.baseUrl, t.info.observedPin, phoneName()) }
+    /**
+     * The setup code from the label instead of the button (a broken button, or
+     * the colours are hard to tell apart). Only while Atlas isn't set up.
+     */
+    fun useSetupCode() {
+        colorJob?.cancel()
+        _color.value = null
+        _pairingError.value = null
+    }
+
+    private fun markOwned(message: String?) {
+        _target.value = _target.value?.let { it.copy(info = it.info.copy(setupState = "owned")) }
+        _color.value = null
+        _pairingError.value = message
+    }
+
+    fun startColorPairing() {
+        val t = _target.value ?: return
+        _pairingError.value = null
+        _colorBusy.value = true
+        colorJob?.cancel()
+        colorJob = viewModelScope.launch {
+            try {
+                var p = AtlasClient.startColorPairing(t.info.baseUrl, t.info.observedPin, phoneName())
+                _color.value = p
+                _colorBusy.value = false
+                // Atlas keeps the attempt for two minutes; the light changes when the button is pressed.
+                while (p.state == "press_button" || p.state == "choose_color") {
+                    delay(1_000L)
+                    if (_colorBusy.value) return@launch
+                    val next = AtlasClient.pollColor(t.info.baseUrl, t.info.observedPin, p)
+                    if (_colorBusy.value || _color.value?.requestId != p.requestId) return@launch
+                    p = next
+                    _color.value = p
+                }
+            } catch (e: PairingException) {
+                _colorBusy.value = false
+                when (e.code) {
+                    "no_button" -> {
+                        _target.value = _target.value?.let { it.copy(info = it.info.copy(hasButton = false)) }
+                        useSetupCode()
+                        _pairingError.value = e.message
+                    }
+                    "claimed" -> markOwned(e.message)      // someone set Atlas up meanwhile: ask them instead
+                    else -> { _color.value = null; _pairingError.value = e.message }
+                }
+            } catch (e: CancellationException) {
+                throw e                                    // a pick or Back took over
+            } catch (e: Exception) {
+                _colorBusy.value = false
+                _color.value = null
+                _pairingError.value = "Couldn't connect to Atlas. ${e.message ?: ""}".trim()
+            }
+        }
+    }
+
+    /** One pick per press: a wrong colour ends the attempt. */
+    fun pickColor(id: String) {
+        val t = _target.value ?: return
+        val p = _color.value ?: return
+        if (p.state != "choose_color" || _colorBusy.value) return
+        _colorBusy.value = true
+        _pairingError.value = null
+        colorJob?.cancel()
+        colorJob = viewModelScope.launch {
+            try {
+                val token = AtlasClient.answerColor(t.info.baseUrl, t.info.observedPin, p, id)
+                _colorBusy.value = false
+                finishPairing(t, token)
+            } catch (e: PairingException) {
+                _colorBusy.value = false
+                if (e.code == "claimed") { markOwned(e.message); return@launch }
+                val ended = if (e.code in setOf("wrong", "conflict", "expired")) e.code!! else "unknown"
+                _color.value = p.copy(state = ended, choices = emptyList())
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _colorBusy.value = false
+                _pairingError.value = "Couldn't connect to Atlas. ${e.message ?: ""}".trim()
+            }
+        }
+    }
 
     fun pairWithCode(code: String) = pair { t -> AtlasClient.claim(t.info.baseUrl, t.info.observedPin, code, phoneName()) }
 
@@ -362,6 +456,15 @@ class ConnectionViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 _pairingError.value = "The request timed out. Try again."
                 _matchCode.value = null
+            } catch (e: PairingException) {
+                _matchCode.value = null
+                if (e.code == "unclaimed") {
+                    // Nobody has set this Atlas up yet, so nobody could allow it: use the button.
+                    _target.value = t.copy(info = t.info.copy(setupState = "unclaimed"))
+                    if (t.info.hasButton) startColorPairing() else useSetupCode()
+                } else {
+                    _pairingError.value = e.message ?: "Couldn't ask Atlas."
+                }
             } catch (e: Exception) {
                 _pairingError.value = e.message ?: "Couldn't ask Atlas."
                 _matchCode.value = null
@@ -383,7 +486,7 @@ class ConnectionViewModel(app: Application) : AndroidViewModel(app) {
                 if (label.deviceId != null && info.deviceId != label.deviceId) continue
                 unsupported(info)?.let { _pairingError.value = it; return@launch }
                 _target.value = PairingTarget(info, false)
-                if (label.setupCode != null) pairWithCode(label.setupCode) else pairViaHotspot()
+                pairWithLabelCode(label, info)
                 return@launch
             }
             if (label.ssid != null) {
@@ -407,8 +510,21 @@ class ConnectionViewModel(app: Application) : AndroidViewModel(app) {
             _joinWifi.value = null
             unsupported(info)?.let { _pairingError.value = it; return }
             _target.value = PairingTarget(info, true)
-            if (label.setupCode != null) pairWithCode(label.setupCode) else pairViaHotspot()
+            pairWithLabelCode(label, info)
             return
+        }
+    }
+
+    /**
+     * The label's setup code pairs only an Atlas that isn't set up yet; once it
+     * has a primary user, a new phone asks them.
+     */
+    private fun pairWithLabelCode(label: AtlasLabel, info: AtlasInfo) {
+        when {
+            info.setupState == "owned" -> askForApproval()
+            label.setupCode != null -> pairWithCode(label.setupCode)
+            info.hasButton -> startColorPairing()
+            else -> useSetupCode()
         }
     }
 
@@ -419,7 +535,7 @@ class ConnectionViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 finishPairing(t, block(t))
             } catch (e: PairingException) {
-                _pairingError.value = e.message
+                if (e.code == "claimed") markOwned(e.message) else _pairingError.value = e.message
             } catch (e: Exception) {
                 _pairingError.value = "Couldn't connect to Atlas. ${e.message ?: ""}".trim()
             }

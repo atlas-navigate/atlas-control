@@ -551,11 +551,27 @@ def _migration_model_profiles(conn):
     conn.executemany("DELETE FROM ai_settings WHERE key=?", [(k,) for k in AI_RUNTIME_KEYS])
 
 
+def _migration_primary_user(conn):
+    """Paired devices get a role. The first device to pair is the primary
+    user, the only one that can allow new devices; on a unit that is already
+    set up, that is the oldest device still paired. Older releases ignore the
+    column (any paired device could approve there)."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(paired_clients)")}
+    if "role" not in columns:
+        conn.execute("ALTER TABLE paired_clients ADD COLUMN role TEXT")
+    conn.execute("""
+        UPDATE paired_clients SET role='owner'
+        WHERE id = (SELECT id FROM paired_clients WHERE revoked=0 ORDER BY created, rowid LIMIT 1)
+          AND NOT EXISTS (SELECT 1 FROM paired_clients WHERE revoked=0 AND role='owner')""")
+    conn.execute("UPDATE paired_clients SET role='member' WHERE role IS NULL")
+
+
 MIGRATIONS = [
     (1, "baseline", _migration_baseline),
     (2, "pairing", _migration_pairing),
     (3, "audit_log", _migration_audit),
     (4, "model_profiles", _migration_model_profiles),
+    (5, "primary_user", _migration_primary_user),
 ]
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 # Oldest schema version whose code can still use a database at SCHEMA_VERSION.

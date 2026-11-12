@@ -203,7 +203,7 @@ class PrivacyRouteTests(PairingTestBase):
         self.assertIn("hotspot_changed", actions)
         self.assertIn("device_paired", actions)
         paired = next(e for e in log if e["action"] == "device_paired")
-        self.assertEqual(paired["detail"], {"kind": "android", "method": "setup_code"})
+        self.assertEqual(paired["detail"], {"kind": "android", "method": "setup_code", "role": "owner"})
 
     def test_unpaired_clients_cannot_read_the_security_log(self):
         self.assertEqual(self.get("/api/audit").status_code, 401)
@@ -248,7 +248,10 @@ class PrivacyRouteTests(PairingTestBase):
         from unittest import mock
         p = mock.patch.object(self.app, "_is_local", return_value=True)
         p.start(); self.addCleanup(p.stop)
-        r = self.post("/api/pair/claim", json={"setup_code": self.setup_code, "kind": "ios", "name": "Old iPhone"})
+        # Atlas is set up (Sam's phone is primary): a second device is allowed in.
+        req = self.post("/api/pair/request", json={"kind": "ios", "name": "Old iPhone"}).get_json()
+        self.assertEqual(self.send("POST", f"/api/pair/request/{req['request_id']}/approve").status_code, 200)
+        r = self.get(f"/api/pair/request/{req['request_id']}?secret={req['secret']}&kind=ios")
         self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
         token = r.get_json()["token"]
         self.client.delete_cookie(pairing.COOKIE, domain="192.168.1.20")

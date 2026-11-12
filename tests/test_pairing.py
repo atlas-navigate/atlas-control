@@ -1,5 +1,4 @@
 """Pairing replaces logins: one-time proof of physical access, then no prompts."""
-import ipaddress
 import json
 import os
 import unittest
@@ -40,7 +39,10 @@ class PairingTestBase(unittest.TestCase):
         app.db._local.conn = None
         app.db.init_db()
         pairing.revoke_all()
-        pairing._failures.clear(); pairing._global_failures.clear()
+        conn = app.db.get_db()
+        conn.execute("DELETE FROM app_settings WHERE key IN (?, ?)", (pairing.FAILURES_SETTING, pairing.IDENTITY_SETTING))
+        conn.execute("DELETE FROM audit_log WHERE action='identity_changed'")
+        conn.commit()
         app.limiter.reset()
         self.client = app.app.test_client()
 
@@ -163,6 +165,8 @@ class ApprovalTests(PairingTestBase):
         self.assertEqual(r.get_json()["status"], "unknown")
 
     def test_unpaired_device_cannot_approve_itself(self):
+        self.app.app.test_client().post("/api/pair/claim", json={"setup_code": self.setup_code},
+                                        base_url=BASE, environ_base=ENV)       # someone else is primary
         req = self.post("/api/pair/request", json={"name": "x"}).get_json()
         r = self.post(f"/api/pair/request/{req['request_id']}/approve")
         self.assertEqual(r.status_code, 401)
@@ -174,33 +178,12 @@ class ApprovalTests(PairingTestBase):
 
 
 class HotspotTests(PairingTestBase):
-    def via_nginx(self, client_ip, server_addr):
-        return {"headers": {"X-Atlas-Proxy": SECRET, "X-Real-IP": client_ip, "X-Atlas-Local-Addr": server_addr},
-                "environ_base": {"REMOTE_ADDR": "127.0.0.1"}}
-
-    def setUp(self):
-        super().setUp()
-        import request_guard
-        fd = os.path.join(self.identity_dir, "proxy_secret")
-        self._secret = request_guard.ProxySecret(fd)
-        mw = self.app.app.wsgi_app
-        old = mw.proxy_secret
-        mw.proxy_secret = self._secret
-        self.addCleanup(setattr, mw, "proxy_secret", old)
-        global SECRET
-        SECRET = open(fd).read().strip()
-
-    def test_phone_on_atlas_hotspot_pairs_with_one_tap(self):
-        hs = ipaddress.ip_interface("10.42.0.1/24")
-        with mock.patch.object(self.app, "_hotspot_interface", return_value=hs):
-            r = self.post("/api/pair/hotspot", json={"name": "Phone"}, **self.via_nginx("10.42.0.37", "10.42.0.1"))
-            self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
-            # the same request from the home LAN is refused
-            r = self.post("/api/pair/hotspot", json={}, **self.via_nginx("192.168.1.50", "192.168.1.20"))
-            self.assertEqual(r.status_code, 403)
-        with mock.patch.object(self.app, "_hotspot_interface", return_value=None):
-            r = self.post("/api/pair/hotspot", json={}, **self.via_nginx("10.42.0.37", "10.42.0.1"))
-            self.assertEqual(r.status_code, 403)
+    def test_joining_atlas_wifi_no_longer_pairs(self):
+        # Its password is the same on every unit: protocol-1 apps must update.
+        r = self.post("/api/pair/hotspot", json={"name": "Phone", "kind": "ios"})
+        self.assertEqual(r.status_code, 410)
+        self.assertEqual(r.get_json()["code"], "update_app")
+        self.assertFalse(pairing.claimed())
 
 
 class RevokeAndSocketTests(PairingTestBase):
@@ -253,7 +236,7 @@ class PersistenceTests(PairingTestBase):
         self.assertFalse(self.restart())
         self.assertTrue(self.paired(token))
         info = self.get("/api/device/info").get_json()
-        self.assertEqual(info["pairing"], 1)
+        self.assertEqual(info["pairing"], pairing.VERSION)
 
     def test_first_start_on_an_existing_unit_only_records_the_identity(self):
         token = self.pair_phone()
@@ -273,6 +256,19 @@ class PersistenceTests(PairingTestBase):
             self.assertFalse(self.restart())                     # once, not on every start
         rows = self.app.db.get_db().execute("SELECT action FROM audit_log WHERE action='identity_changed'").fetchall()
         self.assertEqual(len(rows), 1)
+
+    def test_a_database_from_another_unit_leaves_this_one_unclaimed(self):
+        # A golden drive never carries the database (atlas-capture.sh excludes
+        # it), but if one did, its primary user is no one's here: the next
+        # owner pairs with this unit's button.
+        self.pair_phone()
+        self.restart()
+        self.assertEqual(self.get("/api/device/info").get_json()["setup_state"], "owned")
+        cloned = dict(device_identity.device(), device_id="e" * 32, created_reason="new-unit")
+        with mock.patch.object(device_identity, "device", return_value=cloned):
+            self.assertTrue(self.restart())
+            self.assertIsNone(pairing.owner_id())
+            self.assertEqual(self.get("/api/device/info").get_json()["setup_state"], "unclaimed")
 
     def test_factory_reset_keeps_the_identity_binding(self):
         self.restart()
@@ -298,3 +294,207 @@ class HotspotReminderTests(PairingTestBase):
             self.assertFalse(self.app._current_hotspot_state()["standard_password"])
             os.remove(cfg)                                            # what factory reset does
             self.assertTrue(self.app._current_hotspot_state()["standard_password"])
+
+
+class PrimaryUserTests(PairingTestBase):
+    """The first device to pair is the primary user; only it can let others in."""
+
+    def other(self):
+        return self.app.app.test_client()
+
+    def request_from(self, client, name="Kid's phone"):
+        return client.post("/api/pair/request", json={"name": name, "client_nonce": "n"},
+                           base_url=BASE, environ_base=ENV).get_json()
+
+    def test_first_device_is_primary_and_setup_code_then_stops_working(self):
+        owner = self.pair_browser()
+        self.assertTrue(pairing.claimed())
+        status = self.get("/api/pair/status").get_json()
+        self.assertEqual(status["client"]["role"], "owner")
+        self.assertEqual(status["setup_state"], "owned")
+        self.assertEqual(self.get("/api/device/info").get_json()["setup_state"], "owned")
+        r = self.other().post("/api/pair/claim", json={"setup_code": self.setup_code},
+                              base_url=BASE, environ_base=ENV)
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(r.get_json()["code"], "claimed")
+        del owner
+
+    def test_unclaimed_atlas_sends_new_devices_to_the_button(self):
+        r = self.post("/api/pair/request", json={"name": "x"})
+        self.assertEqual(r.status_code, 409)
+        self.assertEqual(r.get_json()["code"], "unclaimed")
+        self.assertEqual(self.get("/api/device/info").get_json()["setup_state"], "unclaimed")
+
+    def test_only_the_primary_user_can_allow_a_device(self):
+        owner = self.pair_browser()
+        member = self.other()
+        req = self.request_from(member, "Second phone")
+        self.post(f"/api/pair/request/{req['request_id']}/approve", headers={"X-Atlas-CSRF": owner["csrf"]})
+        member.get(f"/api/pair/request/{req['request_id']}?secret={req['secret']}", base_url=BASE, environ_base=ENV)
+        member_csrf = member.get("/api/pair/status", base_url=BASE, environ_base=ENV).get_json()["csrf"]
+        self.assertEqual(member.get("/api/pair/status", base_url=BASE, environ_base=ENV)
+                         .get_json()["client"]["role"], "member")
+        third = self.request_from(self.other(), "Third")
+        r = member.post(f"/api/pair/request/{third['request_id']}/approve", headers={"X-Atlas-CSRF": member_csrf},
+                        base_url=BASE, environ_base=ENV)
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(r.get_json()["code"], "owner_required")
+        self.assertEqual(member.get("/api/pair/requests", base_url=BASE, environ_base=ENV).status_code, 403)
+        self.assertEqual(len(self.get("/api/pair/requests").get_json()), 1)
+
+    def test_primary_role_can_be_handed_over_and_is_never_left_empty(self):
+        owner = self.pair_browser()
+        member = self.other()
+        req = self.request_from(member)
+        self.post(f"/api/pair/request/{req['request_id']}/approve", headers={"X-Atlas-CSRF": owner["csrf"]})
+        member_id = member.get(f"/api/pair/request/{req['request_id']}?secret={req['secret']}",
+                               base_url=BASE, environ_base=ENV).get_json()["client_id"]
+        me = [c for c in self.get("/api/pair/clients").get_json() if c["this"]][0]
+        r = self.client.delete(f"/api/pair/clients/{me['id']}", headers={"X-Atlas-CSRF": owner["csrf"]},
+                               base_url=BASE, environ_base=ENV)
+        self.assertEqual(r.status_code, 409)                      # would leave nobody to allow devices
+        r = self.post(f"/api/pair/clients/{member_id}/primary", headers={"X-Atlas-CSRF": owner["csrf"]})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(pairing.owner_id(), member_id)
+        roles = {c["id"]: c["role"] for c in self.get("/api/pair/clients").get_json()}
+        self.assertEqual(roles, {member_id: "owner", me["id"]: "member"})
+
+    def test_a_database_without_a_primary_promotes_the_oldest_device(self):
+        self.pair_browser()
+        self.request_from(self.other())
+        conn = self.app.db.get_db()
+        conn.execute("UPDATE paired_clients SET role=NULL")
+        conn.commit()
+        oldest = conn.execute("SELECT id FROM paired_clients ORDER BY created, rowid LIMIT 1").fetchone()["id"]
+        self.assertEqual(pairing.owner_id(), oldest)
+
+
+class ColorPairingTests(PairingTestBase):
+    """Press the Atlas button, then pick the colour its light shows."""
+
+    def start(self, client=None, kind="browser"):
+        r = (client or self.client).post("/api/pair/color/start", json={"name": "Pixel", "kind": kind},
+                                         base_url=BASE, environ_base=ENV)
+        return r
+
+    def answer(self, view, color, client=None):
+        return (client or self.client).post(f"/api/pair/color/{view['request_id']}/answer",
+                                            json={"secret": view["secret"], "color": color},
+                                            base_url=BASE, environ_base=ENV)
+
+    def shown(self):
+        return pairing.color_state()["pair_color"]
+
+    def test_press_then_pick_the_colour_pairs_the_primary_user(self):
+        r = self.start(kind="android")
+        self.assertEqual(r.status_code, 200)
+        view = r.get_json()
+        self.assertEqual(view["state"], "press_button")
+        self.assertEqual({c["id"] for c in view["palette"]}, set(pairing.COLOR_IDS))
+        self.assertIsNone(self.shown())
+        self.assertEqual(pairing.button_pressed(), "bound")
+        poll = self.get(f"/api/pair/color/{view['request_id']}?secret={view['secret']}").get_json()
+        self.assertEqual(poll["state"], "choose_color")
+        self.assertEqual(sorted(poll["choices"]), sorted(pairing.COLOR_IDS))
+        color = self.shown()
+        self.assertIn(color, pairing.COLOR_IDS)
+        self.assertNotIn(color, ("red", "amber"))
+        r = self.answer(view, color)
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+        self.assertTrue(r.get_json()["token"])                    # native app: bearer token
+        self.assertTrue(pairing.claimed())
+        self.assertIsNone(self.shown())
+        self.assertEqual(pairing.list_clients()[0]["role"], "owner")
+        self.assertEqual(pairing.list_clients()[0]["proof"], "button_color")
+
+    def test_one_pick_per_press(self):
+        view = self.start().get_json()
+        pairing.button_pressed()
+        wrong = next(c for c in pairing.COLOR_IDS if c != self.shown())
+        r = self.answer(view, wrong)
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(r.get_json()["code"], "wrong")
+        self.assertIsNone(self.shown())
+        r = self.answer(view, "green")                             # no second guess on the same press
+        self.assertEqual(r.status_code, 403)
+        self.assertFalse(pairing.claimed())
+
+    def test_nobody_can_pick_before_the_button_is_pressed(self):
+        view = self.start().get_json()
+        for color in pairing.COLOR_IDS:
+            r = self.answer(view, color)
+            self.assertEqual(r.status_code, 403)
+            self.assertEqual(r.get_json()["code"], "press_button")
+        self.assertFalse(pairing.claimed())
+
+    def test_two_devices_waiting_is_a_conflict(self):
+        a = self.start().get_json()
+        b = self.start(self.app.app.test_client()).get_json()
+        self.assertEqual(pairing.button_pressed(), "conflict")
+        self.assertIsNone(self.shown())
+        for view in (a, b):
+            poll = self.get(f"/api/pair/color/{view['request_id']}?secret={view['secret']}").get_json()
+            self.assertEqual(poll["state"], "conflict")
+
+    def test_press_first_then_open_the_app(self):
+        self.assertEqual(pairing.button_pressed(), "window")
+        self.assertTrue(pairing.color_state()["press_window"])
+        view = self.start().get_json()
+        self.assertEqual(view["state"], "choose_color")
+        self.assertEqual(self.answer(view, self.shown()).status_code, 200)
+
+    def test_a_second_device_during_the_window_is_a_conflict(self):
+        pairing.button_pressed()
+        first = self.start().get_json()
+        second = self.start(self.app.app.test_client()).get_json()
+        self.assertEqual(second["state"], "conflict")
+        poll = self.get(f"/api/pair/color/{first['request_id']}?secret={first['secret']}").get_json()
+        self.assertEqual(poll["state"], "conflict")
+
+    def test_attempts_expire(self):
+        view = self.start().get_json()
+        with mock.patch.object(pairing.time, "monotonic", return_value=pairing.time.monotonic() + 3600):
+            self.assertEqual(pairing.button_pressed(), "window")
+            poll = self.get(f"/api/pair/color/{view['request_id']}?secret={view['secret']}").get_json()
+        self.assertIn(poll["state"], ("expired", "unknown"))
+
+    def test_a_wrong_secret_sees_nothing(self):
+        view = self.start().get_json()
+        pairing.button_pressed()
+        poll = self.get(f"/api/pair/color/{view['request_id']}?secret=guess").get_json()
+        self.assertEqual(poll, {"state": "unknown"})
+
+    def test_button_does_nothing_once_atlas_is_set_up(self):
+        self.pair_browser()
+        self.assertEqual(pairing.button_pressed(), "claimed")
+        r = self.start(self.app.app.test_client())
+        self.assertEqual(r.status_code, 409)
+        self.assertEqual(r.get_json()["code"], "claimed")
+
+
+class LockoutTests(PairingTestBase):
+    def test_wrong_setup_codes_stay_counted_across_a_restart(self):
+        for _ in range(5):
+            pairing._record_failure("10.42.0.9")
+        pairing._cache.clear()
+        self.app.db._local.conn = None                        # what a restart sees
+        self.app.db.init_db()
+        self.assertTrue(pairing._rate_limited("10.42.0.9"))
+        self.assertFalse(pairing._rate_limited("10.42.0.10"))
+
+
+class PrimaryUserMigrationTests(unittest.TestCase):
+    def test_oldest_paired_device_becomes_primary(self):
+        import sqlite3
+        import database
+        conn = sqlite3.connect(":memory:")
+        database._migration_pairing(conn)
+        for cid, created in (("b", 200), ("a", 100), ("c", 300)):
+            conn.execute("INSERT INTO paired_clients (id, name, kind, token_hash, created) VALUES (?, ?, 'ios', ?, ?)",
+                         (cid, cid, cid * 8, created))
+        conn.execute("UPDATE paired_clients SET revoked=1 WHERE id='a'")
+        database._migration_primary_user(conn)
+        roles = dict(conn.execute("SELECT id, role FROM paired_clients").fetchall())
+        self.assertEqual(roles, {"a": "member", "b": "owner", "c": "member"})
+        database._migration_primary_user(conn)                 # running it again changes nothing
+        self.assertEqual(dict(conn.execute("SELECT id, role FROM paired_clients").fetchall()), roles)

@@ -2,7 +2,8 @@
 
 Neither app can be compiled on the Jetson, so this reads their sources and
 checks them against the running Flask app: every endpoint they call exists,
-both speak the same pairing version as the server, the label QR code the
+both speak the same pairing version as the server, both pair with the Atlas
+button the way the server expects, the label QR code the
 server prints parses the way the apps parse it, the 4-digit match code the
 apps compute equals the server's, and every answer the server can give an
 approval poll is handled by both apps.
@@ -47,6 +48,7 @@ class MobileContractTests(unittest.TestCase):
     def setUpClass(cls):
         import app
         cls.app = app
+        app.db.init_db()          # /api/device/info reports whether Atlas has a primary user yet
         cls.rules = [r.rule for r in app.app.url_map.iter_rules()]
         cls.android = _android_main()
         cls.ios = _ios()
@@ -98,6 +100,34 @@ class MobileContractTests(unittest.TestCase):
             for status in ("approved", "denied", "expired", "unknown", "issued", "retry"):
                 with self.subTest(platform=platform, status=status):
                     self.assertIn(f'"{status}"', text)
+
+    def test_both_apps_pair_with_the_atlas_button(self):
+        # The first phone presses the button and picks the colour its light
+        # shows; once Atlas has a primary user, a new phone asks them.
+        import pairing
+        import status_button
+        client = self.app.app.test_client()
+        info = client.get("/api/device/info", base_url="https://127.0.0.1",
+                          environ_base={"REMOTE_ADDR": "127.0.0.1"}).get_json()
+        self.assertIn(info["setup_state"], ("unclaimed", "owned"))
+        self.assertIn("button", info)
+        palette = status_button.palette()
+        for platform, files in (("android", self.android), ("ios", self.ios)):
+            text = "\n".join(files.values())
+            for needle in ("/api/pair/color/start", "/api/pair/color/", "/answer", '"setup_state"', '"button"',
+                           '"palette"', '"choices"', '"swatch"', '"label"', '"color"', '"state"', '"code"',
+                           '"unclaimed"', '"owned"', '"claimed"', '"no_button"'):
+                with self.subTest(platform=platform, needle=needle):
+                    self.assertIn(needle, text)
+            # Every state a colour attempt can be in is shown.
+            for state in ("press_button", "choose_color", "conflict", "wrong", "expired"):
+                with self.subTest(platform=platform, state=state):
+                    self.assertIn(f'"{state}"', text)
+            # The one-tap hotspot claim is gone (Atlas answers 410 to it).
+            self.assertNotIn("/api/pair/hotspot", text, platform)
+        # The palette fields the apps read are the ones Atlas sends.
+        self.assertTrue(palette and all({"id", "label", "swatch"} <= set(c) for c in palette))
+        self.assertEqual(pairing.EXEMPT_PREFIX.count("/api/pair/color/"), 1)
 
     def test_match_code_vectors_in_the_android_tests_are_the_servers(self):
         import device_identity

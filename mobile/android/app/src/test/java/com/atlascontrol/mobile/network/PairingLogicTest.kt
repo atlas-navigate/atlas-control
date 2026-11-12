@@ -29,6 +29,12 @@ class PairingLogicTest {
         assertEquals("k7mq-x3rt:9pwd-h2fc", label.password)       // the password may contain ':'
     }
 
+    @Test fun newLabelsNameTheWifiAfterTheLocalAddress() {
+        val label = QrPayload.parse("ATLAS1:0123abcd:H7QDM3XR9KTW:pinPIN_-x:atlas-k7m2qx9wp.local:k7mq-x3rt-9pwd-h2fc")!!
+        assertEquals("atlas-k7m2qx9wp.local", label.ssid)
+        assertEquals("k7mq-x3rt-9pwd-h2fc", label.password)
+    }
+
     @Test fun plainWifiQrIsUnderstoodToo() {
         val label = QrPayload.parse("WIFI:T:WPA;S:Atlas\;H7QD;P:k7mq-x3rt-9pwd-h2fc;;")!!
         assertEquals("Atlas;H7QD", label.ssid)

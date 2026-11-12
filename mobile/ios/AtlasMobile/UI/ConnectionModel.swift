@@ -49,6 +49,9 @@ final class ConnectionModel: ObservableObject {
     @Published private(set) var pairingError: String?
     @Published private(set) var matchCode: String?
     @Published private(set) var joiningWifi: AtlasLabel?
+    /// Pairing by the Atlas button: press it, then pick the colour its light shows.
+    @Published private(set) var color: ColorPairing?
+    @Published private(set) var colorBusy = false
     @Published var askLocationSharing = false
 
     private(set) var device: PairedDevice? = DeviceStore.load()
@@ -261,7 +264,9 @@ final class ConnectionModel: ObservableObject {
             }
             let onHotspot = AtlasClient.normalize(info.baseUrl) == AtlasDiscovery.hotspotUrl
             target = PairingTarget(info: info, onAtlasHotspot: onHotspot)
-            if onHotspot { pairViaHotspot() }
+            // Not set up yet: the button proves this iPhone is next to Atlas.
+            // Set up: only its primary user can let this iPhone in.
+            if info.setupState == "unclaimed" && info.hasButton { startColorPairing() }
         }
     }
 
@@ -278,10 +283,72 @@ final class ConnectionModel: ObservableObject {
         }
     }
 
-    func cancelPairing() { target = nil; matchCode = nil; pairingError = nil; joiningWifi = nil }
+    func cancelPairing() {
+        target = nil; matchCode = nil; pairingError = nil; joiningWifi = nil
+        color = nil; colorBusy = false
+    }
 
-    func pairViaHotspot() {
-        pair { t in try await AtlasClient.claimViaHotspot(t.info.baseUrl, pin: t.info.observedPin, name: Self.phoneName) }
+    /// The setup code from the label instead of the button (a broken button, or
+    /// the colours are hard to tell apart). Only while Atlas isn't set up.
+    func useSetupCode() { color = nil; pairingError = nil }
+
+    func startColorPairing() {
+        guard let t = target else { return }
+        pairingError = nil
+        colorBusy = true
+        Task {
+            do {
+                var p = try await AtlasClient.startColorPairing(t.info.baseUrl, pin: t.info.observedPin, name: Self.phoneName)
+                color = p
+                colorBusy = false
+                // Atlas keeps the attempt for two minutes; the light changes when the button is pressed.
+                while ["press_button", "choose_color"].contains(p.state) {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    guard color?.requestId == p.requestId, !colorBusy else { return }
+                    let next = await AtlasClient.pollColor(t.info.baseUrl, pin: t.info.observedPin, pairing: p)
+                    guard color?.requestId == p.requestId, !colorBusy else { return }
+                    p = next
+                    color = p
+                }
+            } catch let e as PairingError where e.code == "no_button" {
+                colorBusy = false
+                target?.info.hasButton = false
+                useSetupCode()
+                pairingError = e.message
+            } catch let e as PairingError where e.code == "claimed" {
+                // Someone set Atlas up meanwhile: ask them instead.
+                colorBusy = false
+                target?.info.setupState = "owned"
+                color = nil
+                pairingError = e.message
+            } catch {
+                colorBusy = false
+                color = nil
+                pairingError = error.localizedDescription
+            }
+        }
+    }
+
+    /// One pick per press: a wrong colour ends the attempt.
+    func pickColor(_ id: String) {
+        guard let t = target, let p = color, p.state == "choose_color", !colorBusy else { return }
+        colorBusy = true
+        pairingError = nil
+        Task {
+            do {
+                let token = try await AtlasClient.answerColor(t.info.baseUrl, pin: t.info.observedPin, pairing: p, color: id)
+                colorBusy = false
+                finishPairing(t, token: token)
+            } catch let e as PairingError {
+                color?.state = ["wrong", "conflict", "expired", "claimed"].contains(e.code ?? "") ? e.code! : "unknown"
+                color?.choices = []
+                colorBusy = false
+                if e.code == "claimed" { target?.info.setupState = "owned"; color = nil; pairingError = e.message }
+            } catch {
+                colorBusy = false
+                pairingError = error.localizedDescription
+            }
+        }
     }
 
     func pairWithCode(_ code: String) {
@@ -310,6 +377,11 @@ final class ConnectionModel: ObservableObject {
                 }
                 pairingError = "The request timed out. Try again."
                 matchCode = nil
+            } catch let e as PairingError where e.code == "unclaimed" {
+                // Nobody has set this Atlas up yet, so nobody could allow it: use the button.
+                matchCode = nil
+                target?.info.setupState = "unclaimed"
+                if t.info.hasButton { startColorPairing() } else { useSetupCode() }
             } catch {
                 pairingError = error.localizedDescription
                 matchCode = nil
@@ -330,7 +402,7 @@ final class ConnectionModel: ObservableObject {
                 if let id = label.deviceId, id != info.deviceId { continue }
                 if let why = unsupported(info) { pairingError = why; return }
                 target = PairingTarget(info: info, onAtlasHotspot: url == AtlasDiscovery.hotspotUrl)
-                if let code = label.setupCode { pairWithCode(code) } else { pairViaHotspot() }
+                pairWithLabelCode(label, info)
                 return
             }
             if let ssid = label.ssid {
@@ -359,11 +431,25 @@ final class ConnectionModel: ObservableObject {
             joiningWifi = nil
             if let why = unsupported(info) { pairingError = why; return }
             target = PairingTarget(info: info, onAtlasHotspot: true)
-            if let code = label.setupCode { pairWithCode(code) } else { pairViaHotspot() }
+            pairWithLabelCode(label, info)
             return
         }
         joiningWifi = nil
         pairingError = "Couldn't join Atlas's Wi-Fi. Join it in Settings, then try again."
+    }
+
+    /// The label's setup code pairs only an Atlas that isn't set up yet; once it
+    /// has a primary user, a new iPhone asks them.
+    private func pairWithLabelCode(_ label: AtlasLabel, _ info: AtlasInfo) {
+        if info.setupState == "owned" {
+            askForApproval()
+        } else if let code = label.setupCode {
+            pairWithCode(code)
+        } else if info.hasButton {
+            startColorPairing()
+        } else {
+            useSetupCode()
+        }
     }
 
     private func pair(_ block: @escaping (PairingTarget) async throws -> String) {
@@ -371,6 +457,10 @@ final class ConnectionModel: ObservableObject {
         pairingError = nil
         Task {
             do { finishPairing(t, token: try await block(t)) }
+            catch let e as PairingError where e.code == "claimed" {
+                target?.info.setupState = "owned"
+                pairingError = e.message
+            }
             catch { pairingError = error.localizedDescription }
         }
     }

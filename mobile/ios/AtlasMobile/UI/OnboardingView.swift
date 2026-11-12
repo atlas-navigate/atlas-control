@@ -2,7 +2,9 @@ import SwiftUI
 
 /// First run: find the Atlas and pair with it once.
 ///
-///   Open app → Atlas appears → tap Connect → (one more tap / scan) → Atlas opens.
+///   Atlas not set up yet: tap Connect → press the Atlas button → pick the
+///   colour its light shows → Atlas opens (this iPhone is its primary user).
+///   Atlas already set up: tap Connect → its primary user taps Allow.
 struct OnboardingView: View {
     @ObservedObject var model: ConnectionModel
     @ObservedObject private var localNetwork = LocalNetworkAccess.shared
@@ -25,6 +27,8 @@ struct OnboardingView: View {
                     joinWifi(label)
                 } else if let match = model.matchCode {
                     approvalWait(match)
+                } else if let p = model.color {
+                    colorCard(p)
                 } else if let t = model.target {
                     pairCard(t)
                 } else {
@@ -41,7 +45,7 @@ struct OnboardingView: View {
                         if model.searching { ProgressView() } else { Button("Search again") { model.searchNearby() } }
                     }
                     if model.nearby.isEmpty && !model.searching {
-                        Text("None found yet. Make sure Atlas is switched on and this iPhone is on the same Wi-Fi, or on Atlas's own Wi-Fi (its name and password are on the label).")
+                        Text("None found yet. Make sure Atlas is switched on and this iPhone is on the same Wi-Fi, or on Atlas's own Wi-Fi — it is named after Atlas's address, like atlas-k7m2qx9wp.local (name and password are on the label).")
                             .font(.footnote).foregroundColor(AtlasTheme.muted)
                     }
                     ForEach(model.nearby) { s in
@@ -95,8 +99,13 @@ struct OnboardingView: View {
     private func pairCard(_ t: PairingTarget) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(t.info.name).font(.title3.bold()).foregroundColor(AtlasTheme.onBackground)
-            if t.onAtlasHotspot {
-                HStack { ProgressView(); Text("Connecting…").foregroundColor(AtlasTheme.muted) }
+            if t.info.setupState == "owned" {
+                Text("This Atlas already has a primary user. Ask them to allow this iPhone — they'll get a prompt on their phone or computer.")
+                    .foregroundColor(AtlasTheme.onSurface)
+                Button("Ask to connect") { model.askForApproval() }
+                    .buttonStyle(.borderedProminent)
+                Text("Lost the primary user's phone? Holding the button on Atlas for 15 seconds, until its light turns red, resets Atlas to factory settings and erases its data.")
+                    .font(.footnote).foregroundColor(AtlasTheme.muted)
             } else {
                 Text("Enter the setup code from the label on your Atlas:").foregroundColor(AtlasTheme.onSurface)
                 TextField("XXXX-XXXX-XXXX", text: Binding(
@@ -116,8 +125,59 @@ struct OnboardingView: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(!SetupCode.isComplete(code))
                 Button("Scan the label instead") { scanning = true }
-                Button("Ask someone using this Atlas to allow this iPhone") { model.askForApproval() }
+                if t.info.hasButton { Button("Use the Atlas button instead") { model.startColorPairing() } }
             }
+            Button("Back") { model.cancelPairing() }
+        }
+        .padding(18)
+        .atlasCard()
+    }
+
+    private static let colorStepText = [
+        "conflict": "Two devices tried to connect at the same time. Close Atlas on the other one, then start again.",
+        "wrong": "That wasn't the colour the light showed. Start again and press the button once more.",
+        "expired": "That took too long. Start again.",
+    ]
+
+    /// Press the Atlas button, then pick the colour its light shows.
+    private func colorCard(_ p: ColorPairing) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(model.target?.info.name ?? "Atlas").font(.title3.bold()).foregroundColor(AtlasTheme.onBackground)
+            switch p.state {
+            case "press_button":
+                Text("Press the button on your Atlas once.").font(.headline).foregroundColor(AtlasTheme.onBackground)
+                Text("It's the round button on top of Atlas. Its light changes colour.")
+                    .foregroundColor(AtlasTheme.onSurface)
+                HStack { ProgressView(); Text("Waiting for the button…").font(.footnote).foregroundColor(AtlasTheme.muted) }
+            case "choose_color":
+                Text("Which colour is the button showing?").font(.headline).foregroundColor(AtlasTheme.onBackground)
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 12) {
+                    ForEach(p.choices, id: \.self) { id in
+                        let c = p.palette.first { $0.id == id }
+                        Button { model.pickColor(id) } label: {
+                            VStack(spacing: 6) {
+                                Circle().fill(Color(hex: c?.swatch ?? "#888888"))
+                                    .overlay(Circle().stroke(Color.black.opacity(0.25), lineWidth: 2))
+                                    .frame(width: 52, height: 52)
+                                Text(c?.label ?? id).font(.footnote).foregroundColor(AtlasTheme.onBackground)
+                            }
+                            .frame(maxWidth: .infinity).padding(.vertical, 10)
+                            .atlasCard(corner: 12)
+                        }
+                        .disabled(model.colorBusy)
+                        .accessibilityLabel(c?.label ?? id)
+                    }
+                }
+                Text("You get one pick. Only someone next to Atlas can see its light.")
+                    .font(.footnote).foregroundColor(AtlasTheme.muted)
+            default:
+                Text(Self.colorStepText[p.state] ?? "That attempt ended. Start again.")
+                    .foregroundColor(AtlasTheme.onSurface)
+                Button("Start again") { model.startColorPairing() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(model.colorBusy)
+            }
+            Button("Can't use the button? Enter the setup code") { model.useSetupCode() }
             Button("Back") { model.cancelPairing() }
         }
         .padding(18)
@@ -126,7 +186,7 @@ struct OnboardingView: View {
 
     private func approvalWait(_ match: String) -> some View {
         VStack(spacing: 14) {
-            Text("On a phone or computer already using this Atlas, tap Allow. Check both screens show:")
+            Text("On the primary user's phone or computer, tap Allow. Check both screens show:")
                 .multilineTextAlignment(.center).foregroundColor(AtlasTheme.onSurface)
             Text(match).font(.system(size: 40, weight: .bold, design: .monospaced)).kerning(8)
                 .foregroundColor(AtlasTheme.onBackground)
@@ -142,6 +202,10 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Joining Atlas's Wi-Fi").font(.title3.bold()).foregroundColor(AtlasTheme.onBackground)
             Text(label.ssid ?? "Atlas").font(.title2.bold()).foregroundColor(AtlasTheme.primary)
+            if let ssid = label.ssid, ssid.hasSuffix(".local") {
+                Text("Atlas's Wi-Fi is named after its address: once joined, Atlas is at \(ssid).")
+                    .font(.footnote).foregroundColor(AtlasTheme.muted)
+            }
             Text("Tap Join when iOS asks. Atlas connects automatically afterwards.")
                 .foregroundColor(AtlasTheme.onSurface)
             HStack { ProgressView(); Text("Waiting for the Wi-Fi connection…").font(.footnote).foregroundColor(AtlasTheme.muted) }
