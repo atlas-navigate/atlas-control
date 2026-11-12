@@ -61,6 +61,31 @@ or too old gets exactly that version from `install.sh` when online, and
 disaster recovery — it contains that unit's own secrets and is never used to
 build units.
 
+## Wiring the 40-pin header
+
+Every unit has three I2C devices on the header. The Atlas button must be on
+pins 27/28: the bus at pins 3/5 runs at 400 kHz, and the button (DFRobot
+DFR0991) stops responding there until it is power-cycled.
+
+| Device | Wire → header pin | Bus (address) |
+|---|---|---|
+| **Atlas button** (DFR0991, Gravity cable) | D (SDA) → **27**, C (SCL) → **28**, + → **1** (3.3 V), − → **6** (GND) | i2c-1, 100 kHz (`0x2a`) |
+| **GPS** (NEO-M8U) | SDA → **3**, SCL → **5**, 3.3 V → **17**, GND → **9** | i2c-7, 400 kHz (`0x42`) |
+| **UPS** (INA219) | SDA → 3, SCL → 5 (shared with the GPS) | i2c-7 (`0x41`) |
+
+Never put the button on pins 3/5. Check the wiring before the payload run:
+
+```bash
+sudo i2cdetect -y -r 1      # 2a (the button)
+sudo i2cdetect -y -r 7      # 41 (UPS), 42 (GPS)
+```
+
+Never probe bus 4 (the power-management chip). `install.sh` checks the button
+(stage 98): missing or on pins 3/5 is a `[✗]` on a retail unit ("must not
+ship"), a warning on a developer unit. After install,
+`python3 /opt/atlas/current/status_button.py --flash` shows each pairing colour
+on the button, so the line can confirm the LED and its colours.
+
 ## Per unit
 
 1. Flash JetPack (L4T R39.2) to the NVMe and complete first-boot setup with
@@ -84,13 +109,15 @@ build units.
      files, a health check, and automatic rollback on failure;
    - checks Ollama is new enough for every model and has its GPU runners,
      and that every model is present (pulling any missing when online);
-   - gives the unit its **own identity**: `Atlas-XXXXXX` name, `atlas-xxxxxx`
-     hostname, TLS key and certificate, hotspot name (the hotspot password
-     is the standard one every unit shares), setup code;
+   - gives the unit its **own identity**: `Atlas-XXXXXXXXX` name,
+     `atlas-xxxxxxxxx` hostname, TLS key and certificate, hotspot name (its
+     `.local` address, e.g. `atlas-k7m2qx9wp.local`; the hotspot password is
+     the standard one every unit shares), setup code;
    - writes the **label** (`/root/atlas-labels/Atlas-XXXX.{png,svg,txt}`,
      copied to the drive's `labels/` when it is writable): a Wi-Fi QR code,
-     the Atlas app QR code, the name, hotspot name and password, setup code
-     and address;
+     the Atlas app QR code, the name, the Wi-Fi name (= address) and
+     password, "press the button, pick the colour", and the setup code as the
+     backup;
    - **locks the unit down for retail** (`finalize-retail.sh`): setup-account
      passwords locked, SSH disabled and masked, the setup account removed
      from the `atlas` group, boots headless (`multi-user.target`, from the
@@ -100,8 +127,9 @@ build units.
    - **verifies** the unit with `atlas-engine check`: system files and
      settings match the release, services running, power mode MAXN_SUPER,
      kernel settings, swap, Ollama's settings and every model, the firewall
-     and open ports, lock-down, identity, storage. Any `[FAIL]` ends the run
-     with exit status 1 and "installed but NOT ready".
+     and open ports, lock-down, identity, storage; then that the Atlas button
+     answers on pins 27/28. Any `[FAIL]` ends the run with exit status 1 and
+     "installed but NOT ready".
 
    Everything on screen is also in `/var/log/atlas-install/install-<time>.log`
    (root only; the last 10 are kept). A run that stops can be re-run as it
@@ -117,16 +145,19 @@ build units.
 - `sudo /usr/local/lib/atlas/bin/atlas-engine check` → no `[FAIL]` (install.sh
   ends with it; after the first reboot, `--infer` also has Ray answer once and
   reports its speed); `sudo finalize-retail.sh --check` → "Ready for retail."
-- From a phone: scan the label's app QR code in the Atlas app → paired, map
-  loads, a cross-state route returns (following roads, not a straight line),
-  Ray answers.
+- The button glows dim white (unclaimed). From a phone on the unit's Wi-Fi
+  (`atlas-xxxxxxxxx.local`): open the Atlas app → Connect → press the button →
+  pick the colour → paired, the light blinks green then goes off; map loads, a
+  cross-state route returns (following roads, not a straight line), Ray
+  answers. Then Settings → Factory reset (or hold the button 15 s) so the unit
+  ships unclaimed.
 - `find /atlas_data/atlas-control/osrm-data ! -perm -o=r | wc -l` → `0`. The
   app's service account must read the routing graphs; `osrm-extract` writes
   each `.fileIndex` as 0700, and `install.sh` makes them readable. An
   unreadable graph makes `osrm-routed` exit at once and the app logs
   "cannot read region.osrm.fileIndex".
-- `ss -ltn` shows nothing on `*:5000`; `https://atlas-xxxxxx.local` shows the
-  pairing screen to an unpaired browser.
+- `ss -ltn` shows nothing on `*:5000`; `https://atlas-xxxxxxxxx.local` shows
+  the pairing screen to an unpaired browser.
 
 ## Unique per unit, even from a cloned image
 
@@ -135,16 +166,19 @@ The identity is never on the payload drive. It is created on each unit by
 setup code, TLS key, device id and proxy secret. None of these is shared
 between units: there is no default setup code.
 
-The unit's name code is derived one-way from the module serial. It appears as:
-- the name (Atlas-7KQ3PM);
-- the Wi-Fi name;
-- the `.local` hostname (`atlas-7kq3pm.local`).
+The unit's name code is derived from the module serial. It appears as:
+- the name (Atlas-K7M2QX9WP);
+- the `.local` hostname (`atlas-k7m2qx9wp.local`);
+- the Wi-Fi name, which is that `.local` address.
 
 So a reflashed module keeps its printed name, and a different module never
-gets it. The code has 29⁶ ≈ 590 million values, so two units on one network
-practically never collide. A fleet registry should still check for
-duplicates: if a code repeats, bump `name_salt` with
-`identity.create(salt=1)` and reprint that label.
+gets it. Units made since 2026-11 use 9 characters from a keyed permutation of
+the numeric serial (`derive_name_v2`, scheme `serial-v2`): a bijection over
+29⁹ values, so two units can **never** share a name. A serial that isn't a
+number below 29⁹ falls back to a 9-character hash (`hmac9`, recorded in
+`device.json`); only those need the fleet registry's duplicate check (bump
+`name_salt` with `identity.create(salt=1)` and reprint the label). Units made
+earlier keep their 6-character name.
 
 The hotspot **password** is the exception: it is the same on every unit (owner
 decision, `FACTORY_HOTSPOT_PASSWORD`), so it can be pre-printed on the box and

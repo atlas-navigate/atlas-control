@@ -23,6 +23,31 @@ go in the keyring's revocation list.
 Developer keys (`keygen.py --dev`) are unencrypted and trusted only on units
 with `/etc/atlas/dev-mode`.
 
+### Adding the production key (before the first retail release)
+
+The keyring in this repository is still empty, so today only developer units
+(which trust the developer key) can install a release; retail units and
+`install.sh --from-github` on a retail unit refuse every release. To start
+signing for everyone:
+
+1. On your own offline machine (not this Jetson): run the two `keygen.py`
+   commands above.
+2. Put both public keys in `system/keys/keyring.json` with a higher
+   `keyring_version`:
+   ```json
+   {"keyring_version": 2,
+    "keys": [{"pub": "<primary.pub>", "status": "active"},
+             {"pub": "<backup.pub>",  "status": "backup"}],
+    "revoked": []}
+   ```
+   Commit and push.
+3. Ship that keyring once to every existing unit: build a release from that
+   commit, sign it with the developer key, and install it on each developer
+   unit (`tools/dev/deploy`). The engine adopts the newer keyring when the
+   release commits.
+4. From then on, sign every release with the primary key and publish it;
+   all units (and new installs, whose kit carries the keyring) accept it.
+
 ## Build
 
 ```bash
@@ -50,6 +75,17 @@ uploads the three files, downloads them back and verifies them again, and
 only then (after you confirm) publishes it; devices find it through
 `…/releases/latest`. The releases URL is build-time configurable
 (`ATLAS_RELEASES_URL`); the host is not trusted — only the signature is.
+
+Every unit checks every 6 hours (and on Settings → Software Update → Check),
+downloads in the background with resume, and installs on the owner's OK. The
+same release also installs new units: `install.sh --from-github`
+([INSTALL.md](INSTALL.md#installing-from-github)).
+
+A release that changes root-owned code (`system/atlas_engine/`: identity,
+system files, the engine itself) reaches existing units only if
+`ENGINE_VERSION` in `system/atlas_engine/__init__.py` goes up; the new engine
+is installed first and then installs the rest. (Engine 5: the `.local` Wi-Fi
+name and the hotspot's DNS name.)
 
 ## Developer releases
 

@@ -10,7 +10,8 @@ another.
 | Who | What they can reach | What must hold |
 |---|---|---|
 | Someone on the same Wi-Fi / LAN | ports 80/443, mDNS, the discovery beacon | nothing works until a device is paired; no secrets are disclosed before pairing |
-| Someone who knows the standard Wi-Fi password, within range of an Atlas with its hotspot on | Atlas's hotspot, and through it pairing | **accepted risk** (owner decision 2026-09-26): they can join and pair with one tap. Owners are reminded to set their own Wi-Fi password, which closes this |
+| Someone who knows the standard Wi-Fi password, within range of an Atlas with its hotspot on | Atlas's hotspot (the password is shared, owner decision 2026-09-26) | joining grants nothing: pairing needs the Atlas button's colour (while unclaimed) or the primary user's Allow. Owners are still reminded to set their own Wi-Fi password |
+| Someone with the unit in hand | the Atlas button | by design they are the owner: holding it 15 s erases the owner's data and lets them pair. A reset is refused while an update installs and is recorded in the security log |
 | A web page the owner visits | the owner's browser, which *can* reach Atlas | cross-site requests, DNS rebinding and forged forwarding headers are refused |
 | Another radio on the mesh | text, node names and positions arriving over LoRa | they are data, never markup or instructions (UI and Ray) |
 | A compromised app process | the `atlas` account | no sudo, no root path, no write access to code or other units' keys |
@@ -58,12 +59,19 @@ middleware (so `/socket.io/` is covered too):
 
 ## Pairing (`pairing.py`, `device_identity.py`)
 
-- A client proves ownership once: the label's **setup code** (PBKDF2-hashed
-  on the unit, rate-limited per address and globally), a connection over
-  **Atlas's own hotspot** (its password is on the label), or **approval on
-  an already paired device**. For approvals both screens show a 4-digit code
-  derived from the TLS key the phone actually saw, so a LAN man-in-the-middle
-  shows a mismatch.
+- A client proves ownership once. While Atlas has no primary user
+  (**unclaimed**): the **Atlas button** — press it, and pick the colour its
+  light shows (1 of 6, `secrets.choice`, shown only on the LED; one pick per
+  press; two devices waiting at once void both attempts) — or the label's
+  **setup code** (PBKDF2-hashed on the unit; 5 wrong per address / 20 in
+  total pause it for ten minutes, persisted across restarts). The first
+  device becomes the **primary user**. After that the button and setup code
+  pair nothing; a new device needs **the primary user's approval**. Both
+  screens show a 4-digit code derived from the TLS key the phone actually
+  saw, so a LAN man-in-the-middle shows a mismatch. Only the primary user
+  receives, lists and answers requests (`owner` Socket.IO room; others get
+  `403 owner_required`). Being on Atlas's hotspot is no longer a proof
+  (`/api/pair/hotspot` answers `410`).
 - The result is a random token stored only as its SHA-256. Browsers get it
   as an `HttpOnly; Secure; SameSite=Strict` cookie with `Max-Age` (clock-
   independent); the apps keep it in the Android Keystore / iOS Keychain and
@@ -172,9 +180,10 @@ only on units with `/etc/atlas/dev-mode`. See [UPDATES.md](UPDATES.md) and
   (`sensitive_log.py` redacts, and coordinate logging was demoted).
 - The security log (Settings → Privacy) records which paired device changed
   settings, networks, pairing or updates — never the values.
-- Factory reset (typed `RESET`) removes the owner's data, documents,
-  calendar, settings, paired devices, saved Wi-Fi networks, downloads and
-  database copies, and returns the hotspot to the label's credentials.
+- Factory reset (typed `RESET`, or the Atlas button held 15 s) removes the
+  owner's data, documents, calendar, settings, paired devices (including the
+  primary user), saved Wi-Fi networks, downloads and database copies, and
+  returns the hotspot to the label's credentials.
 
 ## Manufacturing
 
@@ -193,15 +202,18 @@ listens or runs that Atlas does not use. See
 - Browsers show a one-time warning for the self-signed certificate (there is
   no offline way to get a publicly trusted certificate for a `.local` name);
   the apps pin the key instead.
-- Anyone who can open the unit's case, or who has the label, can pair — by
-  design, that is the owner.
-- The hotspot password is the same on every unit, and joining the hotspot
-  pairs with one tap. So until the owner sets their own Wi-Fi password, anyone
-  who knows the standard one can take control of an Atlas whose hotspot is on,
-  from within Wi-Fi range. Universal default passwords are restricted in some
-  markets (UK PSTI, EU EN 18031, California SB-327).
-- Typing the setup code (rather than scanning the label's QR code) trusts
-  the first TLS key the phone sees; an attacker actively intercepting the
-  LAN at that moment could capture the code. Scanning the QR code (which
-  carries the key pin) or approving from a paired device (match code) closes
-  that gap.
+- Anyone with the unit in hand can reset it with the button and pair — by
+  design, that is the owner. Before anyone has paired, whoever has the label
+  can also pair with its setup code.
+- The hotspot password is the same on every unit. Joining no longer pairs,
+  but anyone who knows it can reach an unclaimed or owned Atlas's pages and
+  its LAN services on the hotspot. Universal default passwords are restricted
+  in some markets (UK PSTI, EU EN 18031, California SB-327).
+- The button runs inside the app process: if the app is down, the 15-second
+  reset does nothing (the engine's health check rolls back a broken update).
+- Pairing with the button colour or a typed setup code (rather than
+  scanning the label's QR code) trusts the first TLS key the phone sees; an
+  attacker actively intercepting that network at that moment could relay the
+  pick or the code and keep the token. Doing it on Atlas's own hotspot narrows
+  this to someone who joined that network; scanning the QR code (which carries the
+  key pin) or approval (match code) closes it.

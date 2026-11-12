@@ -13,9 +13,10 @@ Software updates never use it. Atlas installs signed releases itself
 - A Jetson Orin, flashed with JetPack 7: L4T R39, Ubuntu 24.04, and the
   system Python 3.12. Everything is measured on the Orin Nano 8 GB (Super).
 - A signed release: a directory holding `atlas-release.json`, its `.sig` and
-  the bundle ([RELEASES.md](RELEASES.md)). The kit `install.sh` belongs to is
-  that same release unpacked (`stage/kit/` on a payload drive), or a checkout
-  on a developer unit.
+  the bundle ([RELEASES.md](RELEASES.md)), or `--from-github` to download one.
+  The kit `install.sh` belongs to is that same release unpacked (`stage/kit/`
+  on a payload drive), or a checkout of the repository.
+- The Atlas button on header pins 27/28 ([MANUFACTURING.md](MANUFACTURING.md#wiring-the-40-pin-header)).
 - Storage: about 250 GB to build every dataset on the unit. A unit seeded from
   a payload drive needs no extra room.
 - Internet is needed only for whatever the unit lacks: packages, Ollama,
@@ -24,14 +25,16 @@ Software updates never use it. Atlas installs signed releases itself
 ## Usage
 
 ```bash
-sudo ./install.sh --bundle DIR [--labels DIR] [--dev-key PUB]
+sudo ./install.sh --bundle DIR | --from-github [TAG]
+                  [--labels DIR] [--dev-key PUB]
                   [--states all|keep|none|"MD VA …"] [--yes]
                   [--only STAGES] [--skip STAGES] [--log FILE]
 ```
 
 | Option | Meaning |
 |---|---|
-| `--bundle DIR` | The signed release to install. Required. |
+| `--bundle DIR` | The signed release to install (a payload drive's `stage/release`). |
+| `--from-github [TAG]` | Download the newest published release, or `TAG` (e.g. `v1.4.0`), from GitHub Releases into `/atlas_data/release-download`, then install it as `--bundle` does. See below. |
 | `--labels DIR` | Where to write this unit's label files (PNG/SVG/TXT, mode 0600). |
 | `--dev-key PUB` | Makes a developer unit: trusts this release key, keeps SSH, skips the retail lock-down. Never use it on a unit that ships. |
 | `--states` | Which states get routing data. `keep` means the ones already on the unit (any half-built one is finished). `all` is all 50 plus DC, which takes many hours and ~110 GB. `none` skips routing. A list such as `"MD VA"` or `md,va` names states. Unknown names are refused before any work starts. |
@@ -47,6 +50,29 @@ is `keep` if the unit already has routing data, otherwise `all`.
 The old `--full` and `--fresh` flags are still accepted and do nothing: every
 run does both. `--update` is refused, because updates come from the update
 engine.
+
+## Installing from GitHub
+
+Without a payload drive, a unit can be set up from a checkout:
+
+```bash
+git clone https://github.com/atlas-navigate/atlas-control.git
+cd atlas-control
+sudo ./install.sh --from-github            # or: --from-github v1.4.0
+```
+
+`tools/release/fetch_release.py` resolves the release once (so the manifest,
+signature and bundle all come from it), checks the signature against the
+checkout's `system/keys/keyring.json` (plus `--dev-key`) **before** it
+downloads the bundle, then checks the bundle's size and SHA-256. Preflight
+verifies it again, exactly as for `--bundle`. An interrupted download resumes
+when the command is run again. Retail units accept only `https://`;
+`ATLAS_RELEASES_URL` points it at a mirror (plain `http://` only with
+`--dev-key`, for a local test server). It downloads from the same place the
+update engine later checks, so the unit keeps updating from there.
+
+The datasets (maps, routing, models) then come from the Internet, stage by
+stage, instead of from a payload drive: plan on many hours and ~250 GB.
 
 ## Stages
 
@@ -71,7 +97,7 @@ makes a re-run safe.
 | 95 | release | First install: `migrate.py apply --provision`. A newer release goes to the update engine (`tools/release/handoff.py`). The same or an older release triggers `atlas-engine reapply`. | — |
 | 96 | identity | Shows the unit name and writes the label | — |
 | 97 | retail | Runs `finalize-retail.sh` | Developer unit |
-| 98 | verify | Runs `atlas-engine check`. Any `[FAIL]` fails the install. | — |
+| 98 | verify | Runs `atlas-engine check`. Any `[FAIL]` fails the install. Then `status_button.py --probe`: the Atlas button missing is a failure on a retail unit and a warning on a developer unit; the button on pins 3/5 is always a failure. | — |
 | 99 | summary | Prints what is ready and what still needs doing. Exit status 1 if verify failed. | — |
 
 ## Logs

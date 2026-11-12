@@ -4,28 +4,97 @@ There are no accounts or passwords to remember. A phone or browser is paired
 once; after that it simply works — on Atlas's own Wi-Fi, on a home network,
 after Atlas changes address, and after updates.
 
-## Pairing a device (the owner)
+## The first device: the Atlas button
 
-Any one of these proves the device belongs to the owner:
+A new (or factory-reset) Atlas has no primary user: it is **unclaimed**, and
+its button glows dim white. The first device to pair becomes the **primary
+user**:
+
+1. Join Atlas's Wi-Fi. Its name is Atlas's own address, e.g.
+   `atlas-k7m2qx9wp.local`; the password is on the label. (Or use a network
+   Atlas is already on.)
+2. Open the Atlas app, or `https://atlas-k7m2qx9wp.local` in a browser, and
+   tap **Connect with the Atlas button**.
+3. **Press the button on Atlas once.** Its light turns one of six colours
+   (green, blue, purple, yellow, cyan, white — never red or amber, which mean
+   reset).
+4. **Pick that colour** on the screen. One pick per press: a wrong pick ends
+   the attempt, and the owner presses the button again.
+
+Only someone next to Atlas can see the light, so the colour is the proof of
+physical access. Details: the colour is chosen with `secrets.choice` when the
+button is pressed and shown only on the LED; the screen's six swatches are
+shuffled. A press binds to the one device waiting; if two devices wait at
+once, both attempts end ("Two devices tried to connect") and the light blinks
+amber. A press with nobody waiting opens a 60 s window for the next device to
+ask. An attempt lasts two minutes. Atlas keeps attempts in memory only.
+
+**Backups**, accepted only while Atlas is unclaimed (a broken button, or
+colours that are hard to tell apart):
 
 - **Scan the label** with the Atlas app. The QR code carries the unit's id,
-  setup code, TLS key pin and hotspot details, so the app joins Atlas's
-  Wi-Fi if needed and pairs without any typing.
-- **Type the setup code** printed on the label — three groups of capitals
-  and digits (`H7QD-M3XR-9KTW`); the Wi-Fi password looks different (four
+  setup code, TLS key pin and Wi-Fi details, so the app joins Atlas's Wi-Fi if
+  needed and pairs without typing.
+- **Type the setup code** printed on the label — three groups of capitals and
+  digits (`H7QD-M3XR-9KTW`); the Wi-Fi password looks different (four
   lowercase groups) so the two can't be confused. Dashes and case don't
   matter. Five wrong codes from one address, or twenty in total, pause
-  attempts for ten minutes.
-- **Join Atlas's own Wi-Fi** (its name and password are on the label) and
-  tap Connect — being on that network is taken as physical access. The Wi-Fi
-  password is the same on every Atlas (see below), so this holds only while
-  nobody else nearby knows it; owners can set their own.
-- **Allow it from a paired device**: the new device asks, and every paired
-  device shows "Allow new device?" with a 4-digit code. Allow only if the
-  code matches the one on the new device's screen.
+  attempts for ten minutes; the count survives restarts.
 
-Settings → Connected devices lists every paired device; remove any you don't
-recognise (its connection is closed at once). Factory reset removes them all.
+Being on Atlas's Wi-Fi is **not** a proof any more: its password is the same
+on every unit (below). The old one-tap hotspot pairing answers `410
+update_app`.
+
+## Later devices: the primary user allows them
+
+Once Atlas has a primary user, the setup code and the button no longer pair
+anything. A new device taps **Ask to connect**; the primary user's phone or
+browser shows "Allow new device?" with a 4-digit code, and the button blinks
+blue while a request waits. Allow only if the code matches the one on the new
+device's screen. Only the primary user sees these requests and can answer
+them (others get `403 owner_required`).
+
+Settings → Connected devices lists every paired device and marks the primary
+user. The primary user can remove any device (its connection is closed at
+once) and can hand the role to another device (**Make primary**); it can't
+remove itself while other devices remain. Other devices can remove only
+themselves.
+
+Lost the primary user's phone? Hold the Atlas button for 15 seconds (below).
+That erases Atlas's data; the next device pairs with the button again.
+
+## The button: lights and the 15-second reset
+
+The button is a DFRobot DFR0991 (I2C `0x2a`) on header pins 27/28 (bus 1,
+100 kHz); see docs/MANUFACTURING.md for the wiring. Atlas runs it from the app
+process (`status_button.py`) and polls it 20 times a second.
+
+| Light | Meaning |
+|---|---|
+| dim white | not set up yet: press, then pick the colour on the screen |
+| a colour (steady) | pick this colour on the device that is connecting |
+| white blinking | pressed with nobody waiting: open Atlas on your device now |
+| green blinks | paired |
+| blue blinking | a device is waiting for the primary user to allow it |
+| amber blinking | the button is being held: release before 15 s to cancel |
+| red (steady) | factory reset running |
+| red blinks | a reset was refused (an update is installing) |
+| off | set up and idle |
+
+Holding the button 15 seconds runs the same **factory reset** as Settings →
+Factory reset (below), recorded in the security log as by "Atlas button".
+Releasing it earlier cancels. A reset is refused while an update is
+installing. Afterwards the hotspot comes back with the label's name and
+password and the light returns to dim white.
+
+Settings → Connected devices shows whether the button works. "Plugged into the
+wrong pins" means pins 3/5 (bus 7, 400 kHz), where this module stops
+responding; "not responding" needs it unplugged and plugged back in (a
+software reset can't recover it). On a developer unit
+(`/etc/atlas/dev-mode`) the hold only logs the reset (`dry_run` in the
+security log) and erases nothing; `ATLAS_BUTTON_RESET_DRYRUN=0` in a drop-in
+makes it real there too. Retail units have no dev-mode: the hold always
+resets.
 
 ## Every Atlas has its own setup code
 
@@ -37,7 +106,13 @@ PBKDF2 hash that pairing checks. It is printed on that unit's label.
 
 The same run gives the unit its own:
 - device id and TLS key (the apps pin it);
-- `Atlas-XXXXXX` / `atlas-xxxxxx` name (also its Wi-Fi name and `.local` address);
+- `Atlas-XXXXXXXXX` / `atlas-xxxxxxxxx` name. Units made since 2026-11 get 9
+  characters derived from the Jetson module's serial by a keyed permutation
+  (a bijection over 29^9 values), so two units can never get the same name.
+  The name is not secret; anyone with the code can recover the serial from
+  it, and the serial is printed on the module anyway. Older units keep their
+  6-character name;
+- Wi-Fi (hotspot) name: the `.local` address, e.g. `atlas-k7m2qx9wp.local`;
 - proxy secret.
 
 ## The Wi-Fi password is the same on every Atlas
@@ -46,12 +121,15 @@ Atlas's own Wi-Fi (hotspot) starts with one standard password on every unit,
 `FACTORY_HOTSPOT_PASSWORD` in `system/atlas_engine/identity.py`. This was an
 owner decision (2026-09-26) to simplify production: it can be printed on the
 box and in the manual. Its shape (four lowercase groups) still differs from a
-setup code's. The Wi-Fi name stays unique (`Atlas-XXXX`).
+setup code's. The Wi-Fi name is unique: the unit's own `.local` address.
+Software updates move an older unit's factory Wi-Fi name (`Atlas-XXXXXX`) to
+its `.local` address and keep its password; a name the owner chose is kept.
+On the hotspot, Atlas's DNS also answers that name (`10.42.0.1`), for phones
+that don't use mDNS.
 
 Because the password is public, anyone who knows it and is within range of an
-Atlas whose hotspot is on can join that network. Being on the hotspot lets a
-device pair with one tap, and the owner chose to keep that. Such a device gets
-full control of that Atlas.
+Atlas whose hotspot is on can join that network. Joining grants nothing: a
+device still needs the button (while unclaimed) or the primary user's Allow.
 
 The Wi-Fi page reminds owners to set their own password (Settings → Wi-Fi →
 Hotspot). The reminder disappears once they do, and comes back after a factory
@@ -151,16 +229,16 @@ Settings → Factory reset prepares Atlas for a new owner.
 
 | Erased | Kept (the hardware identity on the label) |
 |---|---|
-| every pairing (all phones and browsers must pair again) | name, `.local` hostname and device id |
+| every pairing, including the primary user (all phones and browsers must pair again) | name, `.local` hostname and device id |
 | messages, Ray conversations, owner documents, location history, trackers, routes, waypoints, schedules, calendar, alerts | TLS key (so the label's QR code still verifies) |
 | saved Wi-Fi networks, network hints, an owner-set hotspot name/password (back to the label's) | setup code and standard hotspot password on the label |
 | the security log, downloads, pre-migration database copies | installed software, maps, routing data, built-in reference |
 | Atlas's logs and caches, the system journal, Ray's in-memory conversation state | |
 
 The previous owner keeps nothing that lets them back in: their phones' and
-browsers' tokens are revoked. The setup code is printed on the label, so
-anyone holding the unit can pair. That is the intended physical-possession
-proof. Support can issue a new setup code (`atlas-identity new-setup-code`)
+browsers' tokens are revoked. Holding the button 15 s does the same reset.
+The next owner pairs with the button (or the label's setup code); either is
+the intended physical-possession proof. Support can issue a new setup code (`atlas-identity new-setup-code`)
 if a label is lost or must change hands without the unit.
 
 ## Shared phone location (tracker)
