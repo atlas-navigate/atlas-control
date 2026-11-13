@@ -45,7 +45,7 @@ class _DbTest(unittest.TestCase):
 
 class RetentionTests(_DbTest):
     def test_defaults_are_privacy_leaning(self):
-        self.assertEqual(retention.settings(), {"retention_ai_days": 0, "retention_explain_days": 30,
+        self.assertEqual(retention.settings(), {"retention_ai_days": 30, "retention_explain_days": 30,
                                                 "retention_location_days": 7, "retention_tracker_days": 30})
 
     def test_invalid_values_are_refused(self):
@@ -66,12 +66,14 @@ class RetentionTests(_DbTest):
         retention.apply()
         self.assertEqual(self.count("positions"), 1)
         self.assertEqual(self.count("tracker_devices"), 1)
-        self.assertEqual(self.count("ai_chats"), 2)                   # conversations: until deleted
-        self.assertEqual(self.count("ai_messages", "explain IS NOT NULL"), 1)
-        retention.update({"retention_ai_days": 365})
-        retention.apply()
-        self.assertEqual(self.count("ai_chats", f"id={old_chat}"), 0)
+        self.assertEqual(self.count("ai_chats", f"id={old_chat}"), 0)  # conversations: 30 days
         self.assertEqual(self.count("ai_chats"), 1)
+        self.assertEqual(self.count("ai_messages", "explain IS NOT NULL"), 1)
+        retention.update({"retention_ai_days": 0})                     # "until I delete them"
+        kept = self.add_chat(age_days=400)
+        retention.apply()
+        self.assertEqual(self.count("ai_chats", f"id={kept}"), 1)
+        self.assertEqual(self.count("ai_chats"), 2)
 
     def test_deleted_conversations_do_not_linger_in_the_database_files(self):
         marker = "private-" + secrets.token_hex(12)
@@ -108,8 +110,9 @@ class FactoryResetDataTests(_DbTest):
             conn.execute("INSERT INTO ai_documents_fts(rowid, title, tags, content) VALUES (?, 't', '', 'c')", (doc,))
         conn.execute("INSERT INTO calendar_events (title, start_ts, created_at) VALUES ('dentist', 1, 1)")
         conn.commit()
-        db.set_app_settings({"units": "imperial", "serial_port": "/dev/ttyTHS1", "retention_location_days": "30"})
-        db.ai_set_settings({"temperature": "0.9"})
+        db.set_app_settings({"units": "metric", "serial_port": "/dev/ttyTHS1", "retention_location_days": "30",
+                             "retention_ai_days": "0", "sidebar_order": '["system","map"]'})
+        db.ai_set_settings({"temperature": "0.9", "model": "qwen2.5:3b"})
         pairing._issue("Old phone", "android", "setup_code")
         self.add_chat()
         db.factory_reset_data()
@@ -120,9 +123,13 @@ class FactoryResetDataTests(_DbTest):
             self.assertEqual(self.count(table), 0, table)
         settings = db.get_app_settings()
         self.assertEqual(settings["serial_port"], "/dev/ttyTHS1")
-        self.assertEqual(settings["units"], "metric")
+        # Back to what every new Atlas starts with (the 2026-11-12 defaults).
+        self.assertEqual(settings["units"], "imperial")
+        self.assertEqual(settings["sidebar_order"], "[]")              # the built-in order
         self.assertEqual(retention.settings()["retention_location_days"], 7)
+        self.assertEqual(retention.settings()["retention_ai_days"], 30)
         self.assertNotEqual(db.ai_get_settings().get("temperature"), "0.9")
+        self.assertEqual(db.ai_get_settings()["model"], "qwen3.5:4b")
         self.assertIsNotNone(conn.execute("SELECT value FROM ai_settings WHERE key='embed_format_v'").fetchone())
 
 
@@ -235,7 +242,8 @@ class PrivacyRouteTests(PairingTestBase):
         self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
         self.assertEqual(open(os.path.join(atlas_paths.LOG_DIR, "update.log")).read(), "")
         self.assertEqual(os.listdir(atlas_paths.CACHE_DIR), [])
-        self.assertIn("logs.vacuum", helper_calls)
+        for verb in ("net.forget_all", "bt.forget_all", "logs.vacuum"):         # Wi-Fi, Bluetooth, journal
+            self.assertIn(verb, helper_calls)
         self.assertEqual(self.send("GET", "/api/nodes").status_code, 401)      # every device pairs again
         self.assertFalse(os.path.exists(atlas_paths.BACKUP_DIR))
         self.assertFalse(os.path.exists(app._HOTSPOT_CFG_PATH))
@@ -243,6 +251,19 @@ class PrivacyRouteTests(PairingTestBase):
         self.assertEqual(app._load_hotspot_cfg()["password"], label["password"])  # back to the label
         self.assertEqual(db.get_db().execute("SELECT COUNT(*) FROM calendar_events").fetchone()[0], 0)
         self.assertEqual([e["action"] for e in audit_log.recent()], ["factory_reset"])
+
+    def test_a_reset_that_could_not_forget_bluetooth_says_so(self):
+        from unittest import mock
+        real_run = self.app.atlas_helper.run
+
+        def helper(verb, timeout=60, **args):
+            if verb == "bt.forget_all":
+                return "removed 1, 1 could not be removed", 1
+            return real_run(verb, timeout=timeout, **args)
+        with mock.patch.object(self.app.atlas_helper, "run", side_effect=helper):
+            r = self.send("POST", "/api/factory-reset", {"confirm": "RESET"})
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+        self.assertIn("Bluetooth pairings: removed 1, 1 could not be removed", r.get_json()["incomplete"])
 
     def test_removing_a_device_cuts_its_live_connection(self):
         from unittest import mock

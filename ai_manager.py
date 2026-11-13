@@ -5586,9 +5586,9 @@ class AIManager:
             return [{"role": "user", "content": "hi"}]
         try:
             import database as db
-            units = db.get_app_settings().get("units", "metric")
+            units = db.get_app_settings().get("units", "imperial")
         except Exception:
-            units = "metric"
+            units = "imperial"
         date_block, _ = self._date_block()
         base = self._base_system(settings, units)
         if self._prompt_layout(settings) == "turn":
@@ -7256,9 +7256,9 @@ class AIManager:
         # directive is injected into base_system by the caller (not into parts[])
         # so the model follows it silently rather than narrating it.
         try:
-            _units = db.get_app_settings().get("units", "metric")
+            _units = db.get_app_settings().get("units", "imperial")
         except Exception:
-            _units = "metric"
+            _units = "imperial"
         meta["units"] = _units
 
         # Current date & season — always injected so time-sensitive advice (shelter
@@ -8203,7 +8203,7 @@ class AIManager:
         can reuse the processed history (worth it only with a larger context).
         """
         import database as db
-        base = self._base_system(settings, ctx_meta.get("units", "metric"))
+        base = self._base_system(settings, ctx_meta.get("units", "imperial"))
         loc_prefix = _build_location_prefix(ctx_meta)
         layout = self._prompt_layout(settings)
         if layout == "turn" and (ctx_meta.get("system_parts") or calc_extra):

@@ -149,7 +149,7 @@ radio text a code path.
 
 ### Privacy (`retention.py`, `audit_log.py`, `sensitive_log.py`)
 - **Retention** (Settings → Privacy):
-  - conversations until deleted, explain 30 d, location 7 d, shared phones 30 d;
+  - conversations 30 d, explain 30 d, location 7 d, shared phones 30 d;
   - applied nightly;
   - "Delete AI History" and "Delete Location History" use `secure_delete` plus a WAL truncate,
     and are tested by scanning the database files for the deleted text.

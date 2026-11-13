@@ -91,11 +91,8 @@ password and the light returns to dim white.
 Settings → Connected devices shows whether the button works. "Plugged into the
 wrong pins" means pins 3/5 (bus 7, 400 kHz), where this module stops
 responding; "not responding" needs it unplugged and plugged back in (a
-software reset can't recover it). On a developer unit
-(`/etc/atlas/dev-mode`) the hold only logs the reset (`dry_run` in the
-security log) and erases nothing; `ATLAS_BUTTON_RESET_DRYRUN=0` in a drop-in
-makes it real there too. Retail units have no dev-mode: the hold always
-resets.
+software reset can't recover it). The hold resets every Atlas for real,
+developer units included.
 
 ## Every Atlas has its own setup code
 
@@ -232,9 +229,10 @@ Settings → Factory reset prepares Atlas for a new owner.
 |---|---|
 | every pairing, including the primary user (all phones and browsers must pair again) | name, `.local` hostname and device id |
 | messages, Ray conversations, owner documents, location history, trackers, routes, waypoints, schedules, calendar, alerts | TLS key (so the label's QR code still verifies) |
-| saved Wi-Fi networks, network hints, an owner-set hotspot name/password (back to the label's) | setup code and standard hotspot password on the label |
+| saved Wi-Fi networks, Bluetooth pairings, network hints, an owner-set hotspot name/password (back to the label's) | setup code and standard hotspot password on the label |
 | the security log, downloads, pre-migration database copies | installed software, maps, routing data, built-in reference |
 | Atlas's logs and caches, the system journal, Ray's in-memory conversation state | |
+| every setting the owner changed, Ray's included (back to the defaults every new Atlas starts with) | |
 
 The previous owner keeps nothing that lets them back in: their phones' and
 browsers' tokens are revoked. Holding the button 15 s does the same reset.

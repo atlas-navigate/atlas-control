@@ -530,7 +530,8 @@ def _migration_model_profiles(conn):
     import json as _json
     import model_profiles
     rows = dict(conn.execute("SELECT key, value FROM ai_settings").fetchall())
-    model = model_profiles.find(rows.get("model") or AI_DEFAULTS["model"])
+    # The global set was tuned on qwen2.5:3b, the default when it existed.
+    model = model_profiles.find(rows.get("model") or "qwen2.5:3b")
     changed = {}
     for key in AI_RUNTIME_KEYS:
         if key not in rows:
@@ -1047,7 +1048,7 @@ _APP_SETTING_DEFAULTS = {
     "map_default_zoom": "13",
     "show_offline_nodes": "true",
     "node_online_window_h": "2",
-    "units": "metric",
+    "units": "imperial",
     "date_format": "relative",
     "timezone": "auto",            # IANA tz name (e.g. America/New_York) or "auto" for browser
 
@@ -1391,7 +1392,7 @@ AI_FORMATTING_GUIDE = (
 # can never drift. Per-box values saved in the ai_settings table override these at
 # runtime (see ai_get_settings).
 AI_DEFAULTS = {
-    "model": "qwen2.5:3b",
+    "model": "qwen3.5:4b",
     "embed_model": "qwen3-embedding:0.6b",
     "system_prompt": (
         "You are Ray — the AI assistant built into Atlas Control, a Meshtastic "

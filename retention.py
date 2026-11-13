@@ -3,7 +3,7 @@ How long Atlas keeps personal history, and deleting it for real.
 
 Defaults (privacy-leaning; the owner can change them in Settings → Privacy):
 
-  Ray conversations           kept until deleted        retention_ai_days = 0
+  Ray conversations           30 days                   retention_ai_days
   Ray explain/provenance      30 days                   retention_explain_days
   Location history (track)    7 days                    retention_location_days
   Shared-phone positions      30 days                   retention_tracker_days
@@ -17,7 +17,7 @@ import time
 import database as db
 
 DEFAULTS = {
-    "retention_ai_days": 0,
+    "retention_ai_days": 30,
     "retention_explain_days": 30,
     "retention_location_days": 7,
     "retention_tracker_days": 30,

@@ -214,3 +214,26 @@ def forget_all_wifi():
         _run(["nmcli", "con", "delete", "uuid", c["uuid"]], timeout=20)
         removed += 1
     return {"rc": 0, "out": f"removed {removed}"}
+
+
+_BT_DEVICE = re.compile(r"^Device ((?:[0-9A-F]{2}:){5}[0-9A-F]{2})\b", re.M | re.I)
+
+
+def forget_all_bluetooth():
+    """Factory reset: remove every Bluetooth device bluez knows — pairings
+    (their keys under /var/lib/bluetooth), trusted and remembered devices."""
+    try:
+        listed = _run(["bluetoothctl", "devices"], timeout=20)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"rc": 1, "out": f"bluetoothctl: {type(exc).__name__}"}
+    if "No default controller" in listed["out"]:
+        return {"rc": 0, "out": "no Bluetooth controller"}     # nothing can have been paired
+    if listed["rc"] != 0:
+        return {"rc": listed["rc"], "out": listed["out"][:200]}
+    removed = failed = 0
+    for mac in _BT_DEVICE.findall(listed["out"]):
+        if _run(["bluetoothctl", "remove", mac], timeout=20)["rc"] == 0:
+            removed += 1
+        else:
+            failed += 1
+    return {"rc": 1 if failed else 0, "out": f"removed {removed}" + (f", {failed} could not be removed" if failed else "")}

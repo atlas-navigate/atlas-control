@@ -239,14 +239,8 @@ class AppButtonResetTests(unittest.TestCase):
     """What app.py does when the button has been held for 15 seconds."""
 
     def setUp(self):
-        import os
-        import tempfile
         import app
         self.app = app
-        self.tmp = tempfile.mkdtemp(prefix="atlas-button-")
-        self.addCleanup(__import__("shutil").rmtree, self.tmp, True)
-        self.dev_mode = os.path.join(self.tmp, "dev-mode")
-
         hub = mock.Mock()                      # the gevent hub runs the callback at once
         hub.loop.run_callback_threadsafe = lambda spawn, fn: fn()
         self.resets = []
@@ -255,33 +249,18 @@ class AppButtonResetTests(unittest.TestCase):
             self.resets.append((actor, after))
             return self.reset_answer
         self.reset_answer = ({"ok": True}, 200)
-        self.audits = []
-        for target, attr, value in ((app, "_MAIN_HUB", hub), (app, "_run_factory_reset", reset),
-                                    (app, "DEV_MODE_FILE", self.dev_mode),
-                                    (app.audit_log, "record", lambda *a, **k: self.audits.append((a, k))),
-                                    (app.time, "sleep", lambda s: None)):
+        for target, attr, value in ((app, "_MAIN_HUB", hub), (app, "_run_factory_reset", reset)):
             patch = mock.patch.object(target, attr, value)
             patch.start()
             self.addCleanup(patch.stop)
 
-    def test_a_developer_unit_only_pretends(self):
-        open(self.dev_mode, "w").close()
-        with mock.patch.dict("os.environ", {}, clear=False) as env:
-            env.pop("ATLAS_BUTTON_RESET_DRYRUN", None)
-            self.assertTrue(self.app._button_reset())
-        self.assertEqual(self.resets, [])
-        self.assertEqual(self.audits, [(("factory_reset", "Atlas button"), {"dry_run": True})])
-
-    def test_a_developer_unit_can_ask_for_the_real_reset(self):
-        open(self.dev_mode, "w").close()
-        with mock.patch.dict("os.environ", {"ATLAS_BUTTON_RESET_DRYRUN": "0"}):
-            self.assertTrue(self.app._button_reset())
+    def test_every_unit_really_resets(self):
+        # Developer and retail units alike: the hold is the full factory reset,
+        # then Atlas's own Wi-Fi comes up for the next owner.
+        self.assertTrue(self.app._button_reset())
         self.assertEqual(self.resets, [("Atlas button", self.app._button_reset_hotspot)])
 
-    def test_a_retail_unit_always_resets(self):
-        with mock.patch.dict("os.environ", {"ATLAS_BUTTON_RESET_DRYRUN": "1"}):   # no dev-mode: ignored
-            self.assertTrue(self.app._button_reset())
-        self.assertEqual(len(self.resets), 1)
+    def test_a_refused_reset_is_reported(self):
         self.reset_answer = ({"ok": False, "error": "An update is installing"}, 409)
         self.assertFalse(self.app._button_reset())                            # the light blinks red
 

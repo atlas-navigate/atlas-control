@@ -153,6 +153,10 @@ def v_net_forget_all(args):
     return netctl.forget_all_wifi()
 
 
+def v_bt_forget_all(args):
+    return netctl.forget_all_bluetooth()
+
+
 def v_logs_vacuum(args):
     # Factory reset: the system journal can name the owner's networks,
     # devices and places. Archive the active files, then delete every archive.
@@ -191,6 +195,7 @@ VERBS = {
     "net.hotspot_up": v_net_hotspot_up,
     "net.hotspot_down": v_net_hotspot_down,
     "net.forget_all": v_net_forget_all,
+    "bt.forget_all": v_bt_forget_all,
     "avahi.reload": v_avahi_reload,
     "avahi.reclaim": v_avahi_reclaim,
     "smart.read": v_smart_read,

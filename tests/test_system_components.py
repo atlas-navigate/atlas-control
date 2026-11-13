@@ -50,6 +50,40 @@ class HelperValidationTests(unittest.TestCase):
                     self.assertFalse(out["ok"])
             run.assert_not_called()
 
+    def test_factory_reset_forgets_every_bluetooth_device(self):
+        calls = []
+
+        def fake_run(cmd, timeout=40):
+            calls.append(cmd)
+            if cmd == ["bluetoothctl", "devices"]:
+                return {"rc": 0, "out": "Device AA:BB:CC:DD:EE:01 Owner's iPhone\n"
+                                        "Device 11:22:33:44:55:6f Car stereo\n"
+                                        "Device ZZ:BB:CC:DD:EE:01; reboot\n"
+                                        "[CHG] Controller 00:00:00:00:00:00 Discovering: no"}
+            return {"rc": 0, "out": ""}
+
+        with mock.patch.object(self.netctl, "_run", side_effect=fake_run):
+            out = self.helper.handle({"verb": "bt.forget_all", "args": {"mac": "--help"}})   # arguments are ignored
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["out"], "removed 2")
+        self.assertEqual(calls[1:], [["bluetoothctl", "remove", "AA:BB:CC:DD:EE:01"],
+                                     ["bluetoothctl", "remove", "11:22:33:44:55:6f"]])
+
+    def test_bluetooth_that_cannot_be_forgotten_is_reported(self):
+        def fake_run(cmd, timeout=40):
+            if cmd == ["bluetoothctl", "devices"]:
+                return {"rc": 0, "out": "Device AA:BB:CC:DD:EE:01 Owner's iPhone"}
+            return {"rc": 1, "out": "Failed to remove device"}
+
+        with mock.patch.object(self.netctl, "_run", side_effect=fake_run):
+            self.assertFalse(self.helper.handle({"verb": "bt.forget_all", "args": {}})["ok"])
+        with mock.patch.object(self.netctl, "_run", return_value={"rc": 1, "out": "No default controller available"}):
+            self.assertTrue(self.helper.handle({"verb": "bt.forget_all", "args": {}})["ok"])   # no radio: nothing paired
+        with mock.patch.object(self.netctl, "_run", side_effect=FileNotFoundError("bluetoothctl")):
+            out = self.helper.handle({"verb": "bt.forget_all", "args": {}})
+        self.assertFalse(out["ok"])
+        self.assertIn("bluetoothctl", out["out"])
+
     def test_wifi_password_goes_into_a_root_only_keyfile_not_argv(self):
         calls = []
 

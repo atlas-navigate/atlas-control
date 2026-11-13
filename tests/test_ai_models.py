@@ -27,7 +27,8 @@ class CatalogTests(unittest.TestCase):
         ids = [m["id"] for m in model_profiles.models()]
         self.assertIn("qwen2.5:3b", ids)
         self.assertIn("qwen3.5:4b", ids)
-        self.assertEqual(model_profiles.default_id(), "qwen2.5:3b")
+        self.assertEqual(model_profiles.default_id(), "qwen3.5:4b")
+        self.assertEqual(database.AI_DEFAULTS["model"], model_profiles.default_id())
         for m in model_profiles.models():
             with self.subTest(model=m["id"]):
                 self.assertTrue(m["label"] and m["variants"] and m["sampling"])
@@ -61,8 +62,15 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual((nx["tag"], nx["quant"]), ("qwen3.5:4b-q8_0", "Q8_0"))
         self.assertEqual(nx["options"]["num_thread"], 8)
 
-    def test_default_model_keeps_todays_tuning(self):
+    def test_new_units_start_on_qwen35(self):
         p = model_profiles.resolve({}, None, ORIN_NANO)
+        self.assertEqual((p["id"], p["tag"], p["quant"]), ("qwen3.5:4b", "qwen3.5:4b", "Q4_K_M"))
+        o = p["options"]
+        self.assertEqual((o["num_ctx"], o["num_batch"], o["num_thread"]), (4096, 512, 6))
+        self.assertEqual((o["temperature"], o["top_p"], o["top_k"], o["presence_penalty"]), (0.7, 0.8, 20, 1.5))
+
+    def test_qwen25_keeps_todays_tuning(self):
+        p = model_profiles.resolve({"model": "qwen2.5:3b"}, None, ORIN_NANO)
         self.assertEqual(p["id"], "qwen2.5:3b")
         o = p["options"]
         self.assertEqual((o["num_ctx"], o["num_batch"], o["num_thread"], o["num_predict"]), (4096, 512, 6, 1024))
@@ -70,8 +78,8 @@ class ProfileTests(unittest.TestCase):
 
     def test_a_model_no_longer_offered_falls_back_to_the_default(self):
         p = model_profiles.resolve({"model": "qwen3.5:2b"}, hw=ORIN_NANO)
-        self.assertEqual((p["id"], p["fallback_from"]), ("qwen2.5:3b", "qwen3.5:2b"))
-        self.assertIsNone(model_profiles.resolve({"model": "qwen3.5:4b"}, hw=ORIN_NANO)["fallback_from"])
+        self.assertEqual((p["id"], p["fallback_from"]), ("qwen3.5:4b", "qwen3.5:2b"))
+        self.assertIsNone(model_profiles.resolve({"model": "qwen2.5:3b"}, hw=ORIN_NANO)["fallback_from"])
 
     def test_overrides_are_per_model_cleaned_and_clamped(self):
         settings = {"model": "qwen3.5:4b",
@@ -213,6 +221,7 @@ class SwitchTests(unittest.TestCase):
         conn = database.get_db()
         conn.execute("DELETE FROM ai_settings WHERE key='model' OR key LIKE 'overrides:%' OR key LIKE 'measured:%'")
         conn.commit()
+        database.ai_set_setting("model", "qwen2.5:3b")       # an owner who chose Qwen2.5, switching to Qwen3.5
         self.ollama = FakeOllama()
         for p in (mock.patch.object(ai_manager.urllib.request, "urlopen", side_effect=self.ollama.urlopen),
                   mock.patch.object(model_profiles, "hardware", return_value=dict(ORIN_NANO)),

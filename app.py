@@ -3432,9 +3432,10 @@ def api_factory_defaults_capture():
     return jsonify({"ok": True, "snapshot": _redact_radio_config(snap)})
 
 def _factory_reset_local_state():
-    """The owner's state outside the database: saved networks, network
-    hints, hotspot changes, downloaded updates and pre-migration database
-    copies (which hold the old data). Best effort; returns what failed."""
+    """The owner's state outside the database: saved Wi-Fi networks and
+    Bluetooth pairings, network hints, hotspot changes, downloaded updates and
+    pre-migration database copies (which hold the old data). Best effort;
+    returns what failed."""
     problems = []
     for path in (_LAN_HINTS_PATH, _HOTSPOT_CFG_PATH):
         try:
@@ -3448,6 +3449,9 @@ def _factory_reset_local_state():
     out, rc = atlas_helper.run("net.forget_all", timeout=60)
     if rc != 0:
         problems.append("saved Wi-Fi networks: " + (out or "helper unavailable")[:120])
+    out, rc = atlas_helper.run("bt.forget_all", timeout=60)
+    if rc != 0:
+        problems.append("Bluetooth pairings: " + (out or "helper unavailable")[:120])
     # Logs and caches can name the owner's networks, places and devices.
     # Truncate logs (a writer may hold them open); empty the cache.
     for name in _listdir(atlas_paths.LOG_DIR):
@@ -3521,7 +3525,7 @@ def _run_factory_reset(actor, after=None):
     Steps:
       1. Ensure a Heltec snapshot exists (capture lazily if missing).
       2. Erase the owner's data (see database.factory_reset_data) and state
-         outside the database: saved Wi-Fi networks, hotspot changes,
+         outside the database: saved Wi-Fi networks, Bluetooth pairings, hotspot changes,
          downloads, database copies. Every paired device must pair again,
          and the next one to pair becomes the primary user.
       3. Re-write the snapshot to the radio.
@@ -3606,8 +3610,6 @@ def _run_factory_reset(actor, after=None):
 # press or a hold does runs here, on the gevent hub, like a request.
 _button_controller = None
 _MAIN_HUB = None
-BUTTON_RESET_DRYRUN = "ATLAS_BUTTON_RESET_DRYRUN"
-DEV_MODE_FILE = "/etc/atlas/dev-mode"
 
 
 def _button_present():
@@ -3685,15 +3687,8 @@ def _button_reset_hotspot():
 
 
 def _button_reset():
-    """Held for 15 seconds. Blocks the reset worker (the light is green)
-    until the reset has finished; False when it was refused."""
-    if os.path.exists(DEV_MODE_FILE) and os.environ.get(BUTTON_RESET_DRYRUN, "1") != "0":
-        # Developer units: exercise the button and the light without erasing
-        # the developer's Atlas, unless a drop-in sets ATLAS_BUTTON_RESET_DRYRUN=0.
-        # Retail units have no dev-mode file: the hold always resets.
-        logger.warning("Button factory reset: dry run (developer unit) - nothing erased")
-        _on_hub(audit_log.record, "factory_reset", "Atlas button", dry_run=True).wait(30)
-        return True
+    """Held for 15 seconds: the factory reset, on every unit. Blocks the reset
+    worker (the light is green) until it has finished; False when refused."""
     done = _on_hub(_run_factory_reset, "Atlas button", _button_reset_hotspot)
     done.wait(600)
     body, _status = done.result or ({"ok": False}, 500)

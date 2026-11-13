@@ -6,13 +6,18 @@ model for the hardware it runs on.
 
 | Model | Build on an 8 GB Orin Nano | Context | Answer speed | Memory left for Atlas |
 |---|---|---|---|---|
-| **Qwen2.5 3B** (standard) | `qwen2.5:3b` Q4_K_M, 1.9 GB | 4,096 tokens | 21 tokens/s | 2.3 GB |
-| **Qwen3.5 4B** | `qwen3.5:4b` Q4_K_M, 3.4 GB | 4,096 tokens | 14.8 tokens/s | 0.75 GB |
+| **Qwen3.5 4B** (standard) | `qwen3.5:4b` Q4_K_M, 3.4 GB | 4,096 tokens | 14.8 tokens/s | 0.75 GB |
+| **Qwen2.5 3B** | `qwen2.5:3b` Q4_K_M, 1.9 GB | 4,096 tokens | 21 tokens/s | 2.3 GB |
 
 Both run wholly on the GPU. The embedder (`qwen3-embedding:0.6b`, for
 knowledge-base search) is on the GPU with Qwen2.5 and on the CPU with Qwen3.5
 (0.5 s a query). Measured on the development unit (Orin Nano 8 GB Super,
 Ollama 0.32.1, the full Atlas stack running) with `tools/bench/models.py`.
+
+New units, and any unit after a factory reset, start on Qwen3.5 4B (decided
+2026-11-12). Both models ship on
+every unit, so an owner can switch to the faster Qwen2.5 3B offline. A unit
+that already saved a choice keeps it.
 
 ## Where the settings come from
 

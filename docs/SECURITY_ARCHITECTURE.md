@@ -171,7 +171,7 @@ only on units with `/etc/atlas/dev-mode`. See [UPDATES.md](UPDATES.md) and
 
 ## Privacy
 
-- Retention (Settings → Privacy): Ray conversations kept until deleted,
+- Retention (Settings → Privacy): Ray conversations 30 days,
   answer sources 30 days, location history 7 days, shared phones 30 days;
   "Delete AI History" and "Delete Location History" erase with SQLite
   `secure_delete` and a truncated WAL.

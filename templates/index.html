@@ -2167,7 +2167,7 @@ const api = {
 // Settings Context
 // ═══════════════════════════════════════════════
 const SettingsContext = createContext({
-  units: 'metric', date_format: 'relative', timezone: 'auto', show_offline_nodes: 'true',
+  units: 'imperial', date_format: 'relative', timezone: 'auto', show_offline_nodes: 'true',
   node_online_window_h: '2', dashboard_refresh_s: '5', map_default_zoom: '13',
   battery_alert_pct: '20', node_offline_min: '30', serial_port: '/dev/ttyACM0',
 });
@@ -7625,12 +7625,12 @@ function FactoryResetSection() {
           Returns Atlas to how it left the factory, ready for a new owner. Erases messaging
           and Ray chat history, documents you added to Ray, the node directory, telemetry,
           alerts, location data (positions, phone trackers, waypoints, routes, hike sessions,
-          favorites), the calendar, scheduled jobs, settings, saved Wi-Fi networks and every
-          connected device — the next device to connect becomes the primary user.
+          favorites), the calendar, scheduled jobs, settings, saved Wi-Fi networks, Bluetooth
+          pairings and every connected device — the next device to connect becomes the primary user.
           The Heltec V4 radio is restored to the factory default snapshot
           captured below — only the <span style={{fontFamily:'var(--font-mono)'}}>short_name</span> resets to the firmware default.
           Maps, routing, Ray's models and the details on Atlas's label are kept.
-          Holding the button on Atlas for 15 seconds (until its light turns red) does the same.
+          Holding the button on Atlas for 15 seconds (its light turns red, then green) does the same.
         </div>
 
         {/* Snapshot status & metadata */}
@@ -10912,14 +10912,15 @@ function SystemSection(props) {
 // ═══════════════════════════════════════════════
 // Main App
 // ═══════════════════════════════════════════════
+// The order every new Atlas starts with (and a factory reset or "Reset order" returns to).
 const DEFAULT_PAGES = [
   { id: 'dashboard', icon: Icons.dashboard,  label: 'Dashboard', short: 'Home',  group: 'main'  },
   { id: 'mesh',      icon: Icons.topology,   label: 'Mesh',      short: 'Mesh',  group: 'mesh'  },
   { id: 'map',       icon: Icons.map,        label: 'Map',       short: 'Map',   group: 'map'   },
+  { id: 'ai',        icon: Icons.ai,         label: 'Ray',       short: 'Ray',   group: 'ai'    },
   { id: 'comms',     icon: Icons.messages,   label: 'Messages',  short: 'Chat',  group: 'comms' },
   { id: 'tools',     icon: Icons.calculator, label: 'Tools',     short: 'Tools', group: 'tools' },
   { id: 'system',    icon: Icons.settings,   label: 'Settings',  short: 'Setup', group: 'sys'   },
-  { id: 'ai',        icon: Icons.ai,         label: 'Ray',       short: 'Ray',   group: 'ai'    },
 ];
 const ALWAYS_VISIBLE_PAGES = ['system'];
 
@@ -11578,7 +11579,7 @@ function App() {
   const [trackerDevices, setTrackerDevices] = useState([]);
   const [gpsStatus, setGpsStatus] = useState({connected: false, fix: null});
   const [appSettings, setAppSettings] = useState({
-    units: 'metric', date_format: 'relative', timezone: 'auto', show_offline_nodes: 'true',
+    units: 'imperial', date_format: 'relative', timezone: 'auto', show_offline_nodes: 'true',
     node_online_window_h: '2', dashboard_refresh_s: '5', map_default_zoom: '13',
     battery_alert_pct: '20', node_offline_min: '30', serial_port: '/dev/ttyACM0',
   });
