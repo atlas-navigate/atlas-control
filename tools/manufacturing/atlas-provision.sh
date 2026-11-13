@@ -19,7 +19,7 @@
 # ║    2. Install the staged ollama + OSRM binaries                          ║
 # ║    3. Run the kit's install.sh with the staged signed release: system    ║
 # ║       setup, the Atlas software through its update engine, this unit's   ║
-# ║       own identity and label, and retail lock-down                       ║
+# ║       own identity and unit record, and retail lock-down                 ║
 # ╚══════════════════════════════════════════════════════════════════════════╝
 set -Eeuo pipefail
 
@@ -190,12 +190,13 @@ section "Running install.sh  (configuration only — no map downloads)"
     bash "$STAGE/kit/install.sh" --bundle "$STAGE/release" --labels "$LABELS" --yes --states keep \
         ${DEV_KEY:+--dev-key "$DEV_KEY"}
     log "install.sh finished"
-    # Keep a copy of the label on the drive for printing and support, if the
-    # drive is writable (a desktop auto-mount is; our own mount is read-only).
+    # No label ships with Atlas. Keep this unit's record (name, Wi-Fi name,
+    # setup code) on the drive for support, if the drive is writable (a
+    # desktop auto-mount is; our own mount is read-only).
     if mkdir -p "$BACKUP_MNT/labels" 2>/dev/null && cp -a "$LABELS"/. "$BACKUP_MNT/labels/" 2>/dev/null; then
-        log "Label copied to $BACKUP_MNT/labels/"
+        log "Unit record copied to $BACKUP_MNT/labels/"
     else
-        warn "Drive is read-only: the label files are in $LABELS on this unit"
+        warn "Drive is read-only: the unit record is in $LABELS on this unit"
     fi
 else
     info "Skipping install.sh (--no-install). Run it yourself with:"
@@ -211,5 +212,6 @@ done
 swapon --show || true
 echo
 log "${BLD}Provisioning complete.${NC}"
-info "Print the label (${LABELS}), reboot, then verify from a phone: scan the label's app QR code"
+info "Reboot, then verify from a phone: join the Wi-Fi named after this unit's address (password: the code"
+info "in that name), open it, press the Atlas button and pick the colour it shows"
 info "Unmount the payload drive:  sudo umount $BACKUP_MNT"

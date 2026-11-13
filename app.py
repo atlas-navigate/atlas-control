@@ -848,7 +848,7 @@ def api_device_info():
         # unclaimed, primary-user approval after, bearer tokens, SPKI pin).
         # An app that sees a higher number asks to be updated.
         "pairing": pairing.VERSION,
-        # "unclaimed": the first device pairs with the button (or the label);
+        # "unclaimed": the first device pairs with the button (or a setup code);
         # "owned": new devices ask the primary user.
         "setup_state": "owned" if pairing.claimed() else "unclaimed",
         "button": _button_present(),
@@ -3494,7 +3494,7 @@ def _listdir(path):
 
 
 def _restart_hotspot_with_label_credentials():
-    """If the hotspot is on, bring it back with the label's name/password."""
+    """If the hotspot is on, bring it back with its factory name/password."""
     atlas_blocking.sleep(3)          # let the reset response reach the browser first
     try:
         if _current_hotspot_state().get("active"):
@@ -3533,9 +3533,9 @@ def _run_factory_reset(actor, after=None):
     Also erased: Atlas's logs and caches and the system journal, and Ray's
     in-memory conversation state (models unloaded).
     Kept: the installed software, offline maps/routing and built-in
-    reference, and Atlas's identity — the hardware identity printed on its
-    label: name, .local hostname, key, setup code and Wi-Fi password (the
-    hotspot returns to the label's credentials).
+    reference, and Atlas's identity — name, .local hostname, key, setup
+    code and factory Wi-Fi password (the hotspot returns to its factory name
+    and password, the code in that name).
 
     `after` runs once the reset is done, instead of restarting a running
     hotspot (the button brings the hotspot up for the next owner).
@@ -3674,7 +3674,7 @@ def _button_pressed():
 
 def _button_reset_hotspot():
     """After a button reset nothing remembers a network: bring Atlas's own
-    Wi-Fi up with the label's name and password for the next owner."""
+    Wi-Fi up with its factory name and password for the next owner."""
     atlas_blocking.sleep(2)
     try:
         _defer_auto_hotspot(60)
@@ -4027,7 +4027,8 @@ _HOTSPOT_CFG_PATH = atlas_paths.data_file("hotspot_config.json")
 
 def _load_hotspot_cfg():
     """The owner's hotspot settings; until they change them (and again after
-    a factory reset), the Wi-Fi name and password printed on Atlas's label."""
+    a factory reset), the factory ones: the Wi-Fi is named after Atlas's
+    address and its password is the code in that name."""
     try:
         with open(_HOTSPOT_CFG_PATH) as f:
             cfg = json.load(f)
@@ -4078,10 +4079,11 @@ def _current_hotspot_state(include_password=False):
                 elif line.startswith("802-11-wireless-security.psk:") and not password:
                     password = line.split(":", 1)[1].strip()
     label = device_identity.hotspot() or {}
+    factory = bool(label.get("factory", label.get("shared")))
     state = {"active": active, "ssid": ssid, "passwordSet": bool(password),
-             # Still the standard password every Atlas ships with (anyone who
-             # knows it can join): the page reminds the owner to set their own.
-             "standard_password": bool(label.get("shared") and password and password == label.get("password"))}
+             # Still the factory password (the code in the Wi-Fi name, which
+             # anyone nearby can see): the page reminds the owner to set their own.
+             "standard_password": bool(factory and password and password == label.get("password"))}
     if include_password:
         state["password"] = password
     return state
@@ -4814,9 +4816,27 @@ def api_wifi_disconnect():
     _set_wifi_switch_state(ssid="", pending=False, ok=None, message="", result=None)
     return jsonify({"ok": True})
 
+HOTSPOT_PROMPT_DONE = "hotspot_password_prompt_done"
+
+
 @app.route("/api/hotspot/status")
 def api_hotspot_status():
-    return jsonify(_current_hotspot_state())
+    state = _current_hotspot_state()
+    # Right after the first device pairs, the primary user is asked once to
+    # set their own Wi-Fi password (a factory reset asks again).
+    state["prompt_own_password"] = bool(state["standard_password"] and _owner_only() is None
+                                        and not db.get_app_settings().get(HOTSPOT_PROMPT_DONE))
+    return jsonify(state)
+
+
+@app.route("/api/hotspot/prompt-done", methods=["POST"])
+def api_hotspot_prompt_done():
+    """The primary user answered the Wi-Fi password prompt (set one or skipped)."""
+    refused = _owner_only()
+    if refused:
+        return refused
+    db.set_app_setting(HOTSPOT_PROMPT_DONE, "1")
+    return jsonify({"ok": True})
 
 
 @app.route("/api/hotspot/credentials")

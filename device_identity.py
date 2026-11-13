@@ -3,9 +3,9 @@ The app's read-only view of this Atlas's identity (/etc/atlas/identity),
 created by the root `atlas-identity` tool on the production line or at first
 boot. See system/atlas_engine/identity.py for what each file holds.
 
-The app can read: device.json (public facts), hotspot.json (the label's
-hotspot credentials), setup_code.hash (to check a setup code typed or scanned
-from the label) and proxy_secret. It never sees the TLS private key or the
+The app can read: device.json (public facts), hotspot.json (the factory
+hotspot credentials), setup_code.hash (to check a setup code typed or
+scanned) and proxy_secret. It never sees the TLS private key or the
 setup code itself.
 
 A developer checkout without an identity gets a stable stand-in, and pairing
@@ -49,7 +49,7 @@ def device():
 
 
 def hotspot():
-    """{ssid, password} from the label, or None.
+    """The factory {ssid, password, factory, shared}, or None.
 
     Atlas's own Wi-Fi is named after its .local address (atlas-xxxx.local),
     the name the owner then opens. Units made before that still carry their

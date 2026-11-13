@@ -40,8 +40,14 @@ class LabelTests(unittest.TestCase):
         for ext in (".svg", ".png", ".txt"):
             self.assertEqual(stat.S_IMODE(os.stat(base + ext).st_mode), 0o600, ext)   # holds secrets
         svg = open(base + ".svg").read()
-        for value in (label["name"], label["setup_code"], label["hotspot_password"], label["hostname"] + ".local"):
+        for value in (label["name"], label["setup_code"], label["hostname"] + ".local"):
             self.assertIn(value, svg)
+        # No label ships: the Wi-Fi password is the code in the Wi-Fi name and is never printed.
+        code = label["hostname"].split("-", 1)[1]
+        self.assertEqual((len(code), label["hotspot_password"]), (9, code))
+        self.assertNotIn("WIFI:", svg)
+        for text in (svg, open(base + ".txt").read()):
+            self.assertNotIn("Password", text)
         self.assertTrue(label["app_qr"].startswith("ATLAS1:" + json.load(
             open(os.path.join(sb.paths.IDENTITY, "device.json")))["device_id"]))
         self.assertEqual(open(base + ".png", "rb").read(8), b"\x89PNG\r\n\x1a\n")

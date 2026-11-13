@@ -101,13 +101,13 @@ def identity_main(argv):
         print("setup code verifies" if ok else "setup code does NOT verify — run: atlas-identity new-setup-code")
         return 0 if ok else 1
     elif cmd == "new-setup-code":
-        print(f"New setup code: {identity.new_setup_code()}  (print a new label; paired devices are unaffected)")
+        print(f"New setup code: {identity.new_setup_code()}  (paired devices are unaffected)")
         return 0
     elif cmd == "factory-hotspot":
         ssid = identity.factory_hotspot()
-        print(f"{ssid} now uses the standard Wi-Fi password. It takes effect the next time Atlas starts its "
-              "hotspot (Settings → Wi-Fi, or a reboot); a password set in Settings still takes precedence. "
-              "Print a new label.")
+        print(f"{ssid} now uses its factory Wi-Fi password (the code in its name). It takes effect the next "
+              "time Atlas starts its hotspot (Settings → Wi-Fi, or a reboot); a password set in Settings still "
+              "takes precedence.")
         return 0
     else:
         print("usage: atlas-identity show|ensure|label|label-json|check|new-setup-code|factory-hotspot",

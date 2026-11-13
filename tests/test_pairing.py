@@ -279,8 +279,9 @@ class PersistenceTests(PairingTestBase):
 
 
 class HotspotReminderTests(PairingTestBase):
-    """Every Atlas ships with the same Wi-Fi password; the page reminds the
-    owner to set their own until they do (again after a factory reset)."""
+    """Atlas's Wi-Fi starts with the code in its name as the password; the
+    owner is asked once after pairing, and the page reminds them, to set their
+    own until they do (again after a factory reset)."""
 
     def test_reminder_follows_the_running_password(self):
         import tempfile
@@ -294,6 +295,40 @@ class HotspotReminderTests(PairingTestBase):
             self.assertFalse(self.app._current_hotspot_state()["standard_password"])
             os.remove(cfg)                                            # what factory reset does
             self.assertTrue(self.app._current_hotspot_state()["standard_password"])
+
+    def test_the_new_owner_is_asked_once_to_set_their_own_wifi_password(self):
+        import tempfile
+        cfg = os.path.join(tempfile.mkdtemp(), "hotspot_config.json")
+        p = mock.patch.object(self.app, "_HOTSPOT_CFG_PATH", cfg)
+        p.start(); self.addCleanup(p.stop)
+        q = mock.patch.object(self.app, "_nmcli", return_value=("", 0))
+        q.start(); self.addCleanup(q.stop)
+        self.app.db.get_db().execute("DELETE FROM app_settings WHERE key=?", (self.app.HOTSPOT_PROMPT_DONE,))
+        self.app.db.get_db().commit()
+        owner = self.pair_browser()
+        status = self.get("/api/hotspot/status").get_json()
+        self.assertTrue(status["standard_password"] and status["prompt_own_password"])
+        self.assertTrue(status["ssid"].endswith(".local"))
+        # Another device is never asked, and can't answer for the owner.
+        member = self.app.app.test_client()
+        req = member.post("/api/pair/request", json={"name": "Second phone", "client_nonce": "n"},
+                          base_url=BASE, environ_base=ENV).get_json()
+        self.post(f"/api/pair/request/{req['request_id']}/approve", headers={"X-Atlas-CSRF": owner["csrf"]})
+        member.get(f"/api/pair/request/{req['request_id']}?secret={req['secret']}", base_url=BASE, environ_base=ENV)
+        self.assertFalse(member.get("/api/hotspot/status", base_url=BASE, environ_base=ENV)
+                         .get_json()["prompt_own_password"])
+        member_csrf = member.get("/api/pair/status", base_url=BASE, environ_base=ENV).get_json()["csrf"]
+        r = member.post("/api/hotspot/prompt-done", json={}, headers={"X-Atlas-CSRF": member_csrf},
+                        base_url=BASE, environ_base=ENV)
+        self.assertEqual(r.status_code, 403)
+        # Skipping (or saving) ends the prompt; the page's reminder stays until the password changes.
+        r = self.post("/api/hotspot/prompt-done", json={}, headers={"X-Atlas-CSRF": owner["csrf"]})
+        self.assertEqual(r.status_code, 200)
+        status = self.get("/api/hotspot/status").get_json()
+        self.assertEqual((status["prompt_own_password"], status["standard_password"]), (False, True))
+        # A factory reset asks the next owner again.
+        self.app.db.factory_reset_data()
+        self.assertIsNone(self.app.db.get_app_settings().get(self.app.HOTSPOT_PROMPT_DONE))
 
 
 class PrimaryUserTests(PairingTestBase):

@@ -119,3 +119,12 @@ class WifiReminderTemplateTests(unittest.TestCase):
         self.assertIn("hotspot?.standard_password", html)
         self.assertIn("Set your own password", html)
         self.assertIn('id="hotspot-password-input"', html)
+
+    def test_the_owner_is_prompted_after_pairing(self):
+        with open(os.path.join(REPO, "templates", "index.html"), encoding="utf-8") as f:
+            html = f.read()
+        self.assertIn("<HotspotPasswordPrompt/>", html)
+        self.assertIn("d.prompt_own_password", html)
+        self.assertIn("/api/hotspot/prompt-done", html)
+        for gone in ("on the label", "from the label", "printed on every Atlas"):
+            self.assertNotIn(gone, html)

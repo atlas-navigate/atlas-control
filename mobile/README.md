@@ -14,11 +14,12 @@ itself after network changes, reboots and updates, and notifications.
    - on request only: an HTTPS probe of the phone's own /24 for `/api/device/info`
    Typing an address is an *advanced* fallback.
 2. **Pair once** (no account, username, password or PIN):
-   - on Atlas's own Wi-Fi: one tap;
-   - scan the QR code on the Atlas label — it contains the device id, setup
-     code, TLS key pin and hotspot credentials, so the very first connection
-     is already trusted; the app joins Atlas's Wi-Fi first if needed;
-   - type the label's setup code; or
+   - the Atlas button (while Atlas is unclaimed): press it, then pick the
+     colour its light shows;
+   - the backup: scan the QR code in the factory's record of the unit (no label
+     ships) — it contains the device id, setup code, TLS key pin and hotspot
+     credentials, so the very first connection is already trusted; the app
+     joins Atlas's Wi-Fi first if needed — or type that setup code; or
    - ask someone already using this Atlas to tap **Allow** (both screens show
      the same 4-digit code, computed from the TLS key each side saw).
 3. **Stay connected** — the app stores the device id, the SHA-256 pin of the
@@ -44,7 +45,7 @@ A phone pairs again only when Atlas itself ended the pairing:
 | What happened | What the app shows |
 |---|---|
 | The phone was removed in Settings → Connected devices | "Connect this phone again" — same Atlas, same key; one tap to start |
-| Atlas was factory reset (paired devices are cleared; the label stays valid) | the same |
+| Atlas was factory reset (paired devices are cleared; the button pairs again) | the same |
 | Atlas answers with a different key (storage cloned into another unit, or someone impersonating it) | "Security warning" — never connects silently |
 
 The app notices removal within seconds of connecting (`/api/pair/status`

@@ -107,7 +107,7 @@ def mdns_reclaim_decision(advertised, expected, attempts):
     """(restart avahi now?, seconds until the next check) for the mDNS name guard.
 
     After a name conflict avahi renames itself (atlas-xxxx -> atlas-xxxx-2) and
-    never tries the real name again, so the label's address silently stops
+    never tries the real name again, so Atlas's own address silently stops
     resolving even once the conflict is long gone. A restart makes it probe
     again. Back off between attempts: if another device really holds the name,
     avahi just loses the probe again, and probing does not disturb it.

@@ -9,8 +9,8 @@ The first device to pair becomes the primary user. While there is none
 
   * button colour — the owner presses the Atlas button, the light shows one
     of six colours, and the device must pick that colour (one try per press);
-  * setup code — the backup: the code on the device label, typed in or
-    scanned from the label's QR code.
+  * setup code — the backup: the unit's own code (from the factory's record;
+    no label ships), typed in or scanned from that record's QR code.
 
 Once Atlas has a primary user, every other device asks, and only the primary
 user can tap "Allow" (both screens show the same 4-digit code). Being on
@@ -333,11 +333,11 @@ def _record_failure(ip):
 
 
 def claim_with_setup_code(code, name, kind, ip):
-    """The label's backup proof, accepted only while Atlas is unclaimed.
+    """The setup code, the backup proof, accepted only while Atlas is unclaimed.
     Returns (client_id, token) or raises PairingError."""
     import atlas_blocking
     if claimed():
-        # Someone has the label but Atlas is set up: worth a line in the log.
+        # Someone has the setup code but Atlas is set up: worth a line in the log.
         audit_log.record("pairing_code_rejected", None, reason="claimed")
         raise PairingError(CLAIMED_MESSAGE, "claimed")
     if _rate_limited(ip):

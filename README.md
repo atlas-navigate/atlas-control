@@ -11,10 +11,10 @@ Runs 100% offline — no internet required after installation.
 - Turn-by-turn routing for all 50 states (OSRM, car + hiking profiles)
 - Meshtastic mesh radio integration
 - GPS with Kalman filtering and dead reckoning
-- Ray, the AI assistant (Ollama, on the Jetson GPU): Qwen2.5 3B or Qwen3.5 4B, each tuned for the unit automatically
+- Ray, the AI assistant (Ollama, on the Jetson GPU): Qwen3.5 4B (standard) or Qwen2.5 3B, each tuned for the unit automatically
 - Phone tracker check-in
 - Offline city and NPS trail search
-- Native Android and iOS apps: pair once from the label QR code, pinned TLS, automatic rediscovery
+- Native Android and iOS apps: pair once with the Atlas button, pinned TLS, automatic rediscovery
 - No accounts or passwords; signed, self-healing software updates
 
 ## Hardware
@@ -67,7 +67,7 @@ applies live, no restart needed (`"AUTO"` switches back).
 ## Installation
 
 Production units are built from a payload drive plus one script, and each
-leaves the line with its own identity and label — see
+leaves the line with its own identity (no label ships) — see
 [docs/MANUFACTURING.md](docs/MANUFACTURING.md). The short version, on a
 freshly flashed Jetson with the payload drive attached:
 
@@ -77,7 +77,7 @@ sudo /media/$USER/atlas-control-prod/stage/atlas-imaging/atlas-provision.sh
 
 That copies the maps and datasets, then runs `install.sh --bundle <signed release>`:
 system packages, the Atlas software through its update engine (no git, no
-sudo rules), the unit's own identity and label, and retail lock-down.
+sudo rules), the unit's own identity, and retail lock-down.
 Building the datasets from scratch (a golden unit) runs the same
 `install.sh` with no payload and needs Internet for a day or two.
 
@@ -103,27 +103,29 @@ publishing releases, [docs/RELEASES.md](docs/RELEASES.md).
 
 ## Access
 
-There are no accounts or passwords. The first time, pair the phone or
-browser with Atlas using the label (QR code or setup code), Atlas's own
-Wi-Fi, or "Allow" on a device that is already paired — see
-[docs/PAIRING.md](docs/PAIRING.md).
+There are no accounts or passwords. Join Atlas's Wi-Fi, which is named
+after its address (`atlas-xxxxxxxxx.local`; the password is the code in that
+name), open that address, press the Atlas button and pick the colour its
+light shows. The first device becomes the primary user, which then allows
+every later device ("Allow") — see [docs/PAIRING.md](docs/PAIRING.md).
 
 | Network | Address |
 |---------|---------|
-| Atlas's Wi-Fi or your network | `https://atlas-xxxxxx.local` (on the label; also in Settings → Local Device Address) |
+| Atlas's Wi-Fi or your network | `https://atlas-xxxxxxxxx.local` (the Wi-Fi name; also in Settings → Local Device Address) |
 | Atlas's Wi-Fi | `https://10.42.0.1` |
 
 Browsers warn once about Atlas's own (self-signed) certificate.
 
-Every unit has its own setup code and key; the Wi-Fi password is the same on
-every unit (owners are reminded to set their own). Pairing survives
+Every unit has its own setup code and key; its Wi-Fi starts with the code in
+its name as the password, and Atlas asks the owner to set their own right
+after pairing. Pairing survives
 software updates, reboots and address changes; only removing a device, a
 factory reset or a new identity ends it.
 
 ## Ray's models
 
-Ray → Settings → Model switches between Qwen2.5 3B (standard, quickest) and
-Qwen3.5 4B. Atlas picks each model's build, context window and sampling for
+Ray → Settings → Model switches between Qwen3.5 4B (standard) and
+Qwen2.5 3B (quickest). Atlas picks each model's build, context window and sampling for
 its hardware, switches without a restart, and remembers the choice through
 reboots and updates. Measurements and the expert overrides:
 [docs/AI_MODELS.md](docs/AI_MODELS.md).
@@ -131,7 +133,7 @@ reboots and updates. Measurements and the expert overrides:
 ## Mobile
 
 Native Android and iOS apps live in [`mobile/`](mobile/README.md). They pair
-by scanning the label, pin the unit's TLS key, find Atlas by its device id
+with the Atlas button, pin the unit's TLS key, find Atlas by its device id
 (mDNS, the LAN beacon or its hotspot) after any address change, and keep
 working through updates.
 

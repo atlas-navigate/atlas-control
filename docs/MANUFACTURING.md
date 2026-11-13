@@ -1,8 +1,10 @@
 # Manufacturing and provisioning
 
 Building a unit is a copy from the payload drive plus one script. Each unit
-leaves the line with its own identity, its own label, the signed release
-installed, and nothing another unit could use against it.
+leaves the line with its own identity, the signed release installed, and
+nothing another unit could use against it. No label ships with Atlas (owner
+decision, 2026-11-12): its Wi-Fi is named after its address, and the code in
+that name is the password until the owner sets their own.
 
 ## Once per release: the payload drive
 
@@ -133,13 +135,13 @@ on the button, so the line can confirm the LED and its colours.
      and that every model is present (pulling any missing when online);
    - gives the unit its **own identity**: `Atlas-XXXXXXXXX` name,
      `atlas-xxxxxxxxx` hostname, TLS key and certificate, hotspot name (its
-     `.local` address, e.g. `atlas-k7m2qx9wp.local`; the hotspot password is
-     the standard one every unit shares), setup code;
-   - writes the **label** (`/root/atlas-labels/Atlas-XXXX.{png,svg,txt}`,
-     copied to the drive's `labels/` when it is writable): a Wi-Fi QR code,
-     the Atlas app QR code, the name, the Wi-Fi name (= address) and
-     password, "press the button, pick the colour", and the setup code as the
-     backup;
+     `.local` address, e.g. `atlas-k7m2qx9wp.local`) and password (the code
+     in that name, `k7m2qx9wp`), setup code;
+   - writes the unit's **record** for support
+     (`/root/atlas-labels/Atlas-XXXX.{png,svg,txt}`, copied to the drive's
+     `labels/` when it is writable): the name, the Wi-Fi name (= address),
+     "press the button, pick the colour", the setup code and the Atlas app QR
+     code. It is not printed, and it never shows the Wi-Fi password;
    - **locks the unit down for retail** (`finalize-retail.sh`): setup-account
      passwords locked, SSH disabled and masked, the setup account removed
      from the `atlas` group, boots headless (`multi-user.target`, from the
@@ -157,8 +159,9 @@ on the button, so the line can confirm the LED and its colours.
    (root only; the last 10 are kept). A run that stops can be re-run as it
    is: finished steps are skipped. [INSTALL.md](INSTALL.md) has the stages
    and options.
-3. Print the label and attach it to the unit; the label files hold the setup
-   code and hotspot password (mode 0600). Reboot.
+3. Reboot. Keep the unit records (`labels/` on the drive) with the factory's
+   records: they hold each unit's setup code (mode 0600), support's only way
+   to pair a unit whose button has failed.
 
 ## Verifying a finished unit
 
@@ -168,8 +171,9 @@ on the button, so the line can confirm the LED and its colours.
   ends with it; after the first reboot, `--infer` also has Ray answer once and
   reports its speed); `sudo finalize-retail.sh --check` → "Ready for retail."
 - The button glows dim white (unclaimed). From a phone on the unit's Wi-Fi
-  (`atlas-xxxxxxxxx.local`): open the Atlas app → Connect → press the button →
-  pick the colour → paired, the light blinks green then goes off; map loads, a
+  (`atlas-xxxxxxxxx.local`, password `xxxxxxxxx`): open the Atlas app → Connect
+  → press the button → pick the colour → paired, the light blinks green then
+  goes off, and Atlas asks to set its own Wi-Fi password (skip it); map loads, a
   cross-state route returns (following roads, not a straight line), Ray
   answers. Then Settings → Factory reset (or hold the button 15 s) so the unit
   ships unclaimed.
@@ -199,14 +203,13 @@ the numeric serial (`derive_name_v2`, scheme `serial-v2`): a bijection over
 29⁹ values, so two units can **never** share a name. A serial that isn't a
 number below 29⁹ falls back to a 9-character hash (`hmac9`, recorded in
 `device.json`); only those need the fleet registry's duplicate check (bump
-`name_salt` with `identity.create(salt=1)` and reprint the label). Units made
-earlier keep their 6-character name.
+`name_salt` with `identity.create(salt=1)`). Units made earlier keep their
+6-character name.
 
-The hotspot **password** is the exception: it is the same on every unit (owner
-decision, `FACTORY_HOTSPOT_PASSWORD`), so it can be pre-printed on the box and
-in the manual. Only the label with the setup code is unit-specific. See
-[PAIRING.md](PAIRING.md) for what that means for security, and for
-compliance in markets that ban universal default passwords.
+The hotspot **password** starts as the code in the Wi-Fi name (owner decision,
+2026-11-12), so nothing needs printing. It is public: anyone who sees the
+Wi-Fi name knows it. See [PAIRING.md](PAIRING.md) for what that means for
+security, and for compliance in markets that restrict default passwords.
 
 If a line ever flashes a whole disk image instead, cloned from a finished
 unit, `atlas-firstboot.service` still catches it. It runs
@@ -218,8 +221,8 @@ start:
   hotspot profile;
 - the app ends pairings made with the old identity.
 
-Print the label after that first boot:
-`sudo atlas-identity label-json | make_label.py`.
+Support can read the new identity after that first boot with
+`sudo atlas-identity label`.
 
 ## The clock and the RTC backup cell
 

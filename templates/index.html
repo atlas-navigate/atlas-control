@@ -7629,7 +7629,8 @@ function FactoryResetSection() {
           pairings and every connected device — the next device to connect becomes the primary user.
           The Heltec V4 radio is restored to the factory default snapshot
           captured below — only the <span style={{fontFamily:'var(--font-mono)'}}>short_name</span> resets to the firmware default.
-          Maps, routing, Ray's models and the details on Atlas's label are kept.
+          Maps, routing, Ray's models and Atlas's name, address and setup code are kept; its Wi-Fi goes back to
+          its starting password, the code in its name.
           Holding the button on Atlas for 15 seconds (its light turns red, then green) does the same.
         </div>
 
@@ -9748,13 +9749,13 @@ function WifiPage() {
   const saveHotspotConfig = async () => {
     if (!hsSSID) { flash('SSID is required', false); return; }
     if (!(await atlasConfirm({ title: "Change Atlas's Wi-Fi name or password?",
-      message: "Devices that joined the old network will need the new details, and the label on your Atlas won't match until a factory reset.",
+      message: "Devices that joined the old network will need the new details. A factory reset returns Atlas's Wi-Fi to its starting password (the code in its name).",
       confirmLabel: 'Change' }))) return;
     api.post('/api/hotspot/config', {ssid: hsSSID, password: hsPass, confirm: true})
       .then(() => { flash('Hotspot config saved'); loadHotspot(); })
       .catch(e => flash(errText(e, 'Failed to save config'), false));
   };
-  // Every Atlas ships with the same Wi-Fi password: offer to replace it.
+  // Atlas's Wi-Fi starts with the code in its name as the password: offer to replace it.
   const setOwnHotspotPassword = () => {
     setActiveTab('hotspot');
     setHsPass('');
@@ -9852,8 +9853,8 @@ function WifiPage() {
           <div className="card" role="note" style={{borderColor:'var(--accent-amber, #fbbf24)'}}>
             <div style={{display:'flex', gap:12, alignItems:'center', flexWrap:'wrap'}}>
               <div style={{flex:'1 1 240px', fontSize:13, color:'var(--text-primary)'}}>
-                Atlas's Wi-Fi uses the standard password printed on every Atlas, so anyone who knows it can join.
-                Set your own to keep it private.
+                Atlas's Wi-Fi still uses its starting password, the code in its name, so anyone nearby can work it
+                out and join. Set your own to keep it private.
               </div>
               <button className="btn btn-sm" onClick={setOwnHotspotPassword}>Set your own password</button>
             </div>
@@ -11000,8 +11001,8 @@ async function pairJson(url, data) {
 }
 
 // Pairing a browser. While nobody has set this Atlas up, the owner presses
-// the Atlas button and picks the colour its light shows (or types the setup
-// code from the label); once it has a primary user, a new device asks them.
+// the Atlas button and picks the colour its light shows (or types a setup
+// code from Atlas support); once it has a primary user, a new device asks them.
 const COLOR_STEP_TEXT = {
   press_button: 'Press the button on your Atlas once.',
   choose_color: 'Which colour is the button showing?',
@@ -11131,17 +11132,17 @@ function PairingScreen({ status }) {
           {mode === 'button' && (
             <>
               {noButton
-                ? <div style={{...muted,marginTop:14}}>Atlas can't find its button right now. Use the setup code from the label instead.</div>
+                ? <div style={{...muted,marginTop:14}}>Atlas can't find its button right now. Check it is plugged in, or enter a setup code from Atlas support.</div>
                 : <ColorPairing name={name} onPaired={done} onUseCode={() => { setNoButton(true); setMode('code'); }}/>}
               <button className="btn btn-sm" style={{marginTop:12}} onClick={() => setMode('code')}>
-                {noButton ? 'Enter the setup code' : "Can't use the button? Enter the setup code"}
+                {noButton ? 'Enter a setup code' : "Can't use the button? Enter a setup code"}
               </button>
             </>
           )}
 
           {mode === 'code' && (
             <>
-              <label style={{...muted,display:'block',margin:'14px 0 6px'}}>Setup code from the label</label>
+              <label style={{...muted,display:'block',margin:'14px 0 6px'}}>Setup code (from Atlas support)</label>
               <input style={{...input,letterSpacing:'0.12em',textTransform:'uppercase',fontFamily:'var(--font-mono)'}}
                 value={code} autoFocus autoCapitalize="characters" autoComplete="off" spellCheck={false}
                 placeholder="XXXX-XXXX-XXXX" onChange={e => setCode(e.target.value)}
@@ -11201,6 +11202,77 @@ function AtlasRoot() {
   if (!status) return null;
   if (status.required && !status.paired) return <PairingScreen status={status} />;
   return <App />;
+}
+
+// Right after the first device pairs (and again after a factory reset), the
+// primary user is asked once to replace Atlas's starting Wi-Fi password: the
+// code in its Wi-Fi name, which anyone nearby can read.
+function HotspotPasswordPrompt() {
+  const [hs, setHs] = useState(null);
+  const [pw, setPw] = useState('');
+  const [again, setAgain] = useState('');
+  const [show, setShow] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    api.get('/api/hotspot/status').then(d => { if (d && d.prompt_own_password) setHs(d); }).catch(() => {});
+  }, []);
+  if (!hs) return null;
+  const finish = () => api.post('/api/hotspot/prompt-done', {}).catch(() => {});
+  const skip = () => { finish(); setHs(null); };
+  const problem = pw.length < 8 ? 'At least 8 characters.' : pw.length > 63 ? 'At most 63 characters.'
+    : pw !== again ? "The two passwords don't match." : '';
+  const save = () => {
+    if (problem) { setError(problem); return; }
+    setBusy(true); setError('');
+    api.post('/api/hotspot/config', { ssid: hs.ssid, password: pw, confirm: true })
+      .then(() => { finish(); setSaved(true); })
+      .catch(e => setError((e && (e.message || e.error)) || "Couldn't save the password"))
+      .finally(() => setBusy(false));
+  };
+  const input = {width:'100%',boxSizing:'border-box',padding:'9px 10px',borderRadius:6,border:'1px solid var(--border)',background:'var(--bg-input)',color:'var(--text-primary)',fontSize:15,marginTop:6};
+  const muted = {fontSize:13,color:'var(--text-secondary)',lineHeight:1.5};
+  return (
+    <div role="dialog" aria-modal="true" style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',zIndex:10000,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+      <div className="card" style={{maxWidth:420,width:'100%'}}>
+        <div style={{fontSize:16,fontWeight:700,marginBottom:8}}>{saved ? 'Wi-Fi password saved' : 'Set your own Wi-Fi password'}</div>
+        {saved ? (
+          <>
+            <div style={muted}>
+              Atlas's Wi-Fi <strong>{hs.ssid}</strong> uses your password from the next time it starts. Devices that
+              connect through it, this one included if it does, need the new password then.
+            </div>
+            <div style={{display:'flex',justifyContent:'flex-end',marginTop:16}}>
+              <button className="btn btn-sm" autoFocus onClick={() => setHs(null)}>Done</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={muted}>
+              Atlas's Wi-Fi <strong>{hs.ssid}</strong> still uses its starting password, the code in its name, so
+              anyone nearby can work it out. Choose your own. You can change it later in Settings → Wi-Fi.
+            </div>
+            <input type={show ? 'text' : 'password'} value={pw} autoFocus autoComplete="new-password" placeholder="New password"
+              onChange={e => { setPw(e.target.value); setError(''); }} style={input}/>
+            <input type={show ? 'text' : 'password'} value={again} autoComplete="new-password" placeholder="Repeat it"
+              onChange={e => { setAgain(e.target.value); setError(''); }}
+              onKeyDown={e => { if (e.key === 'Enter' && !busy) save(); }} style={input}/>
+            <label style={{...muted,display:'flex',alignItems:'center',gap:6,marginTop:8}}>
+              <input type="checkbox" checked={show} onChange={e => setShow(e.target.checked)}/> Show password
+            </label>
+            {error && <div style={{color:'var(--accent-red)',fontSize:13,marginTop:8}}>{error}</div>}
+            <div style={{display:'flex',gap:10,justifyContent:'flex-end',marginTop:16}}>
+              <button className="btn btn-sm" onClick={skip} disabled={busy}>Skip for now</button>
+              <button className="btn btn-sm btn-primary" onClick={save} disabled={busy || !pw}>
+                {busy ? 'Saving…' : 'Save password'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function PairRequestPrompt({ requests, onDone }) {
@@ -11992,6 +12064,7 @@ function App() {
   return (
     <SettingsContext.Provider value={{...appSettings, refresh}}>
       <ConfirmHost/>
+      <HotspotPasswordPrompt/>
       <PairRequestPrompt requests={pairRequests}
         onDone={(id) => setPairRequests(prev => prev.filter(x => x.request_id !== id))}/>
       <div className="app" style={isAtlasMobileApp ? {paddingLeft:0, display:'flex', flexDirection:'column', position:'fixed', inset:0, height:'100%', overflow:'hidden'} : null}>

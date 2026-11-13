@@ -10,7 +10,7 @@ another.
 | Who | What they can reach | What must hold |
 |---|---|---|
 | Someone on the same Wi-Fi / LAN | ports 80/443, mDNS, the discovery beacon | nothing works until a device is paired; no secrets are disclosed before pairing |
-| Someone who knows the standard Wi-Fi password, within range of an Atlas with its hotspot on | Atlas's hotspot (the password is shared, owner decision 2026-09-26) | joining grants nothing: pairing needs the Atlas button's colour (while unclaimed) or the primary user's Allow. Owners are still reminded to set their own Wi-Fi password |
+| Anyone within range of an Atlas with its hotspot on | Atlas's hotspot (its starting password is the code in its Wi-Fi name, so it is public; owner decision 2026-11-12) | joining grants nothing: pairing needs the Atlas button's colour (while unclaimed) or the primary user's Allow. Atlas asks the first owner to set their own Wi-Fi password right after pairing, and reminds them until they do |
 | Someone with the unit in hand | the Atlas button | by design they are the owner: holding it 15 s erases the owner's data and lets them pair. A reset is refused while an update installs and is recorded in the security log |
 | A web page the owner visits | the owner's browser, which *can* reach Atlas | cross-site requests, DNS rebinding and forged forwarding headers are refused |
 | Another radio on the mesh | text, node names and positions arriving over LoRa | they are data, never markup or instructions (UI and Ray) |
@@ -62,8 +62,8 @@ middleware (so `/socket.io/` is covered too):
 - A client proves ownership once. While Atlas has no primary user
   (**unclaimed**): the **Atlas button** — press it, and pick the colour its
   light shows (1 of 6, `secrets.choice`, shown only on the LED; one pick per
-  press; two devices waiting at once void both attempts) — or the label's
-  **setup code** (PBKDF2-hashed on the unit; 5 wrong per address / 20 in
+  press; two devices waiting at once void both attempts) — or the unit's
+  **setup code** (no label ships; support has it from the factory record; PBKDF2-hashed on the unit; 5 wrong per address / 20 in
   total pause it for ten minutes, persisted across restarts). The first
   device becomes the **primary user**. After that the button and setup code
   pair nothing; a new device needs **the primary user's approval**. Both
@@ -86,9 +86,9 @@ middleware (so `/socket.io/` is covered too):
 Created per unit on first install (never copied from a golden image):
 device id, `Atlas-XXXXXX` name and `atlas-xxxxxx` hostname (derived from the module serial), ECDSA P-256 key and
 self-signed certificate (valid 2024–2099 so a wrong clock never breaks it),
-hotspot SSID (the password is the standard one shared by every unit, see
+hotspot SSID and starting password (the code in the SSID, see
 [PAIRING.md](PAIRING.md)), setup code, the nginx proxy secret.
-The apps pin the certificate's SPKI SHA-256 (from the label QR code, the
+The apps pin the certificate's SPKI SHA-256 (from the unit record's QR code, the
 mDNS/beacon advert and the pairing handshake) and warn loudly if the same
 device id ever presents a different key. The module serial is recorded and
 checked on every boot (`atlas-firstboot.service`), so storage or a disk image

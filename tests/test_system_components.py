@@ -152,9 +152,9 @@ class IdentityTests(unittest.TestCase):
         self.assertEqual(mode("nginx-proxy-secret.conf"), 0o600)
         hotspot = json.load(open(os.path.join(d, "hotspot.json")))
         self.assertNotIn(hotspot["password"], self.identity.DEFAULT_HOTSPOT_PASSWORDS)
-        self.assertGreaterEqual(len(hotspot["password"]), 12)
+        self.assertGreaterEqual(len(hotspot["password"]), self.identity.WPA_MIN)
 
-    def test_every_unit_gets_the_standard_wifi_password_and_its_own_everything_else(self):
+    def test_the_wifi_password_is_the_code_in_the_wifi_name_and_everything_else_is_unique(self):
         d = self.sb.paths.IDENTITY
         read = lambda *p: open(os.path.join(d, *p)).read()
         with mock.patch.object(self.identity, "module_serial", return_value="1423425090328"):
@@ -164,18 +164,47 @@ class IdentityTests(unittest.TestCase):
         with mock.patch.object(self.identity, "module_serial", return_value="1423425090329"):
             b = self.identity.ensure()
         b_hotspot, b_code = json.load(open(os.path.join(d, "hotspot.json"))), read("setup_code")
-        # Owner decision: one Wi-Fi password for every unit (printed on box and manual)...
-        self.assertEqual(a_hotspot["password"], self.identity.FACTORY_HOTSPOT_PASSWORD)
-        self.assertEqual(b_hotspot["password"], a_hotspot["password"])
-        self.assertTrue(a_hotspot["shared"] and b_hotspot["shared"])
-        # ...and nothing else shared.
+        # Owner decision (2026-11-12, no label ships): Wi-Fi atlas-k7m2qx9wp.local, password k7m2qx9wp.
+        for dev, hs in ((a, a_hotspot), (b, b_hotspot)):
+            code = dev["short"].lower()
+            self.assertEqual(len(code), 9)
+            self.assertEqual(hs, {"ssid": f"atlas-{code}.local", "password": code, "factory": True, "shared": False})
+        self.assertNotEqual(a_hotspot["password"], b_hotspot["password"])
+        # Every other secret is its own, too.
         self.assertNotEqual(a_code, b_code)
         self.assertNotEqual(a_hotspot["ssid"], b_hotspot["ssid"])
         self.assertNotEqual(a["device_id"], b["device_id"])
         self.assertNotEqual(a["tls_spki_sha256"], b["tls_spki_sha256"])
-        self.assertIn("(the standard password on every Atlas)", self.identity.label_text())
+        self.assertIn("the code in the name", self.identity.label_text())
+        self.assertNotIn(b_hotspot["password"] + "\n", self.identity.label_text())
 
-    def test_factory_hotspot_moves_an_existing_unit_to_the_standard_password(self):
+    def test_a_short_code_unit_keeps_the_earlier_shared_password(self):
+        # Wi-Fi needs 8+ characters; developer units from before 2026-11 have 4- or 6-character codes.
+        self.assertEqual(self.identity.factory_password("PJNT"), self.identity.FACTORY_HOTSPOT_PASSWORD)
+        self.assertEqual(self.identity.factory_password("K7M2QX9WP"), "k7m2qx9wp")
+
+    def test_an_update_moves_a_shared_password_unit_to_its_code(self):
+        d = self.sb.paths.IDENTITY
+        dev = self.identity.ensure()
+        path = os.path.join(d, "hotspot.json")
+        hs = json.load(open(path))
+        old = {"ssid": hs["ssid"], "password": self.identity.FACTORY_HOTSPOT_PASSWORD, "shared": True}
+        json.dump(old, open(path, "w"))                                   # made before 2026-11-12
+        self.assertTrue(self.identity.migrate_factory_password(dev))
+        self.assertEqual(json.load(open(path)), {"ssid": hs["ssid"], "password": dev["short"].lower(),
+                                                 "factory": True, "shared": False})
+        self.assertFalse(self.identity.migrate_factory_password(dev))   # once
+        # A short-code unit keeps the shared password; it only gains the flag.
+        json.dump(old, open(path, "w"))
+        self.assertTrue(self.identity.migrate_factory_password(dict(dev, short="PJNT")))
+        self.assertEqual(json.load(open(path)), dict(old, factory=True))
+        # A legacy unit's own password is not a factory one and stays.
+        json.dump({"ssid": hs["ssid"], "password": "our-own-wifi-9", "shared": False}, open(path, "w"))
+        self.identity.migrate_factory_password(dev)
+        self.assertEqual(json.load(open(path))["password"], "our-own-wifi-9")
+        self.assertFalse(json.load(open(path))["factory"])
+
+    def test_factory_hotspot_moves_an_existing_unit_to_its_factory_password(self):
         d = self.sb.paths.IDENTITY
         self.identity.ensure(adopt_hotspot_password="our-own-wifi-9", legacy_alias="atlas")
         before = json.load(open(os.path.join(d, "hotspot.json")))
@@ -183,8 +212,9 @@ class IdentityTests(unittest.TestCase):
         self.assertEqual((before["password"], before["shared"]), ("our-own-wifi-9", False))
         self.assertEqual(self.identity.factory_hotspot(), before["ssid"])
         after = json.load(open(os.path.join(d, "hotspot.json")))
-        self.assertEqual(after, {"ssid": before["ssid"], "password": self.identity.FACTORY_HOTSPOT_PASSWORD,
-                                 "shared": True})
+        short = self.identity.load()["short"]
+        self.assertEqual(after, {"ssid": before["ssid"], "password": self.identity.factory_password(short),
+                                 "factory": True, "shared": len(short) < self.identity.WPA_MIN})
         self.assertEqual(open(os.path.join(d, "setup_code")).read(), code)
         self.assertEqual(stat.S_IMODE(os.stat(os.path.join(d, "hotspot.json")).st_mode), 0o640)
 
@@ -371,7 +401,7 @@ class IdentityTests(unittest.TestCase):
         code = open(os.path.join(d, "setup_code")).read().strip()
         pw = json.load(open(os.path.join(d, "hotspot.json")))["password"]
         self.assertRegex(code, r"^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$")
-        self.assertRegex(pw, r"^[a-z0-9]{4}(-[a-z0-9]{4}){3}$")
+        self.assertRegex(pw, r"^[a-z2-9]{9}$")            # the code in the Wi-Fi name: lowercase, no dashes
         text = self.identity.label_text()
         self.assertIn("Setup code — the backup", text)
         self.assertIn("press the button", text)

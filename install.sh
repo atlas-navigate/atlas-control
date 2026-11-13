@@ -13,7 +13,7 @@
 # ║    --from-github [TAG]  download the newest signed release (or TAG)     ║
 # ║                    from GitHub Releases, verify it against this kit's    ║
 # ║                    keys, then install it as --bundle does                ║
-# ║    --labels DIR    where to write this unit's label files                ║
+# ║    --labels DIR    where to write this unit's record (for support)       ║
 # ║    --dev-key PUB   developer unit: trust this key, keep SSH, skip retail ║
 # ║                    lock-down (never for sold units)                      ║
 # ║    --states LIST   routing data: all | keep | none | "MD VA ..."         ║
@@ -41,7 +41,7 @@
 # ║    90 models      every model Ray offers                                 ║
 # ║    95 release     the Atlas software, through its update engine: first   ║
 # ║                   install, update, or re-apply of the installed release  ║
-# ║    96 identity    this unit's name and printable label                   ║
+# ║    96 identity    this unit's name and its record (for support)          ║
 # ║    97 retail      lock-down (tools/manufacturing/finalize-retail.sh)     ║
 # ║    98 verify      atlas-engine check: the unit matches its release       ║
 # ║    99 summary                                                            ║

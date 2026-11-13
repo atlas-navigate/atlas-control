@@ -8,10 +8,11 @@ unit skipped that step). Nothing here is shared between units.
   tls/key.pem            ECDSA P-256 private key — never leaves the device (0600)
   tls/cert.pem           self-signed certificate, valid 2024-2099 so an
                          offline unit with its clock at 1970 still serves it
-  hotspot.json           Atlas's own Wi-Fi network: its own SSID and the
-                         standard password shared by every unit, printed on
-                         the label (0640 root:atlas)
-  setup_code             the label's setup code (0600, root only)
+  hotspot.json           Atlas's own Wi-Fi network: its SSID (the .local
+                         address) and factory password (the code in that
+                         name; the earlier shared one on short-code units)
+                         (0640 root:atlas)
+  setup_code             the setup code, the backup to the button (0600, root only)
   setup_code.hash        PBKDF2 of the setup code, what pairing checks (0640)
   proxy_secret           nginx→Flask shared secret (0640 root:atlas)
   nginx-proxy-secret.conf  the same secret as an nginx include (0600)
@@ -44,18 +45,30 @@ from . import fsutil, paths
 
 # No 0/O, 1/I/L, 5/S: read aloud and typed from a label without mistakes.
 ALPHABET = "ABCDEFGHJKMNPQRTUVWXYZ2346789"
-# Every Atlas's own Wi-Fi starts with this password, the same on every unit
-# (owner decision, 2026-09-26: it can be printed on the box and in the manual,
-# which keeps production simple). Everything else in an identity — setup
-# code, TLS key, device id, Wi-Fi name, proxy secret — stays unique per unit.
-# It is public: anyone who knows it can join an Atlas's hotspot, and being on
-# the hotspot lets a device pair. Owners can set their own in Settings → Wi-Fi,
-# and Atlas reminds them to. Its shape (four lowercase groups) differs from a
-# setup code's so nobody types one where the other belongs.
+# Atlas's own Wi-Fi starts with the code in its name as the password
+# (owner decision, 2026-11-12; no label ships with the unit): Wi-Fi
+# atlas-k7m2qx9wp.local, password k7m2qx9wp. It is public — anyone who sees
+# the Wi-Fi name knows it — and joining grants nothing: a device still needs
+# the Atlas button or the primary user's Allow. Atlas asks the owner to set
+# their own right after the first device pairs (Settings → Wi-Fi).
+#
+# Units whose code is shorter than Wi-Fi's 8-character minimum (developer
+# units made before 2026-11) keep the earlier password, the same on every
+# such unit. Its shape (four lowercase groups) differs from a setup code's.
 FACTORY_HOTSPOT_PASSWORD = "w2hh-m6n8-3nyc-2hhv"
 if not (8 <= len(FACTORY_HOTSPOT_PASSWORD) <= 63 and FACTORY_HOTSPOT_PASSWORD.isascii()
         and FACTORY_HOTSPOT_PASSWORD.isprintable()):
     raise RuntimeError("FACTORY_HOTSPOT_PASSWORD must be a WPA2 passphrase: 8-63 printable ASCII characters")
+WPA_MIN = 8
+
+
+def factory_password(short):
+    """The Wi-Fi password a unit starts with: its code, lowercase as in the
+    Wi-Fi name; the earlier shared password when the code is too short."""
+    code = str(short or "").lower()
+    return code if len(code) >= WPA_MIN else FACTORY_HOTSPOT_PASSWORD
+
+
 # Old units' universal password: never adopted when a legacy unit is migrated.
 DEFAULT_HOTSPOT_PASSWORDS = {"AtlasControl", "password", "atlascontrol"}
 
@@ -263,9 +276,12 @@ def create(hotspot_password=None, legacy_alias=None, reason="new", salt=0):
     fsutil.atomic_write_bytes(_d("tls", "key.pem"), key_pem, mode=0o600)
     fsutil.atomic_write_bytes(_d("tls", "cert.pem"), cert_pem, mode=0o644)
 
-    # Atlas's own Wi-Fi is named after the address the owner opens next.
-    password = hotspot_password or FACTORY_HOTSPOT_PASSWORD
+    # Atlas's own Wi-Fi is named after the address the owner opens next, and
+    # its password is the code in that name ("factory": the owner should
+    # set their own). An adopted legacy unit keeps the password it had.
+    password = hotspot_password or factory_password(short)
     _write_hotspot({"ssid": f"{host}.local", "password": password,
+                    "factory": not hotspot_password,
                     "shared": password == FACTORY_HOTSPOT_PASSWORD})
 
     _write_setup_code(_grouped())
@@ -326,6 +342,7 @@ def ensure(adopt_hotspot_password=None, legacy_alias=None):
         device = migrate_legacy_hostname(device)
         reconcile_hostname(device)
         migrate_factory_ssid(device)
+        migrate_factory_password(device)
         return device
     pw = adopt_hotspot_password
     if pw in DEFAULT_HOTSPOT_PASSWORDS:
@@ -372,6 +389,27 @@ def migrate_factory_ssid(device):
     return True
 
 
+def migrate_factory_password(device):
+    """Units made with the shared Wi-Fi password move to the code in their
+    name, when it is long enough (9-character codes, units made since
+    2026-11). Short-code units keep it. A password the owner chose in
+    Settings is kept by the app and unaffected. Returns True when changed."""
+    hotspot = fsutil.read_json(_d("hotspot.json"), None)
+    if not isinstance(hotspot, dict):
+        return False
+    changed = False
+    if "factory" not in hotspot:                     # written before the flag existed
+        hotspot["factory"] = bool(hotspot.get("shared"))
+        changed = True
+    wanted = factory_password(device.get("short"))
+    if hotspot.get("password") == FACTORY_HOTSPOT_PASSWORD and wanted != FACTORY_HOTSPOT_PASSWORD:
+        hotspot.update(password=wanted, factory=True, shared=False)
+        changed = True
+    if changed:
+        _write_hotspot(hotspot)
+    return changed
+
+
 def reissue_cert(device):
     """New certificate for the current names, same key (same pin)."""
     from cryptography.hazmat.primitives import serialization
@@ -402,14 +440,16 @@ def _write_hotspot(hotspot):
 
 
 def factory_hotspot():
-    """Give an existing unit the standard Wi-Fi password (units made before it
-    existed, or support). The Wi-Fi name, setup code and paired devices stay.
-    It takes effect the next time Atlas starts its hotspot; a password the
-    owner chose in Settings still wins. Returns the Wi-Fi name."""
+    """Give an existing unit its factory Wi-Fi password: the code in its name
+    (the shared password for a short code). For units made before it existed,
+    or support. The Wi-Fi name, setup code and paired devices stay. It takes
+    effect the next time Atlas starts its hotspot; a password the owner chose
+    in Settings still wins. Returns the Wi-Fi name."""
     hotspot = fsutil.read_json(_d("hotspot.json"), None) or {}
     if not hotspot.get("ssid"):
         raise RuntimeError("this unit has no identity yet (run: atlas-identity ensure)")
-    hotspot.update(password=FACTORY_HOTSPOT_PASSWORD, shared=True)
+    password = factory_password((load() or {}).get("short"))
+    hotspot.update(password=password, factory=True, shared=password == FACTORY_HOTSPOT_PASSWORD)
     _write_hotspot(hotspot)
     return hotspot["ssid"]
 
@@ -474,15 +514,16 @@ def new_setup_code():
 
 
 def label_text(payload=None):
-    """The label's facts for a person to read, each clearly named."""
+    """This unit's facts for support, each clearly named (`atlas-identity
+    label`). No label ships with Atlas; this is never printed for owners."""
     p = payload or label_payload()
     return "\n".join([
         f"{p['name']}   https://{p['hostname']}.local",
         "",
         "  Atlas's own Wi-Fi (not needed when Atlas is on your network):",
         f"      Name:      {p['hotspot_ssid']}",
-        f"      Password:  {p['hotspot_password']}" + ("   (the standard password on every Atlas)"
-                                                       if p.get("hotspot_shared") else ""),
+        "      Password:  " + ("the earlier standard password (a short-code unit)" if p.get("hotspot_shared")
+                               else "the code in the name, until the owner sets their own"),
         "",
         "  To connect the first phone: open the Atlas app, press the button on",
         "  Atlas and pick the colour its light shows.",
@@ -494,7 +535,8 @@ def label_text(payload=None):
 
 
 def label_payload(device=None):
-    """What the manufacturing label encodes (root only: reads the setup code)."""
+    """This unit's record: the facts and QR payloads (root only: reads the
+    setup code). The Wi-Fi password is in the QR payloads, never printed."""
     device = device or load()
     hotspot = fsutil.read_json(_d("hotspot.json"), {})
     with open(_d("setup_code"), encoding="utf-8") as f:

@@ -35,7 +35,7 @@ sudo ./install.sh --bundle DIR | --from-github [TAG]
 |---|---|
 | `--bundle DIR` | The signed release to install (a payload drive's `stage/release`). |
 | `--from-github [TAG]` | Download the newest published release, or `TAG` (e.g. `v1.4.0`), from GitHub Releases into `/atlas_data/release-download`, then install it as `--bundle` does. See below. |
-| `--labels DIR` | Where to write this unit's label files (PNG/SVG/TXT, mode 0600). |
+| `--labels DIR` | Where to write this unit's record for support (PNG/SVG/TXT, mode 0600; holds the setup code, never the Wi-Fi password). No label ships with Atlas. |
 | `--dev-key PUB` | Makes a developer unit: trusts this release key, keeps SSH, skips the retail lock-down. Never use it on a unit that ships. |
 | `--states` | Which states get routing data. `keep` means the ones already on the unit (any half-built one is finished). `all` is all 50 plus DC, which takes many hours and ~110 GB. `none` skips routing. A list such as `"MD VA"` or `md,va` names states. Unknown names are refused before any work starts. |
 | `--yes` | Never ask anything. Without `--states`, routing defaults to `keep`. |
@@ -95,7 +95,7 @@ makes a re-run safe.
 | 85 | places | Builds NPS trails, the address/POI index and the GeoNames fallback | Each database present |
 | 90 | models | Pulls every model Ray offers, in this unit's build, plus the embedder (with retries). Never restarts a running Ollama. | Every model present |
 | 95 | release | First install: `migrate.py apply --provision`. A newer release goes to the update engine (`tools/release/handoff.py`). The same or an older release triggers `atlas-engine reapply`. | — |
-| 96 | identity | Shows the unit name and writes the label | — |
+| 96 | identity | Shows the unit name and writes its record (with `--labels`) | — |
 | 97 | retail | Runs `finalize-retail.sh` | Developer unit |
 | 98 | verify | Runs `atlas-engine check`. Any `[FAIL]` fails the install. Then `status_button.py --probe`: the Atlas button missing is a failure on a retail unit and a warning on a developer unit; the button on pins 3/5 is always a failure. | — |
 | 99 | summary | Prints what is ready and what still needs doing. Exit status 1 if verify failed. | — |

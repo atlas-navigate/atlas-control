@@ -205,7 +205,7 @@ def set_autoconnect(name, enabled):
 def forget_all_wifi():
     """Factory reset: remove every saved client Wi-Fi network. The Hotspot
     profile goes too unless it is running (the app restarts a running one
-    with the label's credentials), so no old password is left behind."""
+    with its factory credentials), so no old password is left behind."""
     active = set(_run(["nmcli", "-t", "-f", "UUID", "con", "show", "--active"], timeout=20)["out"].split())
     removed = 0
     for c in _connections():
