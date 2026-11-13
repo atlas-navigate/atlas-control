@@ -145,16 +145,32 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(len(self.resets), 1)
         self.assertEqual(self.presses, [])
 
+    def test_red_then_green_once_the_reset_has_started_never_amber_again(self):
+        self.c.tick()
+        self.module.pressed = True
+        self.run_for(15.1)
+        self.module.writes.clear()
+        self.run_for(sb.RESET_RED_S - 0.2)                    # still held
+        self.assertEqual(set(self.module.writes) - {sb.RED}, set())
+        self.run_for(1.0)
+        self.assertEqual(self.module.rgb, sb.SUCCESS)         # green: the reset has started
+        self.assertNotIn(sb.AMBER, self.module.writes)
+        self.module.pressed = False
+        self.run_for(sb.RESET_STARTED_S + 0.5)
+        self.assertEqual(self.module.rgb, sb.OFF)              # back to what Atlas shows
+
     def test_refused_reset_flashes_red(self):
         self.reset_result = False
         self.c.tick()
         self.module.pressed = True
         self.run_for(15.1)
         self.module.pressed = False
+        self.run_for(sb.RESET_RED_S)
         self.module.writes.clear()
         self.run_for(1.0)
         self.assertIn(sb.RED, self.module.writes)
         self.assertIn(sb.OFF, self.module.writes)
+        self.assertNotIn(sb.SUCCESS, self.module.writes)      # never green when refused
 
     def test_light_shows_what_atlas_is_waiting_for(self):
         self.state = {"unclaimed": True}

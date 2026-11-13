@@ -3685,7 +3685,7 @@ def _button_reset_hotspot():
 
 
 def _button_reset():
-    """Held for 15 seconds. Blocks the button thread (the light stays red)
+    """Held for 15 seconds. Blocks the reset worker (the light is green)
     until the reset has finished; False when it was refused."""
     if os.path.exists(DEV_MODE_FILE) and os.environ.get(BUTTON_RESET_DRYRUN, "1") != "0":
         # Developer units: exercise the button and the light without erasing
@@ -3693,7 +3693,6 @@ def _button_reset():
         # Retail units have no dev-mode file: the hold always resets.
         logger.warning("Button factory reset: dry run (developer unit) - nothing erased")
         _on_hub(audit_log.record, "factory_reset", "Atlas button", dry_run=True).wait(30)
-        time.sleep(3)
         return True
     done = _on_hub(_run_factory_reset, "Atlas button", _button_reset_hotspot)
     done.wait(600)

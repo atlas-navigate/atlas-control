@@ -77,7 +77,8 @@ process (`status_button.py`) and polls it 20 times a second.
 | green blinks | paired |
 | blue blinking | a device is waiting for the primary user to allow it |
 | amber blinking | the button is being held: release before 15 s to cancel |
-| red (steady) | factory reset running |
+| red (steady, 2 s) | held for 15 s: the factory reset begins |
+| green (steady) | the factory reset has started and is running |
 | red blinks | a reset was refused (an update is installing) |
 | off | set up and idle |
 

@@ -86,6 +86,8 @@ SHORT_PRESS_MAX_S = 2.0
 HOLD_WARN_S = 3.0
 RESET_HOLD_S = 15.0
 SUCCESS_FLASH_S = 3.0
+RESET_RED_S = 2.0          # solid red when the hold reaches 15 s
+RESET_STARTED_S = 3.0      # then solid green: the reset has started (and while it runs)
 REFUSED_FLASH_S = 2.0
 FAILS_BEFORE_UNRESPONSIVE = 5
 RETRY_S = 5.0
@@ -205,6 +207,8 @@ class ButtonController:
         self._down_since = None
         self._hold_fired = False
         self._resetting = False
+        self._red_until = 0.0
+        self._started_until = 0.0
         self._success_until = 0.0
         self._refused_until = 0.0
         self._shown = None
@@ -307,8 +311,11 @@ class ButtonController:
                 logger.warning("Atlas button press: %s", exc)
 
     def _start_reset(self):
+        now = self._clock()
         self._resetting = True
-        self._show(RED, self._clock())
+        self._red_until = now + RESET_RED_S
+        self._started_until = self._red_until + RESET_STARTED_S
+        self._show(RED, now)
         logger.warning("Atlas button held for %d seconds: factory reset", RESET_HOLD_S)
 
         def _run():
@@ -318,18 +325,22 @@ class ButtonController:
                 logger.error("Button factory reset failed: %s", exc)
                 ok = False
             if ok is False:
-                self._refused_until = self._clock() + REFUSED_FLASH_S
+                self._started_until = 0.0
+                self._refused_until = max(self._clock(), self._red_until) + REFUSED_FLASH_S
             self._resetting = False
         threading.Thread(target=_run, name="atlas-button-reset", daemon=True).start()
 
     # ── the light ───────────────────────────────────────────────────────
     def _light(self, now):
         blink = int(now * 2) % 2 == 0          # 1 Hz
-        if self._resetting:
+        if now < self._red_until:
             return RED
         if now < self._refused_until:
             return RED if int(now * 4) % 2 == 0 else OFF
-        if self._down_since is not None and now - self._down_since >= HOLD_WARN_S:
+        if self._resetting or now < self._started_until:
+            return SUCCESS
+        # Still held after the reset fired: never back to "hold in progress".
+        if self._down_since is not None and not self._hold_fired and now - self._down_since >= HOLD_WARN_S:
             return AMBER if blink else OFF
         try:
             state = self._state_fn() or {}
