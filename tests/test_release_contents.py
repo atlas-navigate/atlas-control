@@ -135,3 +135,55 @@ class WorktreeExportTests(unittest.TestCase):
         self.assertNotEqual(sha, self.head)
         self.assertEqual(open(os.path.join(dest, "a.py")).read(), "changed")
         self.assertEqual(self.git("status", "--porcelain"), "M a.py")     # the checkout is untouched
+
+
+class SignReleaseTests(unittest.TestCase):
+    """A release can carry the developer and the production signature."""
+
+    def setUp(self):
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        self.tmp = tempfile.mkdtemp(prefix="atlas-sign-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        sys.path.insert(0, os.path.join(REPO, "system"))
+        from atlas_engine import verify
+        self.verify = verify
+        self.keys = {}
+        for name in ("dev", "prod"):
+            key = Ed25519PrivateKey.generate()
+            path = os.path.join(self.tmp, f"{name}.key")
+            with open(path, "wb") as f:
+                f.write(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                          serialization.NoEncryption()))
+            raw = key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+            self.keys[name] = (path, verify.key_id(raw), raw)
+        manifest = {"format": 1, "product": "atlas-control", "channel": "stable", "arch": "aarch64",
+                    "python": "3.12", "version": "0.1.1", "seq": 1800000000, "git_sha": "0" * 40,
+                    "min_engine": 1, "engine_version": 6, "notes": [],
+                    "bundle": {"name": "atlas-0.1.1-aarch64.tar.xz", "url": "", "size": 1, "sha256": "0" * 64,
+                               "chunk_size": 8388608, "chunks": ["0" * 64], "unpacked_size": 2},
+                    "db": {"schema_target": 1, "compat_floor": 0}}
+        self.manifest = os.path.join(self.tmp, "atlas-release.json")
+        with open(self.manifest, "w") as f:
+            json.dump(manifest, f, indent=2)
+
+    def sign(self, name, *extra):
+        r = subprocess.run([sys.executable, os.path.join(REPO, "tools", "release", "sign_release.py"),
+                            self.manifest, "--key", self.keys[name][0], "--yes", *extra],
+                           capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        with open(self.manifest + ".sig") as f:
+            return [e["key_id"] for e in json.load(f)["signatures"]]
+
+    def trusted_by(self, name):
+        mbytes = open(self.manifest, "rb").read()
+        sig = open(self.manifest + ".sig", "rb").read()
+        return self.verify.check_signature(mbytes, sig, {self.keys[name][1]: self.keys[name][2]})
+
+    def test_a_second_key_adds_its_signature(self):
+        self.assertEqual(self.sign("dev"), [self.keys["dev"][1]])
+        self.assertEqual(self.sign("prod"), [self.keys["dev"][1], self.keys["prod"][1]])
+        for name in ("dev", "prod"):              # a dev unit and a retail unit both accept it
+            self.assertEqual(self.trusted_by(name), self.keys[name][1])
+        self.assertEqual(self.sign("prod"), [self.keys["dev"][1], self.keys["prod"][1]])   # re-signing replaces
+        self.assertEqual(self.sign("prod", "--fresh"), [self.keys["prod"][1]])

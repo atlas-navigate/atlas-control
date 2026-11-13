@@ -42,9 +42,11 @@ signing for everyone:
    ```
    Commit and push.
 3. Ship that keyring once to every existing unit: build a release from that
-   commit, sign it with the developer key, and install it on each developer
-   unit (`tools/dev/deploy`). The engine adopts the newer keyring when the
-   release commits.
+   commit and sign it with **both** keys, the developer key first, then
+   `sign_release.py … --key ~/atlas-keys/primary.key` on your own machine
+   (it adds its signature next to the developer one). Developer units install
+   it through the developer key, retail units and new installs through the
+   primary key, and each adopts the newer keyring when the release commits.
 4. From then on, sign every release with the primary key and publish it;
    all units (and new installs, whose kit carries the keyring) accept it.
 
@@ -63,6 +65,10 @@ wheel from `requirements.lock`, and `release.json`. The tar is deterministic.
 devices refuse downgrades.
 
 ## Sign, verify, publish
+
+A `.sig` can hold several signatures: signing with a second key adds it
+(`--fresh` starts over), and a unit accepts the release if any of them is
+from a key in its keyring.
 
 ```bash
 tools/release/sign_release.py dist/1.2.0/atlas-release.json --key ~/atlas-keys/primary.key
@@ -85,7 +91,8 @@ A release that changes root-owned code (`system/atlas_engine/`: identity,
 system files, the engine itself) reaches existing units only if
 `ENGINE_VERSION` in `system/atlas_engine/__init__.py` goes up; the new engine
 is installed first and then installs the rest. (Engine 5: the `.local` Wi-Fi
-name and the hotspot's DNS name.)
+name and the hotspot's DNS name. Engine 6: the factory reset forgets
+Bluetooth devices; `atlas-engine check` reports the Atlas button.)
 
 ## Developer releases
 
