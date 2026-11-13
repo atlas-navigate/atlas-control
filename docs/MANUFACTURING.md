@@ -55,8 +55,10 @@ production keys in the release's own keyring. Capture's final checks run the
 same check that unit's `install.sh` starts with, and fail on a release signed
 only with a developer key; such a drive would be refused on the line, unit
 after unit. A drive for developer units takes `--dev` and its own label
-(`--drive atlas-backup --dev`), and units provisioned from it need
-`atlas-provision.sh --dev-key PUB`.
+(`--drive atlas-ctrl-dev --dev`), and units provisioned from it need
+`atlas-provision.sh --drive atlas-ctrl-dev --dev-key PUB`; copy the developer
+public key onto the drive for that (see the README's "A developer golden
+drive").
 
 **Never on the drive**: the golden unit's database (mesh history,
 conversations, paired devices, security log), Wi-Fi hints, hotspot password,
@@ -240,8 +242,11 @@ a minute, boot, and check that `sudo atlas-engine clock status` shows
 ## Developer units
 
 `atlas-provision.sh --dev-key dev-release.pub` makes a developer unit: it
-trusts that key (so `tools/dev/deploy` works), keeps SSH, and skips the
-retail lock-down. Never ship one.
+trusts that key (so `tools/dev/deploy` works), keeps SSH and the desktop, and
+skips the retail lock-down. Everything else is as on a production unit,
+including the factory reset (Settings, or the button held for 15 seconds),
+which really erases the unit. The README's "Developer and production units"
+lists every difference. Never ship one.
 
 ## Existing units
 

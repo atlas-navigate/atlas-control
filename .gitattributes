@@ -3,5 +3,7 @@ mobile/ export-ignore
 tests/ export-ignore
 dist/ export-ignore
 heltec-v4-pinmap.webp export-ignore
+MANUAL.md export-ignore
+docs/manual/ export-ignore
 .codex export-ignore
 .gitattributes export-ignore
