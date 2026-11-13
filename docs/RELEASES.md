@@ -25,10 +25,11 @@ with `/etc/atlas/dev-mode`.
 
 ### Adding the production key (before the first retail release)
 
-The keyring in this repository is still empty, so today only developer units
-(which trust the developer key) can install a release; retail units and
-`install.sh --from-github` on a retail unit refuse every release. To start
-signing for everyone:
+Done 2026-11-12 (keyring version 2): primary `348d8b861526da1d` (active) and
+backup `c09714f115923287` (kept offline). Atlas 0.1.2 is the first release
+that carries them. Releases before it are signed with the developer key only,
+so retail units refuse them. The steps, for the record and for a future key
+change:
 
 1. On your own offline machine (not this Jetson): run the two `keygen.py`
    commands above.
@@ -92,7 +93,8 @@ system files, the engine itself) reaches existing units only if
 `ENGINE_VERSION` in `system/atlas_engine/__init__.py` goes up; the new engine
 is installed first and then installs the rest. (Engine 5: the `.local` Wi-Fi
 name and the hotspot's DNS name. Engine 6: the factory reset forgets
-Bluetooth devices; `atlas-engine check` reports the Atlas button.)
+Bluetooth devices; `atlas-engine check` reports the Atlas button. Engine 7:
+the hotspot's factory password is the code in its Wi-Fi name.)
 
 ## Developer releases
 

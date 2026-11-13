@@ -1,6 +1,9 @@
 {
-  "keyring_version": 1,
-  "comment": "Release-signing public keys trusted by production Atlas units. Generate the primary and escrowed backup keys offline with tools/release/keygen.py and add their public halves here before the first production release. Empty until then: only developer keys on dev-mode units are trusted.",
-  "keys": [],
+  "keyring_version": 2,
+  "comment": "Release-signing public keys trusted by every Atlas unit. Generated offline by the owner with tools/release/keygen.py on 2026-11-12: primary (348d8b861526da1d) signs releases; backup (c09714f115923287) is kept offline, separately, to replace a lost or compromised primary. Private keys never enter this repository or any Atlas.",
+  "keys": [
+    {"pub": "OJ2fhbPZzZHN/TUuIIZXdFE1RpUfQdckhv8ieHqV0U0=", "status": "active"},
+    {"pub": "ZrK/Zn9fUVl10X2QgPG0s+vrYSEgKSzy6mWwgiKozEU=", "status": "backup"}
+  ],
   "revoked": []
 }
