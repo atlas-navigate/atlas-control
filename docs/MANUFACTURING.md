@@ -6,19 +6,30 @@ installed, and nothing another unit could use against it.
 
 ## Once per release: the payload drive
 
-On the golden unit (a developer unit with all datasets built), with the
-`atlas-backup` drive attached:
+The production payload drive is an ext4 drive labelled `atlas-control-prod`,
+500 GB or larger: the payload is about 155 GB, and capture wants 200 GB free
+every time it runs. Prepare a new drive once. This erases it, so check the
+device name with `lsblk` first:
 
 ```bash
-sudo install -d -m755 /opt/atlas-imaging
-sudo install -m755 tools/manufacturing/*.sh tools/manufacturing/make_label.py /opt/atlas-imaging/
-sudo install -m644 docs/MANUFACTURING.md /opt/atlas-imaging/
+sudo wipefs -a /dev/sdX
+sudo parted -s /dev/sdX mklabel gpt mkpart atlas-control-prod ext4 0% 100%
+sudo mkfs.ext4 -L atlas-control-prod /dev/sdX1
+```
 
-sudo /opt/atlas-imaging/atlas-capture.sh --release dist/1.2.0
+On the golden unit (a developer unit with all datasets built, updated to the
+release being captured), with the drive attached, fetch that release from
+GitHub Releases and capture:
+
+```bash
+cd /atlas_data/atlas-control
+python3 -I tools/release/fetch_release.py ~/atlas-release/1.2.0 --tag v1.2.0
+sudo tools/manufacturing/atlas-capture.sh --release ~/atlas-release/1.2.0 --drive atlas-control-prod
 ```
 
 `--release` is a signed release directory (see [RELEASES.md](RELEASES.md)).
-Capture refuses a release this unit's update engine does not trust
+`--drive` is the drive's label; `atlas-control-prod` is the default. Capture
+refuses a release this unit's update engine does not trust
 (`atlas-engine verify`), then writes to the drive:
 
 | Path | Contents |
@@ -29,8 +40,16 @@ Capture refuses a release this unit's update engine does not trust
 | `stage/ollama-lib/` | its GPU runners (`/usr/local/lib/ollama`, ~2 GB) — without them Ray runs on the CPU |
 | `stage/release/` | the signed release every new unit installs |
 | `stage/kit/` | that same release unpacked (minus wheels): `install.sh`, tools, dataset builders |
-| `stage/atlas-imaging/` | these scripts |
+| `stage/atlas-imaging/` | `atlas-provision.sh` and the other imaging scripts, from that same release |
 | `MANIFEST.txt` | L4T version, release, sizes, date |
+
+**Production or developer drive**: a new retail unit trusts only the
+production keys in the release's own keyring. Capture's final checks run the
+same check that unit's `install.sh` starts with, and fail on a release signed
+only with a developer key; such a drive would be refused on the line, unit
+after unit. A drive for developer units takes `--dev` and its own label
+(`--drive atlas-backup --dev`), and units provisioned from it need
+`atlas-provision.sh --dev-key PUB`.
 
 **Never on the drive**: the golden unit's database (mesh history,
 conversations, paired devices, security log), Wi-Fi hints, hotspot password,
@@ -93,8 +112,11 @@ on the button, so the line can confirm the LED and its colours.
 2. Attach the payload drive and run:
 
    ```bash
-   sudo /media/$USER/atlas-backup/stage/atlas-imaging/atlas-provision.sh
+   sudo /media/$USER/atlas-control-prod/stage/atlas-imaging/atlas-provision.sh
    ```
+
+   It finds the `atlas-control-prod` drive by its label (`--drive LABEL` for
+   another drive).
 
    It copies the payload (45–60 min), installs the staged binaries and runs
    the kit's `install.sh --bundle stage/release --yes --states keep`

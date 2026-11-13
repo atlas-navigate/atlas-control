@@ -6,36 +6,45 @@
 # ║  (L4T R39.2) and you have completed OOBE creating the 'admin' user.      ║
 # ║                                                                          ║
 # ║  Usage:  sudo ./atlas-provision.sh [--yes] [--no-install] [--dev-key PUB]║
+# ║                                    [--drive LABEL]                       ║
 # ║            --yes         skip the confirmation prompt                    ║
 # ║            --no-install  copy the payload but don't run install.sh       ║
 # ║            --dev-key PUB make a developer unit (trusts that key, keeps   ║
 # ║                          SSH) — never for units that are sold            ║
+# ║            --drive LABEL the payload drive's label (default: the         ║
+# ║                          production drive, atlas-control-prod)           ║
 # ║                                                                          ║
 # ║  What it does:                                                           ║
 # ║    1. Copy payload/ -> /atlas_data   (~150 GB, no downloads)             ║
 # ║    2. Install the staged ollama + OSRM binaries                          ║
 # ║    3. Run the kit's install.sh with the staged signed release: system    ║
 # ║       setup, the Atlas software through its update engine, this unit's   ║
-# ║       own identity and label, and retail lock-down                        ║
+# ║       own identity and label, and retail lock-down                       ║
 # ╚══════════════════════════════════════════════════════════════════════════╝
 set -Eeuo pipefail
 
-BACKUP_LABEL="atlas-backup"
+# A test sandbox (tests/test_manufacturing.py) sets ATLAS_ROOT and puts stub
+# system commands first on PATH, as for install.sh. Unset on a real unit.
+R="${ATLAS_ROOT:-}"
+
+PROD_LABEL="atlas-control-prod"   # the production payload drive
+BACKUP_LABEL="atlas-backup"       # the golden unit's backup drive (older payloads)
 BACKUP_UUID="9b6fe19b-34c1-434f-8e6e-c87cb1f370c4"
-BACKUP_MNT="/mnt/atlas-backup"
-ATLAS_DATA="/atlas_data"
+BACKUP_MNT="$R/mnt/atlas-payload"
+ATLAS_DATA="$R/atlas_data"
 NEED_GB=200          # payload (~150) + 32 GB swapfile it will create + headroom
 
-ASSUME_YES=0; RUN_INSTALL=1; DEV_KEY=""
+ASSUME_YES=0; RUN_INSTALL=1; DEV_KEY=""; DRIVE_LABEL=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --yes|-y)     ASSUME_YES=1; shift ;;
         --no-install) RUN_INSTALL=0; shift ;;
         --dev-key)    DEV_KEY="${2:-}"; shift 2 ;;
+        --drive)      DRIVE_LABEL="${2:-}"; shift 2 ;;
         *) echo "Unknown option: $1" >&2; exit 2 ;;
     esac
 done
-LABELS="/root/atlas-labels"
+LABELS="$R/root/atlas-labels"
 
 RED=$'\033[0;31m'; GRN=$'\033[0;32m'; YLW=$'\033[0;33m'; BLU=$'\033[0;34m'; BLD=$'\033[1m'; NC=$'\033[0m'
 log()  { echo -e "${GRN}[✓]${NC} $*"; }
@@ -44,12 +53,12 @@ warn() { echo -e "${YLW}[!]${NC} $*"; }
 die()  { echo -e "${RED}[✗]${NC} $*" >&2; exit 1; }
 section() { echo; echo -e "${BLD}── $* ${NC}"; }
 
-[[ $EUID -eq 0 ]] || die "Must run as root:  sudo $0"
+[[ $EUID -eq 0 || -n "$R" ]] || die "Must run as root:  sudo $0"
 
 # ════════════════════════════════════════════════════════════════════════════
 section "Preflight"
 # ════════════════════════════════════════════════════════════════════════════
-[[ -f /etc/nv_tegra_release ]] || die "Not a Jetson (no /etc/nv_tegra_release)."
+[[ -f "$R/etc/nv_tegra_release" ]] || die "Not a Jetson (no /etc/nv_tegra_release)."
 
 TGT_L4T=$(dpkg-query -W -f='${Version}' nvidia-l4t-core 2>/dev/null || echo "")
 [[ -n "$TGT_L4T" ]] || warn "nvidia-l4t-core not installed — is this box fully flashed?"
@@ -67,13 +76,19 @@ log "Target user: $TGT_USER (uid $(id -u "$TGT_USER"))"
 
 # Mount the payload drive
 SRC_DEV=""
-for cand in "/dev/disk/by-uuid/$BACKUP_UUID" "/dev/disk/by-label/$BACKUP_LABEL"; do
+if [[ -n "$DRIVE_LABEL" ]]; then
+    CANDIDATES=("$R/dev/disk/by-label/$DRIVE_LABEL")
+else
+    CANDIDATES=("$R/dev/disk/by-label/$PROD_LABEL" "$R/dev/disk/by-uuid/$BACKUP_UUID" "$R/dev/disk/by-label/$BACKUP_LABEL")
+fi
+for cand in "${CANDIDATES[@]}"; do
     [[ -e "$cand" ]] && { SRC_DEV="$cand"; break; }
 done
-[[ -n "$SRC_DEV" ]] || die "Payload drive not found (looked for UUID $BACKUP_UUID and label '$BACKUP_LABEL').
+[[ -n "$SRC_DEV" ]] || die "Payload drive not found (looked for ${CANDIDATES[*]}).
     Plug it in and re-run."
-# A desktop session may have auto-mounted it at /media/$USER/atlas-backup; use
-# that rather than mounting the same filesystem twice.
+info "Payload drive: $SRC_DEV"
+# A desktop session may have auto-mounted it at /media/$USER/<label>; use that
+# rather than mounting the same filesystem twice.
 EXISTING_MNT=$(findmnt -n -o TARGET --source "$(readlink -f "$SRC_DEV")" | head -1)
 if [[ -n "$EXISTING_MNT" ]]; then
     BACKUP_MNT="$EXISTING_MNT"
@@ -103,7 +118,7 @@ if [[ -f "$BACKUP_MNT/MANIFEST.txt" ]]; then
 fi
 
 # Space on the target root
-AVAIL_GB=$(df -BG --output=avail / | tail -1 | tr -dc '0-9')
+AVAIL_GB=$(df -BG --output=avail "${R:-/}" | tail -1 | tr -dc '0-9')
 (( AVAIL_GB >= NEED_GB )) || die "Only ${AVAIL_GB} GB free on / (need ~${NEED_GB} GB for the payload plus its 32 GB swapfile)."
 log "Free space: ${AVAIL_GB} GB"
 
@@ -138,12 +153,12 @@ section "Installing staged binaries"
 # ollama has no prebuilt hatch in install.sh — it checks `command -v ollama`
 # and otherwise curls the installer, so put it on PATH first.
 if [[ -x "$STAGE/ollama" ]]; then
-    install -m755 "$STAGE/ollama" /usr/local/bin/ollama
+    install -D -m755 "$STAGE/ollama" "$R/usr/local/bin/ollama"
     if [[ -d "$STAGE/ollama-lib" ]]; then
         # The GPU runners: without them Ollama runs Ray on the CPU.
-        mkdir -p /usr/local/lib/ollama
-        rsync -a --delete "$STAGE/ollama-lib/" /usr/local/lib/ollama/
-        log "ollama installed with its GPU runners: $(/usr/local/bin/ollama --version 2>/dev/null | head -1)"
+        mkdir -p "$R/usr/local/lib/ollama"
+        rsync -a --delete "$STAGE/ollama-lib/" "$R/usr/local/lib/ollama/"
+        log "ollama installed with its GPU runners: $("$R/usr/local/bin/ollama" --version 2>/dev/null | head -1)"
     else
         warn "$STAGE/ollama-lib missing (drive captured by an older atlas-capture.sh) — install.sh reinstalls Ollama online."
     fi
@@ -159,9 +174,9 @@ else
     warn "No prebuilt OSRM found — install.sh will build from source (20-40 min)."
 fi
 
-install -d -m755 /opt/atlas-imaging
+install -d -m755 "$R/opt/atlas-imaging"
 if [[ -d "$STAGE/atlas-imaging" ]]; then
-    install -m755 "$STAGE"/atlas-imaging/*.sh /opt/atlas-imaging/ 2>/dev/null || true
+    install -m755 "$STAGE"/atlas-imaging/*.sh "$R/opt/atlas-imaging/" 2>/dev/null || true
 fi
 
 # ════════════════════════════════════════════════════════════════════════════

@@ -2,11 +2,15 @@
 # ╔══════════════════════════════════════════════════════════════════════════╗
 # ║  ATLAS CAPTURE — build a deployable data payload from this golden unit   ║
 # ║                                                                          ║
-# ║  Usage:  sudo /opt/atlas-imaging/atlas-capture.sh --release DIR           ║
-# ║            DIR = a signed Atlas release (atlas-release.json, .sig and    ║
-# ║                  the bundle), checked against this unit's trusted keys   ║
+# ║  Usage:  sudo tools/manufacturing/atlas-capture.sh --release DIR         ║
+# ║                [--drive LABEL] [--dev]                                   ║
+# ║            DIR   = a signed Atlas release (atlas-release.json, .sig and  ║
+# ║                    the bundle), checked against this unit's trusted keys ║
+# ║            LABEL = the drive's filesystem label (atlas-control-prod)     ║
+# ║            --dev = a drive for developer units only: its release need    ║
+# ║                    not be signed by a production key                     ║
 # ║                                                                          ║
-# ║  Produces on the backup drive:                                           ║
+# ║  Produces on the drive:                                                  ║
 # ║    payload/            ~150 GB of /atlas_data, device secrets stripped   ║
 # ║    payload/osrm-native-bin/   OSRM binaries (install.sh prebuilt hatch)  ║
 # ║    stage/ollama        the ollama binary (lives outside /atlas_data)     ║
@@ -14,15 +18,19 @@
 # ║    stage/release/      the signed Atlas release every new unit installs  ║
 # ║    stage/kit/          that same release unpacked (minus wheels): its    ║
 # ║                        install.sh, tools and dataset builders            ║
+# ║    stage/atlas-imaging/  the release's own atlas-provision.sh            ║
 # ║    MANIFEST.txt        provenance: L4T ver, release, sizes, date         ║
 # ║                                                                          ║
 # ║  Re-running is cheap: rsync only transfers deltas.                       ║
 # ╚══════════════════════════════════════════════════════════════════════════╝
 set -Eeuo pipefail
 
-BACKUP_UUID="9b6fe19b-34c1-434f-8e6e-c87cb1f370c4"
-BACKUP_MNT="/mnt/atlas-backup"   # fallback only; an existing mount wins
-ATLAS_DATA="/atlas_data"
+# A test sandbox (tests/test_manufacturing.py) sets ATLAS_ROOT and puts stub
+# system commands first on PATH, as for install.sh. Unset on a real unit.
+R="${ATLAS_ROOT:-}"
+
+DRIVE_LABEL="atlas-control-prod"   # the production payload drive
+ATLAS_DATA="$R/atlas_data"
 APP_DIR="$ATLAS_DATA/atlas-control"
 MIN_FREE_GB=200
 # PAYLOAD and STAGE are derived after the mountpoint is resolved below.
@@ -34,19 +42,23 @@ warn() { echo -e "${YLW}[!]${NC} $*"; }
 die()  { echo -e "${RED}[✗]${NC} $*" >&2; exit 1; }
 section() { echo; echo -e "${BLD}── $* ${NC}"; }
 
-[[ $EUID -eq 0 ]] || die "Must run as root:  sudo $0"
+[[ $EUID -eq 0 || -n "$R" ]] || die "Must run as root:  sudo $0"
 
-RELEASE=""
+RELEASE=""; DEV_DRIVE=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --release) RELEASE="${2:-}"; shift 2 ;;
-        *) die "Unknown option: $1  (usage: $0 --release DIR)" ;;
+        --drive)   DRIVE_LABEL="${2:-}"; shift 2 ;;
+        --dev)     DEV_DRIVE=1; shift ;;
+        *) die "Unknown option: $1  (usage: $0 --release DIR [--drive LABEL] [--dev])" ;;
     esac
 done
+[[ "$DRIVE_LABEL" =~ ^[A-Za-z0-9._-]+$ ]] || die "--drive needs the drive's filesystem label, e.g. atlas-control-prod"
+BACKUP_MNT="$R/mnt/$DRIVE_LABEL"   # fallback only; an existing mount wins
 [[ -n "$RELEASE" && -f "$RELEASE/atlas-release.json" ]] \
     || die "Give the signed Atlas release to ship:  $0 --release DIR  (DIR holds atlas-release.json)"
 # Only a release this unit's update engine trusts goes onto the drive.
-RELEASE_INFO=$(/usr/local/lib/atlas/bin/atlas-engine verify "$RELEASE") \
+RELEASE_INFO=$("$R"/usr/local/lib/atlas/bin/atlas-engine verify "$RELEASE") \
     || die "$RELEASE is not signed by a key this unit trusts — refusing to stage it."
 RELEASE_VERSION=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])' <<<"$RELEASE_INFO")
 RELEASE_BUNDLE=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["bundle"])' <<<"$RELEASE_INFO")
@@ -71,13 +83,13 @@ section "Preflight"
 # ════════════════════════════════════════════════════════════════════════════
 [[ -d "$APP_DIR" ]] || die "$APP_DIR not found — is this the golden Atlas unit?"
 
-# The GNOME desktop auto-mounts this drive at /media/$USER/atlas-backup. Honour
+# The GNOME desktop auto-mounts this drive at /media/$USER/<label>. Honour
 # whatever mountpoint it already has rather than mounting the same filesystem a
-# second time at /mnt/atlas-backup — that would work, but would write the
-# payload somewhere the operator isn't looking.
-BACKUP_DEV="/dev/disk/by-uuid/$BACKUP_UUID"
-[[ -e "$BACKUP_DEV" ]] || die "Backup drive (UUID $BACKUP_UUID) not attached.
-    Plug in the 2 TB 'atlas-backup' drive and re-run."
+# second time at /mnt/<label> — that would work, but would write the payload
+# somewhere the operator isn't looking.
+BACKUP_DEV="$R/dev/disk/by-label/$DRIVE_LABEL"
+[[ -e "$BACKUP_DEV" ]] || die "No drive labelled '$DRIVE_LABEL' is attached.
+    Plug it in and re-run (a new drive: sudo mkfs.ext4 -L $DRIVE_LABEL /dev/sdX1 — see MANUFACTURING.md)."
 EXISTING_MNT=$(findmnt -n -o TARGET --source "$(readlink -f "$BACKUP_DEV")" | head -1)
 if [[ -n "$EXISTING_MNT" ]]; then
     BACKUP_MNT="$EXISTING_MNT"
@@ -111,7 +123,7 @@ done
 command -v ollama >/dev/null || die "ollama not on PATH — cannot stage the ollama binary."
 log "OSRM toolchain and ollama located"
 
-mkdir -p "$PAYLOAD/osrm-native-bin" "$STAGE"
+mkdir -p "$PAYLOAD" "$STAGE"
 
 # ════════════════════════════════════════════════════════════════════════════
 section "Quiescing services"
@@ -169,16 +181,18 @@ log "Payload synced"
 # ════════════════════════════════════════════════════════════════════════════
 section "Staging binaries that live outside /atlas_data"
 # ════════════════════════════════════════════════════════════════════════════
-# Done AFTER the rsync so --delete can never remove them.
-install -m755 /usr/local/bin/osrm-* "$PAYLOAD/osrm-native-bin/"
+# Done AFTER the rsync so --delete can never remove them (--delete-excluded
+# removes the excluded osrm-native-bin/ itself, so it is created here).
+mkdir -p "$PAYLOAD/osrm-native-bin"
+install -m755 "$R"/usr/local/bin/osrm-* "$PAYLOAD/osrm-native-bin/"
 log "OSRM binaries staged: $(ls "$PAYLOAD/osrm-native-bin/" | tr '\n' ' ')"
 
 install -m755 "$(command -v ollama)" "$STAGE/ollama"
 log "ollama staged ($("$STAGE/ollama" --version 2>/dev/null | head -1))"
 # Without its runners the binary falls back to the CPU and Ray crawls.
-[[ -d /usr/local/lib/ollama ]] \
+[[ -d "$R/usr/local/lib/ollama" ]] \
     || die "/usr/local/lib/ollama is missing — this unit's Ollama has no GPU runners. Reinstall Ollama, then capture."
-rsync -a --delete /usr/local/lib/ollama/ "$STAGE/ollama-lib/"
+rsync -a --delete "$R/usr/local/lib/ollama/" "$STAGE/ollama-lib/"
 log "ollama GPU runners staged ($(du -sh "$STAGE/ollama-lib" | cut -f1))"
 
 # The signed release, and the installer + tools from inside that same bundle
@@ -189,14 +203,14 @@ mkdir -p "$STAGE/kit"
 tar -xJf "$STAGE/release/$RELEASE_BUNDLE" -C "$STAGE/kit" --exclude='wheels' --exclude='wheels/*'
 log "Release $RELEASE_VERSION and its installer kit staged"
 
-# Ship the imaging scripts and runbook so the drive is self-contained and any
-# unit can seed the next one without needing this repo.
-if [[ -d /opt/atlas-imaging ]]; then
-    mkdir -p "$STAGE/atlas-imaging"
-    install -m755 /opt/atlas-imaging/*.sh "$STAGE/atlas-imaging/" 2>/dev/null || true
-    install -m644 /opt/atlas-imaging/MANUFACTURING.md "$BACKUP_MNT/MANUFACTURING.md" 2>/dev/null || true
-    log "Imaging scripts + runbook staged"
-fi
+# The imaging scripts and runbook from that same release, so the drive is
+# self-contained and its atlas-provision.sh always matches the release it
+# installs (never a stale copy left on this unit).
+rm -rf "$STAGE/atlas-imaging"
+mkdir -p "$STAGE/atlas-imaging"
+install -m755 "$STAGE"/kit/tools/manufacturing/*.sh "$STAGE/atlas-imaging/"
+install -m644 "$STAGE/kit/docs/MANUFACTURING.md" "$BACKUP_MNT/MANUFACTURING.md"
+log "Imaging scripts + runbook staged from release $RELEASE_VERSION"
 
 # ════════════════════════════════════════════════════════════════════════════
 section "Manifest"
@@ -214,12 +228,13 @@ Kernel             : $(uname -r)
 Board              : $(tr -d '\0' < /proc/device-tree/model 2>/dev/null)
 TNSPEC             : $(grep '^TNSPEC' /etc/nv_boot_control.conf 2>/dev/null | cut -d' ' -f2-)
 Atlas release      : $RELEASE_VERSION
+Drive              : $DRIVE_LABEL ($( (( DEV_DRIVE )) && echo "developer units only" || echo "production"))
 Payload size       : $PAYLOAD_H
 OSRM states built  : $PROCESSED  (expect 102 = 51 states x car+hiking)
 OSRM version       : $(osrm-routed --version 2>/dev/null | head -1)
 ollama version     : $(ollama --version 2>/dev/null | head -1)
 
-Deploy with: sudo stage/atlas-imaging/atlas-provision.sh   (see MANUFACTURING.md)
+Deploy with: sudo stage/atlas-imaging/atlas-provision.sh$( (( DEV_DRIVE )) && echo " --dev-key PUB")   (see MANUFACTURING.md)
 EOF
 cat "$BACKUP_MNT/MANIFEST.txt"
 
@@ -244,6 +259,19 @@ check "mesh history stripped"      '[[ ! -e "$PAYLOAD/atlas-control/data/meshtas
 check "hotspot password stripped"  '[[ ! -e "$PAYLOAD/atlas-control/data/hotspot_config.json" && ! -e "$PAYLOAD/atlas-control/hotspot_config.json" ]]'
 check "database copies stripped"   '[[ ! -e "$PAYLOAD/atlas-control/data/backups" ]]'
 check "release staged + kit"       '[[ -f "$STAGE/release/atlas-release.json" && -f "$STAGE/kit/install.sh" && -d "$STAGE/kit/system/atlas_engine" ]]'
+check "provision script staged"    '[[ -x "$STAGE/atlas-imaging/atlas-provision.sh" ]]'
+# A new retail unit trusts only the keys in the release's own keyring: run the
+# check its install.sh starts with. A dev-signed release passes this unit's
+# verify above but would be refused on the line, unit after unit.
+if (( DEV_DRIVE )); then
+    info "Developer drive: provision units from it with atlas-provision.sh --dev-key PUB"
+elif RETAIL=$(python3 -I "$STAGE/kit/tools/migrate/migrate.py" check --bundle "$STAGE/release" 2>&1); then
+    log "retail units trust release $RELEASE_VERSION"
+else
+    warn "retail units refuse release $RELEASE_VERSION (${RETAIL##*$'\n'}) — FAILED"
+    warn "    sign it with the production key (docs/RELEASES.md); a drive for developer units takes --dev"
+    FAIL=1
+fi
 check "ollama GPU runners staged"  '[[ -d "$STAGE/ollama-lib" && -n "$(ls -A "$STAGE/ollama-lib")" ]]'
 # Every model the release offers (in this hardware's build) must be on the
 # drive: a unit sold off-grid can never download one.
