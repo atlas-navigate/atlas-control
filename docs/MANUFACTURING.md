@@ -8,16 +8,21 @@ that name is the password until the owner sets their own.
 
 ## Once per release: the payload drive
 
-The production payload drive is an ext4 drive labelled `atlas-control-prod`,
+The production payload drive is an ext4 drive labelled `atlas-ctrl-prod`,
 500 GB or larger: the payload is about 155 GB, and capture wants 200 GB free
 every time it runs. Prepare a new drive once. This erases it, so check the
 device name with `lsblk` first:
 
 ```bash
 sudo wipefs -a /dev/sdX
-sudo parted -s /dev/sdX mklabel gpt mkpart atlas-control-prod ext4 0% 100%
-sudo mkfs.ext4 -L atlas-control-prod /dev/sdX1
+sudo parted -s /dev/sdX mklabel gpt mkpart atlas-ctrl-prod ext4 0% 100%
+sudo mkfs.ext4 -L atlas-ctrl-prod /dev/sdX1
 ```
+
+A drive label holds at most 16 characters (`mkfs.ext4` cuts a longer one
+without saying so), so the scripts refuse a longer `--drive`. To rename a
+drive that already has data on it, without erasing it:
+`sudo e2label /dev/sdX1 atlas-ctrl-prod`.
 
 On the golden unit (a developer unit with all datasets built, updated to the
 release being captured), with the drive attached, fetch that release from
@@ -26,11 +31,11 @@ GitHub Releases and capture:
 ```bash
 cd /atlas_data/atlas-control
 python3 -I tools/release/fetch_release.py ~/atlas-release/1.2.0 --tag v1.2.0
-sudo tools/manufacturing/atlas-capture.sh --release ~/atlas-release/1.2.0 --drive atlas-control-prod
+sudo tools/manufacturing/atlas-capture.sh --release ~/atlas-release/1.2.0 --drive atlas-ctrl-prod
 ```
 
 `--release` is a signed release directory (see [RELEASES.md](RELEASES.md)).
-`--drive` is the drive's label; `atlas-control-prod` is the default. Capture
+`--drive` is the drive's label; `atlas-ctrl-prod` is the default. Capture
 refuses a release this unit's update engine does not trust
 (`atlas-engine verify`), then writes to the drive:
 
@@ -114,10 +119,10 @@ on the button, so the line can confirm the LED and its colours.
 2. Attach the payload drive and run:
 
    ```bash
-   sudo /media/$USER/atlas-control-prod/stage/atlas-imaging/atlas-provision.sh
+   sudo /media/$USER/atlas-ctrl-prod/stage/atlas-imaging/atlas-provision.sh
    ```
 
-   It finds the `atlas-control-prod` drive by its label (`--drive LABEL` for
+   It finds the `atlas-ctrl-prod` drive by its label (`--drive LABEL` for
    another drive).
 
    It copies the payload (45–60 min), installs the staged binaries and runs

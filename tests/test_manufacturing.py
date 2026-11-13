@@ -88,9 +88,9 @@ while [[ $# -gt 0 ]]; do
         *) pos="$1"; shift ;;
     esac
 done
-if [[ -n "$src" ]]; then
-    [[ "$src" == "$FAKE_DRIVE_DEV" ]] && echo "$FAKE_DRIVE_MNT"
-    exit 0
+if [[ -n "$src" ]]; then                    # like findmnt: exit 1 when nothing is mounted from it
+    [[ -z "${FAKE_DRIVE_UNMOUNTED:-}" && "$src" == "$FAKE_DRIVE_DEV" ]] && { echo "$FAKE_DRIVE_MNT"; exit 0; }
+    exit 1
 fi
 case "${tgt:-$pos}" in "$FAKE_DRIVE_MNT"*) echo "$FAKE_DRIVE_DEV" ;; *) echo /dev/nvme0n1p1 ;; esac
 """
@@ -121,7 +121,7 @@ case "$1" in
 esac
 """
 
-LABEL = "atlas-control-prod"
+LABEL = "atlas-ctrl-prod"
 
 
 class GoldenDriveTests(unittest.TestCase):
@@ -199,6 +199,7 @@ class GoldenDriveTests(unittest.TestCase):
         u = Unit()
         self.addCleanup(u.cleanup)
         os.unlink(os.path.join(u.bin, "rsync"))                          # payloads are really copied
+        os.symlink(os.path.join(u.bin, "_stub"), os.path.join(u.bin, "mount"))   # the sandbox's dirs stand in
         for name, text in (("findmnt", FINDMNT), ("df", DF)):
             Unit._write(os.path.join(u.bin, name), text, 0o755)
         return u
@@ -226,15 +227,16 @@ class GoldenDriveTests(unittest.TestCase):
         return g
 
     def attach(self, u):
-        """Plug the drive into u: /dev/disk/by-label/atlas-control-prod."""
+        """Plug the drive into u: /dev/disk/by-label/atlas-ctrl-prod."""
         Unit._write(u.p("/dev/sdz1"), "")
         os.makedirs(u.p("/dev/disk/by-label"))
         os.symlink("../../sdz1", u.p(f"/dev/disk/by-label/{LABEL}"))
 
-    def run_script(self, u, script, *args):
-        env = {"PATH": f"{u.bin}:/usr/bin:/bin", "HOME": u.tmp, "SUDO_USER": USER, "LANG": "C.UTF-8",
+    def run_script(self, u, script, *args, env=None):
+        env = dict(env or {}, **{k: v for k, v in {"PATH": f"{u.bin}:/usr/bin:/bin", "HOME": u.tmp, "SUDO_USER": USER, "LANG": "C.UTF-8",
                "ATLAS_ROOT": u.root, "ATLAS_SYS_PYTHON": u.python, "FAKE_STATE": u.state, "ATLAS_REPO": REPO,
-               "FAKE_DRIVE_DEV": os.path.realpath(u.p("/dev/sdz1")), "FAKE_DRIVE_MNT": self.drive}
+               "FAKE_DRIVE_DEV": os.path.realpath(u.p("/dev/sdz1")), "FAKE_DRIVE_MNT": self.drive}.items()
+                                 if k not in (env or {})})
         open(os.path.join(u.state, "calls.jsonl"), "w").close()
         r = subprocess.run(["bash", script, *args], stdin=subprocess.DEVNULL, capture_output=True, text=True,
                            env=env, timeout=600)
@@ -297,7 +299,7 @@ class GoldenDriveTests(unittest.TestCase):
         Unit._write(stale, "older capture")
         g = self.golden()
         self.attach(g)
-        r = self.capture(g, self.production)                              # --drive defaults to atlas-control-prod
+        r = self.capture(g, self.production)                              # --drive defaults to atlas-ctrl-prod
         self.assertEqual(r.returncode, 0, r.out[-3000:])
         self.assertFalse(os.path.exists(stale))
 
@@ -314,6 +316,31 @@ class GoldenDriveTests(unittest.TestCase):
         manifest = open(os.path.join(self.drive, "MANIFEST.txt")).read()
         self.assertIn(f"Drive              : {LABEL} (developer units only)", manifest)
         self.assertIn("atlas-provision.sh --dev-key PUB", manifest)
+
+    def test_capture_mounts_a_drive_nothing_has_mounted(self):
+        """With no desktop session the drive is attached but not mounted: capture mounts it
+        itself (it used to stop with no reason given: findmnt exits 1 under pipefail)."""
+        g = self.golden()
+        self.attach(g)
+        mnt = g.p(f"/mnt/{LABEL}")
+        r = self.run_script(g, os.path.join(MFG, "atlas-capture.sh"), "--release", self.production,
+                            env={"FAKE_DRIVE_UNMOUNTED": "1", "FAKE_DRIVE_MNT": mnt})
+        self.assertEqual(r.returncode, 0, r.out[-3000:])
+        self.assertIn(f"at {mnt}", r.out)
+        self.assertIn(["mount", os.path.realpath(g.p("/dev/sdz1")), mnt], [c[:1] + [os.path.realpath(c[1])] + c[2:]
+                                                                        if c[:1] == ["mount"] else c for c in r.calls])
+        self.assertIn("Payload ready", r.out)
+        self.assertTrue(os.path.isfile(os.path.join(mnt, "MANIFEST.txt")))
+        self.assertEqual(os.listdir(self.drive), [])
+
+    def test_a_drive_name_longer_than_a_label_holds_is_refused(self):
+        g = self.golden()
+        self.attach(g)
+        r = self.capture(g, self.production, "--drive", "atlas-control-prod")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("longer than 16 characters", r.out)
+        self.assertIn("cuts it to 'atlas-control-pr'", r.out)
+        self.assertEqual(os.listdir(self.drive), [])
 
     def test_capture_writes_nothing_without_the_drive(self):
         g = self.golden()

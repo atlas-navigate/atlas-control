@@ -27,7 +27,8 @@ die()  { echo -e "${RED}[✗]${NC} $*" >&2; exit 1; }
 
 BACKUP_DEV="/dev/disk/by-uuid/$BACKUP_UUID"
 [[ -e "$BACKUP_DEV" ]] || die "Backup drive not attached."
-EXISTING_MNT=$(findmnt -n -o TARGET --source "$(readlink -f "$BACKUP_DEV")" | head -1)
+# findmnt exits 1 when the drive isn't mounted; under pipefail that must not end the script.
+EXISTING_MNT=$(findmnt -n -o TARGET --source "$(readlink -f "$BACKUP_DEV")" | head -1 || true)
 if [[ -n "$EXISTING_MNT" ]]; then
     BACKUP_MNT="$EXISTING_MNT"
 else

@@ -72,7 +72,7 @@ leaves the line with its own identity (no label ships) — see
 freshly flashed Jetson with the payload drive attached:
 
 ```bash
-sudo /media/$USER/atlas-control-prod/stage/atlas-imaging/atlas-provision.sh
+sudo /media/$USER/atlas-ctrl-prod/stage/atlas-imaging/atlas-provision.sh
 ```
 
 That copies the maps and datasets, then runs `install.sh --bundle <signed release>`:

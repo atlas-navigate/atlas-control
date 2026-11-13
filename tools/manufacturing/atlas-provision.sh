@@ -12,7 +12,7 @@
 # ║            --dev-key PUB make a developer unit (trusts that key, keeps   ║
 # ║                          SSH) — never for units that are sold            ║
 # ║            --drive LABEL the payload drive's label (default: the         ║
-# ║                          production drive, atlas-control-prod)           ║
+# ║                          production drive, atlas-ctrl-prod)              ║
 # ║                                                                          ║
 # ║  What it does:                                                           ║
 # ║    1. Copy payload/ -> /atlas_data   (~150 GB, no downloads)             ║
@@ -27,7 +27,7 @@ set -Eeuo pipefail
 # system commands first on PATH, as for install.sh. Unset on a real unit.
 R="${ATLAS_ROOT:-}"
 
-PROD_LABEL="atlas-control-prod"   # the production payload drive
+PROD_LABEL="atlas-ctrl-prod"   # the production payload drive
 BACKUP_LABEL="atlas-backup"       # the golden unit's backup drive (older payloads)
 BACKUP_UUID="9b6fe19b-34c1-434f-8e6e-c87cb1f370c4"
 BACKUP_MNT="$R/mnt/atlas-payload"
@@ -45,6 +45,8 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 LABELS="$R/root/atlas-labels"
+# ext4 labels hold at most 16 characters, so a longer --drive can never match a drive.
+[[ -z "$DRIVE_LABEL" || ${#DRIVE_LABEL} -le 16 ]] || { echo "--drive '$DRIVE_LABEL' is longer than 16 characters, the most a drive label holds" >&2; exit 2; }
 
 RED=$'\033[0;31m'; GRN=$'\033[0;32m'; YLW=$'\033[0;33m'; BLU=$'\033[0;34m'; BLD=$'\033[1m'; NC=$'\033[0m'
 log()  { echo -e "${GRN}[✓]${NC} $*"; }
@@ -89,7 +91,8 @@ done
 info "Payload drive: $SRC_DEV"
 # A desktop session may have auto-mounted it at /media/$USER/<label>; use that
 # rather than mounting the same filesystem twice.
-EXISTING_MNT=$(findmnt -n -o TARGET --source "$(readlink -f "$SRC_DEV")" | head -1)
+# findmnt exits 1 when the drive isn't mounted; under pipefail that must not end the script.
+EXISTING_MNT=$(findmnt -n -o TARGET --source "$(readlink -f "$SRC_DEV")" | head -1 || true)
 if [[ -n "$EXISTING_MNT" ]]; then
     BACKUP_MNT="$EXISTING_MNT"
     log "Payload drive already mounted at $BACKUP_MNT — using it"

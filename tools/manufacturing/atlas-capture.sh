@@ -6,7 +6,7 @@
 # ║                [--drive LABEL] [--dev]                                   ║
 # ║            DIR   = a signed Atlas release (atlas-release.json, .sig and  ║
 # ║                    the bundle), checked against this unit's trusted keys ║
-# ║            LABEL = the drive's filesystem label (atlas-control-prod)     ║
+# ║            LABEL = the drive's filesystem label (atlas-ctrl-prod)        ║
 # ║            --dev = a drive for developer units only: its release need    ║
 # ║                    not be signed by a production key                     ║
 # ║                                                                          ║
@@ -29,7 +29,7 @@ set -Eeuo pipefail
 # system commands first on PATH, as for install.sh. Unset on a real unit.
 R="${ATLAS_ROOT:-}"
 
-DRIVE_LABEL="atlas-control-prod"   # the production payload drive
+DRIVE_LABEL="atlas-ctrl-prod"   # the production payload drive
 ATLAS_DATA="$R/atlas_data"
 APP_DIR="$ATLAS_DATA/atlas-control"
 MIN_FREE_GB=200
@@ -53,7 +53,10 @@ while [[ $# -gt 0 ]]; do
         *) die "Unknown option: $1  (usage: $0 --release DIR [--drive LABEL] [--dev])" ;;
     esac
 done
-[[ "$DRIVE_LABEL" =~ ^[A-Za-z0-9._-]+$ ]] || die "--drive needs the drive's filesystem label, e.g. atlas-control-prod"
+[[ "$DRIVE_LABEL" =~ ^[A-Za-z0-9._-]+$ ]] || die "--drive needs the drive's filesystem label, e.g. atlas-ctrl-prod"
+# ext4 labels hold at most 16 characters; mkfs.ext4 silently cuts a longer one.
+(( ${#DRIVE_LABEL} <= 16 )) || die "--drive '$DRIVE_LABEL' is longer than 16 characters, the most an ext4 label holds
+    (mkfs.ext4 cuts it to '${DRIVE_LABEL:0:16}'). Use a shorter name, e.g. atlas-ctrl-prod."
 BACKUP_MNT="$R/mnt/$DRIVE_LABEL"   # fallback only; an existing mount wins
 [[ -n "$RELEASE" && -f "$RELEASE/atlas-release.json" ]] \
     || die "Give the signed Atlas release to ship:  $0 --release DIR  (DIR holds atlas-release.json)"
@@ -90,7 +93,8 @@ section "Preflight"
 BACKUP_DEV="$R/dev/disk/by-label/$DRIVE_LABEL"
 [[ -e "$BACKUP_DEV" ]] || die "No drive labelled '$DRIVE_LABEL' is attached.
     Plug it in and re-run (a new drive: sudo mkfs.ext4 -L $DRIVE_LABEL /dev/sdX1 — see MANUFACTURING.md)."
-EXISTING_MNT=$(findmnt -n -o TARGET --source "$(readlink -f "$BACKUP_DEV")" | head -1)
+# findmnt exits 1 when the drive isn't mounted; under pipefail that must not end the script.
+EXISTING_MNT=$(findmnt -n -o TARGET --source "$(readlink -f "$BACKUP_DEV")" | head -1 || true)
 if [[ -n "$EXISTING_MNT" ]]; then
     BACKUP_MNT="$EXISTING_MNT"
     log "Backup drive already mounted at $BACKUP_MNT — using it"
