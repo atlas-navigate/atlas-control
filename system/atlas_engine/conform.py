@@ -5,7 +5,8 @@ says it should be?
 Read-only. Compares the live system with the release in /opt/atlas/current:
 its system files and settings, the units it enables, the power mode, kernel
 settings, swap, Ollama's effective settings and models, where Ray's model
-runs, the firewall, open ports, retail lock-down and free storage. The same
+runs, the Atlas button, the firewall, open ports, retail lock-down and free
+storage. The same
 report on a freshly installed unit and on a long-running one is the proof
 that they match.
 
@@ -366,6 +367,45 @@ def check_lockdown(rep, runner):
     rep.add("fail" if on else "ok", "retail", "unused services off", ", ".join(on) + " enabled" if on else "")
 
 
+BUTTON_BUS = 1          # header pins 27/28, 100 kHz (status_button.py, atlas-control.service)
+BUTTON_WIRING = "docs/MANUFACTURING.md"
+
+
+def check_button(rep, current, runner):
+    """The Atlas button: the first owner pairs with it and holding it 15 s
+    resets Atlas. The same read-only probe install.sh's verify stage runs."""
+    what = "Atlas button on pins 27/28 (I2C bus 1)"
+    probe = os.path.join(current, "status_button.py")
+    if not os.path.exists(probe):
+        rep.add("skip", "button", what, "this release has no button support")
+        return
+    missing = "warn" if paths.dev_mode() else "fail"      # a retail unit must not ship without it
+    dev = paths.p(f"/dev/i2c-{BUTTON_BUS}")
+    if not os.path.exists(dev):
+        rep.add(missing, "button", what, f"no /dev/i2c-{BUTTON_BUS} on this unit")
+        return
+    if not os.access(dev, os.R_OK | os.W_OK):
+        rep.add("skip", "button", what, "needs root or the i2c group")
+        return
+    try:
+        r = runner.run(["/usr/bin/python3", "-I", probe, "--probe"], timeout=30)
+    except Exception as exc:
+        rep.add("fail", "button", what, f"the probe did not run: {type(exc).__name__}")
+        return
+    try:
+        found = json.loads((r.stdout or "").strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        found = {}
+    if r.returncode == 0:
+        rep.add("ok", "button", what, f"found at {found.get('addr', '?')}")
+    elif r.returncode == 3:
+        rep.add("fail", "button", what, "it is on pins 3/5 (bus 7, 400 kHz), where it stops responding: "
+                                        f"move D to pin 27 and C to pin 28 ({BUTTON_WIRING})")
+    else:
+        rep.add(missing, "button", what, f"not found: owners pair with it and hold it to reset Atlas "
+                                         f"(wiring: {BUTTON_WIRING})")
+
+
 def check_identity(rep):
     try:
         device = fsutil.read_json(os.path.join(paths.IDENTITY, "device.json"))
@@ -407,6 +447,8 @@ def run(runner=None, infer=False):
         check_ollama(rep, current, runner)
         if infer:
             check_inference(rep, current)
+    if current:
+        check_button(rep, current, runner)
     check_network(rep, runner)
     check_lockdown(rep, runner)
     check_identity(rep)

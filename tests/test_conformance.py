@@ -379,6 +379,35 @@ class CheckTests(unittest.TestCase):
         self.conform.check_network(rep, self.sb.runner)
         self.assertFalse(rep.ok())
 
+    def test_the_atlas_button_is_checked_with_the_installers_probe(self):
+        def check():
+            rep = self.conform.Report()
+            self.conform.check_button(rep, self.current, self.sb.runner)
+            self.assertEqual(len(rep.items), 1)
+            return rep.items[0]
+
+        self.assertEqual(check()["status"], "skip")                       # a release without button support
+        _write(os.path.join(self.current, "status_button.py"), "# probe\n")
+        self.assertEqual(check()["status"], "fail")                       # retail: no I2C bus 1 at all
+        bus = self.sb.paths.p("/dev/i2c-1")
+        _write(bus, "")
+        probe = ["/usr/bin/python3", "-I", os.path.join(self.current, "status_button.py"), "--probe"]
+        self.sb.runner.outputs["/usr/bin/python3 -I"] = '{"found": true, "bus": 1, "addr": "0x2a"}\n'
+        item = check()
+        self.assertEqual((item["status"], item["detail"]), ("ok", "found at 0x2a"))
+        self.assertIn(probe, self.sb.runner.calls)
+        self.sb.runner.fail["/usr/bin/python3 -I"] = 3                   # on pins 3/5
+        item = check()
+        self.assertEqual(item["status"], "fail")
+        self.assertIn("pin 27", item["detail"])
+        self.sb.runner.fail["/usr/bin/python3 -I"] = 2                   # not found
+        self.assertEqual(check()["status"], "fail")
+        _write(self.sb.paths.DEV_MODE_FLAG, "")
+        self.assertEqual(check()["status"], "warn")                       # a developer unit may lack one
+        if os.geteuid() != 0:
+            os.chmod(bus, 0)
+            self.assertEqual(check()["status"], "skip")                   # needs root or the i2c group
+
     def test_json_output(self):
         out = subprocess.run([sys.executable, "-c",
                               "import sys; sys.path.insert(0, sys.argv[1]); from atlas_engine import cli; "

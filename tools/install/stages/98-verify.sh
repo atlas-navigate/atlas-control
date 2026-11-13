@@ -2,7 +2,8 @@
 # The same read-only report (atlas-engine check) a technician or a later
 # support session gets: system files and settings, services, power mode,
 # kernel settings, swap, Ollama's settings and version, every model, Ray on
-# the GPU, firewall and open ports, lock-down, identity, storage.
+# the GPU, the Atlas button, firewall and open ports, lock-down, identity,
+# storage.
 section "Verify"
 
 ENGINE_BIN="$R/usr/local/lib/atlas/bin/atlas-engine"
